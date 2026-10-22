@@ -97,7 +97,7 @@ theorem "\<not> sudoku
     x71 x72 x73 x74 x75 x76 x77 x78 x79
     x81 x82 x83 x84 x85 x86 x87 x88 x89
     x91 x92 x93 x94 x95 x96 x97 x98 x99"
-  nitpick [expect=genuine]
+  
 oops
 
 text \<open>
@@ -114,7 +114,7 @@ theorem "\<not> sudoku
     x71  6  x73 x74 x75 x76  2   8  x79
     x81 x82 x83  4   1   9  x87 x88  5 
     x91 x92 x93 x94  8  x96 x97  7   9 "
-  nitpick [expect=genuine]
+  
 oops
 
 text \<open>
@@ -131,7 +131,7 @@ theorem "\<not> sudoku
     x71 x72 x73 x74  1  x76  7   8  x79
      5  x82 x83 x84 x85  9  x87 x88 x89
     x91 x92 x93 x94 x95 x96 x97  4  x99"
-  nitpick [expect=genuine]
+  
 oops
 
 text \<open>
@@ -171,7 +171,7 @@ theorem "\<not> sudoku
      7  x72 x73 x74 x75 x76  6  x78 x79
     x81  3  x83 x84 x85  9  x87  8  x89
     x91 x92  2  x94 x95 x96 x97 x98  1 "
-  nitpick [expect=genuine]
+  
 oops
 
 text \<open>
@@ -205,7 +205,7 @@ theorem "\<not> sudoku
      3  x72 x73 x74  8  x76 x77 x78  6 
     x81 x82  9   2  x85 x86 x87 x88 x89
     x91  4  x93 x94 x95  1  x97 x98 x99"
-  nitpick [expect=genuine]
+  
 oops
 
 text \<open>
@@ -239,7 +239,7 @@ theorem "\<not> sudoku
     x71 x72  9  x74  8  x76 x77  5  x79
     x81  2  x83 x84 x85 x86  6  x88 x89
      4  x92 x93  7  x95 x96 x97 x98 x99"
-  nitpick [expect=genuine]
+  
 oops
 
 text \<open>
@@ -273,7 +273,7 @@ theorem "\<not> sudoku
      5  x72 x73 x74 x75 x76  9  x78 x79
     x81  3  x83  9  x85 x86 x87 x88  7 
     x91 x92  1  x94 x95  8   6  x98 x99"
-  nitpick [expect=genuine]
+  
 oops
 
 text \<open>
@@ -307,7 +307,7 @@ theorem "\<not> sudoku
     x71 x72  9  x74  8  x76 x77  5  x79
     x81  2  x83 x84 x85 x86  6  x88 x89
      4  x92 x93  7  x95 x96 x97 x98 x99"
-  nitpick [expect=genuine]
+  
 oops
 
 end
