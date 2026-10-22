@@ -604,6 +604,7 @@ val _ = Theory.setup
   register_config_bool Ast.stats #>
   register_config_bool Printer.show_sorts #>
   register_config_bool Printer.show_types #>
+  register_config_bool Printer.show_types_nv #>
   register_config_bool Printer.show_markup #>
   register_config_bool Printer.show_consts_markup #>
   register_config_bool Printer.show_structs #>

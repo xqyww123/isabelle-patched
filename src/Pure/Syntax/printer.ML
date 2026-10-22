@@ -8,6 +8,7 @@ Pretty printing of asts, terms, types and print (ast) translation.
 signature BASIC_PRINTER =
 sig
   val show_types: bool Config.T
+  val show_types_nv: bool Config.T
   val show_sorts: bool Config.T
   val show_markup: bool Config.T
   val show_consts_markup: bool Config.T
@@ -51,6 +52,7 @@ struct
 (** options for printing **)
 
 val show_types = Config.declare_option_bool ("show_types", \<^here>);
+val show_types_nv = Config.declare_option_bool ("show_types_nv", \<^here>);
 val show_sorts = Config.declare_option_bool ("show_sorts", \<^here>);
 val show_markup_default = Unsynchronized.ref false;
 val show_markup = Config.declare_bool ("show_markup", \<^here>) (fn _ => ! show_markup_default);
