@@ -304,17 +304,26 @@ fun gen_witness_proof proof after_qed wit_propss eq_props =
     val propss =
       (map o map) (fn prop => (mark_witness prop, [])) wit_propss @
         [map (rpair []) eq_props];
-    fun after_qed' thmss =
+    (*every result carries every assumption of ctxt, the context it is exported to, as the
+      result of a forked proof does (Goal.future_result): the facts a witness activates have
+      the same hyps under serial and parallel checking*)
+    fun after_qed' thmss ctxt =
       let
         val (wits, eqs) =
-          split_last ((map o map) (Thm.close_derivation \<^here> #> Thm.trim_context) thmss);
+          split_last ((map o map)
+            (fold Thm.weaken (Assumption.all_assms_of ctxt) #>
+              Thm.close_derivation \<^here> #> Thm.trim_context) thmss);
       in after_qed ((map2 o map2) (curry Witness) wit_propss wits) eqs end;
   in proof after_qed' propss #> refine_witness end;
+
+fun proof_global after_qed =
+  Proof.theorem NONE (fn thmss => fn ctxt => after_qed thmss ctxt ctxt);
 
 fun proof_local cmd goal_ctxt after_qed propp =
   let
     fun after_qed' (result_ctxt, results) state' =
-      after_qed (burrow (Proof_Context.export result_ctxt (Proof.context_of state')) results) state';
+      let val ctxt = Proof.context_of state'
+      in after_qed (burrow (Proof_Context.export result_ctxt ctxt) results) ctxt state' end;
   in
     Proof.map_context (K goal_ctxt) #>
     Proof.internal_goal (K (K ())) (Proof_Context.get_mode goal_ctxt) true cmd
@@ -324,10 +333,10 @@ fun proof_local cmd goal_ctxt after_qed propp =
 in
 
 fun witness_proof after_qed wit_propss =
-  gen_witness_proof (Proof.theorem NONE) (fn wits => fn _ => after_qed wits)
+  gen_witness_proof proof_global (fn wits => fn _ => after_qed wits)
     wit_propss [];
 
-val witness_proof_eqs = gen_witness_proof (Proof.theorem NONE);
+val witness_proof_eqs = gen_witness_proof proof_global;
 
 fun witness_local_proof after_qed cmd wit_propss goal_ctxt =
   gen_witness_proof (proof_local cmd goal_ctxt)
@@ -356,7 +365,8 @@ fun pretty_witness ctxt witn =
 fun instantiate_normalize_morphism insts =
   Morphism.instantiate_frees_morphism insts $>
   Morphism.term_morphism "beta_norm" Envir.beta_norm $>
-  Morphism.thm_morphism "beta_conversion" (Conv.fconv_rule (Thm.beta_conversion true));
+  Morphism.thm_morphism "beta_conversion"
+    (Exported_Premises.keeping_count (Conv.fconv_rule (Thm.beta_conversion true)));
 
 
 (* satisfy hypotheses *)
@@ -391,7 +401,8 @@ fun satisfy_thm witns thm =
   (Thm.chyps_of thm, thm) |-> fold (fn hyp =>
     (case find_witness witns (Thm.term_of hyp) of
       NONE => I
-    | SOME w => Thm.implies_intr hyp #> compose_witness w));
+    | SOME w => Thm.implies_intr hyp #> compose_witness w))
+  |> Exported_Premises.keep_count thm;
 
 val satisfy_morphism = Morphism.thm_morphism "Element.satisfy" o satisfy_thm;
 
@@ -443,7 +454,7 @@ fun eq_morphism _ [] = NONE
            {binding = [],
             typ = [],
             term = [rewrite_term o Morphism.the_theory],
-            fact = [map o rewrite o Morphism.the_theory]};
+            fact = [map o Exported_Premises.keeping_count o rewrite o Morphism.the_theory]};
       in SOME phi end;
 
 

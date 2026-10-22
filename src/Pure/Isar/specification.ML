@@ -342,7 +342,7 @@ fun gen_theorems prep_fact prep_att add_fixes
     val facts' = facts
       |> Attrib.partial_evaluation ctxt'
       |> Attrib.transform_facts (Proof_Context.export_morphism ctxt' lthy);
-    val (res, lthy') = lthy |> Local_Theory.notes_kind kind facts';
+    val (res, lthy') = lthy |> Local_Theory.redeclare_result (Local_Theory.notes_kind kind facts');
     val _ =
       Proof_Display.print_results {interactive = int, pos = Position.thread_data ()}
         lthy' ((kind, ""), res);
