@@ -1018,9 +1018,10 @@ fun update_transfer_rules pointer lthy =
   in
     case Lifting_Info.lookup_restore_data lthy pointer of
       SOME refresh_data => 
-        Local_Theory.declaration {syntax = false, pervasive = true, pos =  \<^here>}
-          (fn phi => Lifting_Info.add_transfer_rules_in_restore_data pointer 
-            (new_transfer_rules refresh_data lthy phi)) lthy
+        Local_Theory.redeclare
+          (Local_Theory.declaration {syntax = false, pervasive = true, pos =  \<^here>}
+            (fn phi => Lifting_Info.add_transfer_rules_in_restore_data pointer 
+              (new_transfer_rules refresh_data lthy phi))) lthy
     | NONE => error "The lifting bundle refers to non-existent restore data."
   end
 

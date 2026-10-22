@@ -27,6 +27,7 @@ sig
   val locale_keyword: string parser
   val locale_expression: Expression.expression parser
   val context_element: Element.context parser
+  val locale_val: ((Expression.expression * Bundle.xname list) * Element.context list) parser
   val statement': (string * string list) list list parser
   val if_statement': (string * string list) list list parser
   val statement: (Attrib.binding * (string * string list) list) list parser
@@ -155,6 +156,13 @@ val locale_expression =
   in expr0 -- Scan.optional (Parse.$$$ "for" |-- Parse.!!! locale_fixes) [] end;
 
 val context_element = Parse.group (fn () => "context element") loc_element;
+
+val locale_context_elements = Scan.repeat1 context_element;
+
+val locale_val =
+  ((locale_expression -- Scan.optional opening []) || opening >> pair ([], []))
+  -- Scan.optional (Parse.$$$ "+" |-- Parse.!!! locale_context_elements) []
+  || locale_context_elements >> pair (([], []), []);
 
 end;
 
