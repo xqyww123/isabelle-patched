@@ -555,6 +555,22 @@ val _ = Theory.setup
   setup \<^binding>\<open>consumes\<close>
     (Scan.lift (Scan.optional Parse.int 1) >> Rule_Cases.consumes)
     "number of consumed facts" #>
+  setup \<^binding>\<open>exported_premises\<close>
+    (Scan.lift Parse.int >> (fn n =>
+      Thm.rule_attribute [] (fn context => fn th =>
+        let
+          val ctxt = Context.proof_of context;
+          (*the absolute count n, written in place; a normalisation that rebuilt the theorem
+            (the tags differ) gets the input's rule-case tags back through Rule_Cases.save*)
+          val th' = Raw_Simplifier.norm_hhf_protect ctxt th;
+          val th'' =
+            if eq_list (op =) (Thm.get_tags th, Thm.get_tags th') then th'
+            else Rule_Cases.save th th';
+        in
+          if 0 <= n andalso n <= Thm.nprems_of th'' then Exported_Premises.put n th''
+          else error ("exported_premises: count out of range\n" ^ Thm.string_of_thm ctxt th'')
+        end)))
+    "number of leading premises of the HHF normal form that are exported contextual assumptions" #>
   setup \<^binding>\<open>constraints\<close>
     (Scan.lift Parse.nat >> Rule_Cases.constraints)
     "number of equality constraints" #>

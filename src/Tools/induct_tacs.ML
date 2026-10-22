@@ -45,7 +45,9 @@ fun case_tac ctxt s fixes opt_rule = SUBGOAL (fn (goal, i) =>
           end);
     val _ = Method.trace ctxt [rule];
   in
-    (case Induct.vars_of (Thm.term_of (Thm.cprem_of rule 1)) handle THM _ => [] of
+    (case (case Exported_Premises.own_prems rule of
+        prem :: _ => Induct.own_vars_of rule prem
+      | [] => []) of
       Var (xi, _) :: _ => Rule_Insts.res_inst_tac ctxt [((xi, Position.none), s)] fixes rule i
     | _ => no_tac)
   end);

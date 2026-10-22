@@ -40,6 +40,8 @@ sig
   val raw_theory: (theory -> theory) -> local_theory -> local_theory
   val background_theory_result: (theory -> 'a * theory) -> local_theory -> 'a * local_theory
   val background_theory: (theory -> theory) -> local_theory -> local_theory
+  val redeclare_result: (local_theory -> 'a * local_theory) -> local_theory -> 'a * local_theory
+  val redeclare: (local_theory -> local_theory) -> local_theory -> local_theory
   val target_of: local_theory -> Proof.context
   val target: (Proof.context -> Proof.context) -> local_theory -> local_theory
   val target_morphism: local_theory -> morphism
@@ -92,6 +94,7 @@ signature PRIVATE_LOCAL_THEORY =
 sig
   include LOCAL_THEORY
   val reset: local_theory -> local_theory
+  val redeclaring: Proof.context -> bool
 end
 
 structure Local_Theory: PRIVATE_LOCAL_THEORY =
@@ -236,6 +239,20 @@ fun background_theory_result f lthy =
   end;
 
 fun background_theory f = #2 o background_theory_result (f #> pair ());
+
+
+(* re-declaration *)
+
+val redeclaring_flag = Config.declare_bool ("redeclaring", \<^here>) (K false);
+
+fun redeclaring ctxt = Config.get ctxt redeclaring_flag;
+
+(*every fact noted or declared under f re-declares a fact that exists when f starts; the
+  previous value is restored afterwards*)
+fun redeclare_result f lthy =
+  lthy |> Config.put redeclaring_flag true |> f ||> Config.restore redeclaring_flag lthy;
+
+fun redeclare f = #2 o redeclare_result (f #> pair ());
 
 
 (* target contexts *)

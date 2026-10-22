@@ -187,11 +187,13 @@ ML_file "cterm_items.ML";
 ML_file "more_pattern.ML";
 ML_file "more_unify.ML";
 ML_file "more_thm.ML";
+ML_file "exported_premises.ML";
 
 ML_file "facts.ML";
 ML_file "global_theory.ML";
 ML_file "pure_thy.ML";
 ML_file "drule.ML";
+ML_file "more_exported_premises.ML";
 ML_file "morphism.ML";
 ML_file "variable.ML";
 ML_file "conv.ML";
@@ -267,10 +269,11 @@ ML_file "Isar/proof.ML";
 ML_file "Isar/element.ML";
 ML_file "Isar/obtain.ML";
 ML_file "Isar/subgoal.ML";
-ML_file "Isar/calculation.ML";
 
 (*local theories and targets*)
 ML_file "Isar/locale.ML";
+ML_file "Isar/light_locale_axiom_facts.ML";
+ML_file "Isar/calculation.ML";
 ML_file "Isar/generic_target.ML";
 ML_file "Isar/bundle.ML";
 ML_file "Isar/overloading.ML";
