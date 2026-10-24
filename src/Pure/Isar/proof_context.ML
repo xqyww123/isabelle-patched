@@ -1362,7 +1362,7 @@ fun declare_implicit_structure t ctxt =
   in
     ctxt'
     |> Variable.declare_constraints (Free (x, Term.fastype_of t))
-    |> Syntax_Trans.put_implicit_structure (SOME t)
+    |> Syntax_Trans.put_implicit_structure (Syntax_Trans.Declare t)
   end;
 
 

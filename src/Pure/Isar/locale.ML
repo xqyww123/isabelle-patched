@@ -53,12 +53,18 @@ sig
     Element.context_i list ->
     Morphism.declaration_entity list ->
     (string * Attrib.fact list) list ->
-    (string * morphism * position_kind list) list -> theory -> theory
+    (string * morphism * position_kind list) list -> term Syntax_Trans.implicit_structure_spec ->
+    theory -> theory
   val is_light: theory -> string -> bool
   val is_light_predicate: theory -> string -> bool
-  val set_implicit_structure: string -> term -> theory -> theory
-  val implicit_structure_of_imports: theory -> (string * position_kind list) list ->
-    (int * term) option
+  datatype 'a structure_state =
+    Inherited_Structure | Cancelled_Structure | Structure_Of of 'a | Structure_Head of string
+  val map_structure_state: ('a -> 'b) -> 'a structure_state -> 'b structure_state
+  val imports_structure_state: theory -> string list -> (string * position_kind list) list ->
+    (int * term) structure_state
+  val install_structure_state: (string -> typ) -> term structure_state ->
+    Proof.context -> Proof.context
+  val parent_implicit_structures: theory -> string -> (string * term option) list
   val locale_space: theory -> Name_Space.T
   val intern: theory -> xstring -> string
   val check_global: theory -> xstring * Position.T -> string
@@ -96,6 +102,12 @@ sig
     theory -> theory
   val light_degeneracy_check_of: theory ->
     (string -> Attrib.fact list -> local_theory -> unit) option
+  val set_light_own_structure_check: (Proof.context -> string list -> unit) -> theory -> theory
+  val light_own_structure_check_of: theory -> (Proof.context -> string list -> unit) option
+  val set_light_structure_guard:
+    (Proof.context -> {params: (string * typ) list, declared: term} -> unit) -> theory -> theory
+  val light_structure_guard_of: theory ->
+    (Proof.context -> {params: (string * typ) list, declared: term} -> unit) option
   val eliminated_names_of: Proof.context -> (string * term) Symtab.table
   val eliminated_names_declaration: (string * (string * term)) list -> Morphism.declaration
   val eliminated_name_warning: Proof.context -> string * string -> unit
@@ -219,6 +231,9 @@ datatype locale = Loc of {
   hyp_spec: Element.context_i list,
   (*declared by light_locale*)
   light: bool,
+  (*the implicit structure element of the header (header plan section 3.5): inherited, cancelled
+    or declared; written at registration only*)
+  implicit_structure: term Syntax_Trans.implicit_structure_spec,
 
   (* dynamic part *)
 
@@ -229,37 +244,33 @@ datatype locale = Loc of {
   (*locale dependencies (sublocale relation) in reverse order*)
   dependencies: dep list,
   (*mixin part of dependencies*)
-  mixins: mixins,
-  (*implicit structure slot (plan decision 16 (b))*)
-  implicit_structure: term option
+  mixins: mixins
 };
 
-fun mk_locale ((parameters, spec, intros, axioms, hyp_spec, light),
-    (((syntax_decls, notes), (dependencies, mixins)), implicit_structure)) =
+fun mk_locale ((parameters, spec, intros, axioms, hyp_spec, light, implicit_structure),
+    ((syntax_decls, notes), (dependencies, mixins))) =
   Loc {parameters = parameters, spec = spec, intros = intros, axioms = axioms, hyp_spec = hyp_spec,
-    light = light, syntax_decls = syntax_decls, notes = notes, dependencies = dependencies,
-    mixins = mixins, implicit_structure = implicit_structure};
+    light = light, implicit_structure = implicit_structure, syntax_decls = syntax_decls,
+    notes = notes, dependencies = dependencies, mixins = mixins};
 
-fun map_locale f (Loc {parameters, spec, intros, axioms, hyp_spec, light,
-    syntax_decls, notes, dependencies, mixins, implicit_structure}) =
-  mk_locale (f ((parameters, spec, intros, axioms, hyp_spec, light),
-    (((syntax_decls, notes), (dependencies, mixins)), implicit_structure)));
+fun map_locale f (Loc {parameters, spec, intros, axioms, hyp_spec, light, implicit_structure,
+    syntax_decls, notes, dependencies, mixins}) =
+  mk_locale (f ((parameters, spec, intros, axioms, hyp_spec, light, implicit_structure),
+    ((syntax_decls, notes), (dependencies, mixins))));
 
 val eq_note = op = o apply2 #2;
 
 fun merge_locale
- (Loc {parameters, spec, intros, axioms, hyp_spec, light, syntax_decls, notes, dependencies,
-    mixins, implicit_structure},
+ (Loc {parameters, spec, intros, axioms, hyp_spec, light, implicit_structure, syntax_decls, notes,
+    dependencies, mixins},
   Loc {syntax_decls = syntax_decls', notes = notes',
-      dependencies = dependencies', mixins = mixins',
-      implicit_structure = implicit_structure', ...}) =
+      dependencies = dependencies', mixins = mixins', ...}) =
     mk_locale
-      ((parameters, spec, intros, axioms, hyp_spec, light),
-        (((merge (eq_snd op =) (syntax_decls, syntax_decls'),
+      ((parameters, spec, intros, axioms, hyp_spec, light, implicit_structure),
+        ((merge (eq_snd op =) (syntax_decls, syntax_decls'),
           merge eq_note (notes, notes')),
             (merge eq_dep (dependencies, dependencies'),
-              (merge_mixins (mixins, mixins')))),
-          merge_options (implicit_structure, implicit_structure')));
+              (merge_mixins (mixins, mixins')))));
 
 structure Locales = Theory_Data
 (
@@ -300,37 +311,35 @@ fun the_locale thy name =
   | NONE => error ("Unknown locale " ^ quote name));
 
 fun register_locale_tagged tag light
-    binding parameters spec intros axioms hyp_spec syntax_decls notes dependencies thy =
+    binding parameters spec intros axioms hyp_spec syntax_decls notes dependencies slot thy =
   thy |> Locales.map (Name_Space.define (Context.Theory thy) true
     (binding,
       mk_locale ((parameters, spec, (apply2 o Option.map) Thm.trim_context intros,
           map Thm.trim_context axioms,
-          map Element.trim_context_ctxt hyp_spec, light),
-        (((map (fn decl => (Morphism.entity_reset_context decl, serial ())) syntax_decls,
+          map Element.trim_context_ctxt hyp_spec, light, slot),
+        ((map (fn decl => (Morphism.entity_reset_context decl, serial ())) syntax_decls,
           map (fn (a, facts) => ((a, map Attrib.trim_context_fact facts), serial (), tag)) notes),
           (map (fn (name, morph, header) => make_dep (name, (morph, Morphism.identity)) header)
             dependencies,
-            Inttab.empty)),
-          NONE))) #> snd);
+            Inttab.empty)))) #> snd);
           (* FIXME Morphism.identity *)
 
 (*the old entry point: Plain notes, heavy, no header record -- as before*)
 fun register_locale binding parameters spec intros axioms hyp_spec syntax_decls notes dependencies =
   register_locale_tagged Plain false binding parameters spec intros axioms hyp_spec syntax_decls notes
-    (map (fn (name, morph) => (name, morph, NONE)) dependencies);
+    (map (fn (name, morph) => (name, morph, NONE)) dependencies) Syntax_Trans.Inherit;
 
-(*the entry point of the locale and light_locale commands: Axiom notes, header record*)
+(*the entry point of the locale and light_locale commands: Axiom notes, header record, the
+  implicit structure slot*)
 fun register_locale' light binding parameters spec intros axioms hyp_spec syntax_decls notes
-    dependencies =
+    dependencies slot =
   register_locale_tagged Axiom light binding parameters spec intros axioms hyp_spec syntax_decls notes
-    (map (fn (name, morph, header) => (name, morph, SOME header)) dependencies);
+    (map (fn (name, morph, header) => (name, morph, SOME header)) dependencies) slot;
 
 fun change_locale name =
   Locales.map o Name_Space.map_table_entry name o map_locale o apsnd;
 
 fun is_light thy = #light o the_locale thy;
-
-fun set_implicit_structure name t = change_locale name (apsnd (K (SOME t)));
 
 
 
@@ -703,16 +712,40 @@ fun make_notes kind = map (fn ((b, atts), facts) =>
 
 structure Light_Hooks = Theory_Data
 (
-  type T = Token.src list option * (string -> Attrib.fact list -> local_theory -> unit) option;
-  val empty: T = (NONE, NONE);
-  fun merge ((attrs1, check1), (attrs2, check2)) =
-    (merge_options (attrs1, attrs2), merge_options (check1, check2));
+  type T =
+   {attrs: Token.src list option,
+    degeneracy: (string -> Attrib.fact list -> local_theory -> unit) option,
+    own_structures: (Proof.context -> string list -> unit) option,
+    structure_guard:
+      (Proof.context -> {params: (string * typ) list, declared: term} -> unit) option};
+  val empty: T = {attrs = NONE, degeneracy = NONE, own_structures = NONE, structure_guard = NONE};
+  fun merge (hooks1: T, hooks2: T) : T =
+   {attrs = merge_options (#attrs hooks1, #attrs hooks2),
+    degeneracy = merge_options (#degeneracy hooks1, #degeneracy hooks2),
+    own_structures = merge_options (#own_structures hooks1, #own_structures hooks2),
+    structure_guard = merge_options (#structure_guard hooks1, #structure_guard hooks2)};
 );
 
-fun set_light_axioms_attributes attrs = Light_Hooks.map (apfst (K (SOME attrs)));
-val light_axioms_attributes_of = these o #1 o Light_Hooks.get;
-fun set_light_degeneracy_check check = Light_Hooks.map (apsnd (K (SOME check)));
-val light_degeneracy_check_of = #2 o Light_Hooks.get;
+fun map_hooks f {attrs, degeneracy, own_structures, structure_guard} =
+  let val (attrs', degeneracy', own_structures', structure_guard') =
+    f (attrs, degeneracy, own_structures, structure_guard)
+  in
+   {attrs = attrs', degeneracy = degeneracy', own_structures = own_structures',
+    structure_guard = structure_guard'}
+  end;
+
+fun set_light_axioms_attributes attrs =
+  Light_Hooks.map (map_hooks (fn (_, d, o', g) => (SOME attrs, d, o', g)));
+val light_axioms_attributes_of = these o #attrs o Light_Hooks.get;
+fun set_light_degeneracy_check check =
+  Light_Hooks.map (map_hooks (fn (a, _, o', g) => (a, SOME check, o', g)));
+val light_degeneracy_check_of = #degeneracy o Light_Hooks.get;
+fun set_light_own_structure_check check =
+  Light_Hooks.map (map_hooks (fn (a, d, _, g) => (a, d, SOME check, g)));
+val light_own_structure_check_of = #own_structures o Light_Hooks.get;
+fun set_light_structure_guard guard =
+  Light_Hooks.map (map_hooks (fn (a, d, o', _) => (a, d, o', SOME guard)));
+val light_structure_guard_of = #structure_guard o Light_Hooks.get;
 
 
 (* names eliminated by light locale headers, per proof context (plan decision 1, D20) *)
@@ -866,16 +899,30 @@ fun header_edges thy name =
 fun structure_names thy name =
   map_filter (fn ((x, _), Mixfix.Structure _) => SOME x | _ => NONE) (params_of thy name);
 
-(*the summary of a locale: the surviving (structure) names in order of first occurrence, and the
+(*the (structure) parameters a locale declares itself: not the image of an inherited position
+  of a header edge*)
+fun own_structure_params thy name =
+  let
+    val inherited =
+      header_edges thy name |> maps (fn (l, _, kinds) =>
+        map_filter (fn (((x, _), _), Inherited) => SOME x | _ => NONE)
+          (params_of thy l ~~ kinds));
+  in filter_out (member (op =) inherited) (structure_names thy name) end;
+
+(*the summary of a locale: the surviving (structure) names in order of first occurrence, the
   cut -- the first eliminated (structure) position of a header edge, or an import's own cut --
-  in the locale's own vocabulary; its slot overrides everything.  imports_summary walks the
-  imports of a header and reports the cut untransported: the import's index and the term in the
-  import's vocabulary.  The memo table carries the summaries of the locales visited.*)
+  in the locale's own vocabulary, and whether a cancelled slot is reachable through the header
+  edges; its slot overrides everything.  imports_summary walks the imports of a header and
+  reports the cut untransported: the import's index and the term in the import's vocabulary.
+  Where no cancelled slot is reachable the summary is the one of a world without cancellation;
+  where one is reachable and no cut is found, the surviving names are the imports' followed by
+  the locale's own (structure) parameters.  The memo table carries the summaries of the locales
+  visited.*)
 fun imports_summary thy imports memo =
   let
-    fun scan_block (i, (loc, kinds)) (names, memo) =
+    val (summaries, memo') = fold_map (structure_summary thy o fst) imports memo;
+    fun scan_block (i, ((loc, kinds), ((ns, cut_loc), _))) names =
       let
-        val ((ns, cut_loc), memo') = structure_summary thy loc memo;
         val params = params_of thy loc;
         fun position n = find_index (fn ((x, _), _) => x = n) params;
         fun walk [] names = (names, NONE)
@@ -885,13 +932,13 @@ fun imports_summary thy imports memo =
               | Inherited => walk ns (if member (op =) names n then names else names @ [n])
               | Eliminated => (names, SOME (Free (#1 (nth params (position n))))));
         val (names', cut) = walk ns names;
-      in ((names', Option.map (pair i) (if is_some cut then cut else cut_loc)), memo') end;
-    fun scan [] (names, memo) = ((names, NONE), memo)
-      | scan (block :: blocks) (names, memo) =
-          (case scan_block block (names, memo) of
-            ((names', NONE), memo') => scan blocks (names', memo')
+      in (names', Option.map (pair i) (if is_some cut then cut else cut_loc)) end;
+    fun scan [] names = (names, NONE)
+      | scan (block :: blocks) names =
+          (case scan_block block names of
+            (names', NONE) => scan blocks names'
           | result => result);
-  in scan (map_index I imports) ([], memo) end
+  in ((scan (map_index I (imports ~~ summaries)) [], exists snd summaries), memo') end
 and structure_summary thy name memo =
   (case Symtab.lookup memo name of
     SOME summary => (summary, memo)
@@ -899,26 +946,76 @@ and structure_summary thy name memo =
       let
         val (summary, memo') =
           (case #implicit_structure (the_locale thy name) of
-            SOME t => (([], SOME t), memo)
-          | NONE =>
+            Syntax_Trans.Declare t => ((([], SOME t), false), memo)
+          | Syntax_Trans.Cancel => ((([], NONE), true), memo)
+          | Syntax_Trans.Inherit =>
               let
                 val edges = header_edges thy name;
-                val ((names, cut), memo') =
+                val (((names, cut), reachable), memo') =
                   imports_summary thy (map (fn (l, _, kinds) => (l, kinds)) edges) memo;
-              in
-                ((case cut of
-                  SOME (i, t_src) => (names, SOME (Morphism.term (#2 (nth edges i)) t_src))
-                | NONE => (structure_names thy name, NONE)), memo')
-              end);
+                val summary =
+                  (case cut of
+                    SOME (i, t_src) => (names, SOME (Morphism.term (#2 (nth edges i)) t_src))
+                  | NONE =>
+                      if reachable then (names @ own_structure_params thy name, NONE)
+                      else (structure_names thy name, NONE));
+              in ((summary, reachable), memo') end);
       in (summary, Symtab.update (name, summary) memo') end);
 
 (*a cut counts only while no (structure) name survives before it*)
 fun project (names, cut) = if null names then cut else NONE;
 
-fun implicit_structure_of thy name = project (#1 (structure_summary thy name Symtab.empty));
+(*how a bare index position reads in a context with this summary: the cut where one counts;
+  else, where a cancelled slot is reachable, the first surviving variable structure expressed
+  through the implicit structure, so that a cancelled parent's structure does not read, and
+  cancelled where none survives and no cut counts; elsewhere nothing changes*)
+datatype 'a structure_state =
+  Inherited_Structure | Cancelled_Structure | Structure_Of of 'a | Structure_Head of string;
 
-fun implicit_structure_of_imports thy imports =
-  project (#1 (imports_summary thy imports Symtab.empty));
+fun structure_state ((names, cut), reachable) =
+  (case project (names, cut) of
+    SOME t => Structure_Of t
+  | NONE =>
+      if not reachable then Inherited_Structure
+      else (case names of [] => Cancelled_Structure | h :: _ => Structure_Head h));
+
+fun map_structure_state f (Structure_Of x) = Structure_Of (f x)
+  | map_structure_state _ Inherited_Structure = Inherited_Structure
+  | map_structure_state _ Cancelled_Structure = Cancelled_Structure
+  | map_structure_state _ (Structure_Head h) = Structure_Head h;
+
+fun locale_structure_state thy name =
+  structure_state (#1 (structure_summary thy name Symtab.empty));
+
+(*the state a header gives its body, in the imports' vocabulary: the imports' summary, completed
+  as structure_summary completes a locale's with the (structure) parameters the header writes
+  itself*)
+fun imports_structure_state thy own imports =
+  let val ((names, cut), reachable) = #1 (imports_summary thy imports Symtab.empty)
+  in structure_state ((if is_none cut then names @ own else names, cut), reachable) end;
+
+fun install_structure_state typ_of state ctxt =
+  (case state of
+    Structure_Of t => Proof_Context.declare_implicit_structure t ctxt
+  | Structure_Head h => Proof_Context.declare_implicit_structure (Free (h, typ_of h)) ctxt
+  | Cancelled_Structure => Syntax_Trans.put_implicit_structure Syntax_Trans.Cancel ctxt
+  | Inherited_Structure => ctxt);
+
+fun param_type thy name x = the (AList.lookup (op =) (map #1 (params_of thy name)) x);
+
+(*one entry per header edge: the import and how a bare index position reads in it, under the
+  edge's morphism; inherited reads the import's first variable structure, none when there is none*)
+fun parent_implicit_structures thy name =
+  header_edges thy name |> map (fn (l, morph, _) =>
+    let
+      fun var x = SOME (Morphism.term morph (Free (x, param_type thy l x)));
+      val reading =
+        (case locale_structure_state thy l of
+          Structure_Of t => SOME (Morphism.term morph t)
+        | Structure_Head h => var h
+        | Cancelled_Structure => NONE
+        | Inherited_Structure => (case structure_names thy l of h :: _ => var h | [] => NONE));
+    in (l, reading) end);
 
 fun init name thy =
   let
@@ -932,9 +1029,7 @@ fun init name thy =
     |-> (fn marked' => Idents.put (merge_idents (marked, marked')))
     |> Context_Position.restore_visible_generic context
     |> Context.proof_of
-    |> (case implicit_structure_of thy name of
-          SOME t => Proof_Context.declare_implicit_structure t
-        | NONE => I)
+    |> install_structure_state (param_type thy name) (locale_structure_state thy name)
   end;
 
 
@@ -1007,7 +1102,7 @@ fun add_dependency loc {inst = (name, morph), mixin, export} thy =
     val add_dep =
       apfst (cons dep) #>
       apsnd (case mixin of NONE => I | SOME mixin => insert_mixin (#serial dep) mixin);
-    val thy' = change_locale loc (apfst (apsnd add_dep)) thy;
+    val thy' = change_locale loc (apsnd add_dep) thy;
     val context' = Context.Theory thy';
     (*collect from each registration at its own level; register the Full ones after the
       Syntax_only ones, fold_rev starting from the end (plan decision 6 (b))*)
@@ -1050,7 +1145,7 @@ fun add_facts_tagged tag loc kind facts ctxt =
       ctxt
       |> Attrib.local_notes kind facts |> #2
       |> Proof_Context.background_theory
-        ((change_locale loc o apfst o apfst o apsnd) (cons stored_notes) #> apply_registrations)
+        ((change_locale loc o apfst o apsnd) (cons stored_notes) #> apply_registrations)
     end;
 
 val add_facts = add_facts_tagged Plain;
@@ -1059,7 +1154,7 @@ fun add_declaration loc {syntax, pos} decl =
   let val decl0 = Morphism.entity_reset_context decl in
     syntax ?
       Proof_Context.background_theory
-        ((change_locale loc o apfst o apfst o apfst) (cons (decl0, serial ())))
+        ((change_locale loc o apfst o apfst) (cons (decl0, serial ())))
     #> add_facts_tagged (if syntax then Syntax_copy else Plain) loc ""
       [(Binding.empty_atts, Attrib.internal_declaration pos decl0)]
   end;

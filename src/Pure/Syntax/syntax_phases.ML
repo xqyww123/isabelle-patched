@@ -631,8 +631,9 @@ fun mark_atoms ctxt tm =
   let
     val {structs, fixes} = Syntax_Trans.get_idents ctxt;
     val show_structs = Config.get ctxt show_structs;
-    (*with an implicit structure a bare index position denotes that, not the variable structure*)
-    val implicit = is_some (Syntax_Trans.implicit_structure ctxt);
+    (*the first variable structure's subscript is omitted exactly where a bare index position reads
+      it back (Syntax_Trans.struct_tr)*)
+    val inherited = Syntax_Trans.inherited_struct ctxt;
 
     fun mark ((t as Const (c, _)) $ u) =
           if member (op =) Pure_Thy.token_markers c
@@ -646,7 +647,7 @@ fun mark_atoms ctxt tm =
           let val i = find_index (fn s => s = x) structs + 1 in
             if i = 0 andalso member (op =) fixes x then
               Const (Lexicon.mark_fixed x, T)
-            else if i = 1 andalso not show_structs andalso not implicit then
+            else if not show_structs andalso inherited = SOME x then
               Syntax.const "_struct" $ Syntax.const "_indexdefault"
             else Syntax.const "_free" $ t
           end
