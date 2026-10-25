@@ -43,6 +43,11 @@ sig
     expression -> string Syntax_Trans.implicit_structure_spec -> Element.context list ->
     theory -> string * local_theory
 
+  (* Light locale headers: eliminated parameters, unfolded definitions *)
+  val eliminated_params: theory -> string -> (string * int * term) list
+  val unfolded_definitions: Proof.context -> string -> (string * (string * term)) list
+  val unfolded_definitions_message: Proof.context -> string -> string list
+
   (* Processing of locale expressions *)
   val cert_goal_expression: expression_i -> Proof.context ->
     (term list list * term list list * (string * morphism) list * (Attrib.binding * term) list list * morphism) * Proof.context
@@ -1087,6 +1092,49 @@ fun define_preds binding parms (((exts, exts'), (ints, ints')), defs) thy =
 end;
 
 
+(** The definitions a light header unfolds (plan decision 1, D20) **)
+
+(*name, source locale, the value at the eliminated position, from the header edges in header
+  order; the first occurrence of a name wins (plan section 3.2 item 1)*)
+fun unfolded_definitions ctxt name =
+  let val thy = Proof_Context.theory_of ctxt in
+    build (Locale.header_edges thy name |> fold (fn (l, m, kinds) =>
+      fold2 (fn ((n, T), _) => fn kind =>
+          kind = Locale.Eliminated ? cons (n, (l, Morphism.term m (Free (n, T)))))
+        (Locale.params_of thy l) kinds))
+    |> rev |> distinct (eq_fst (op =))
+  end;
+
+(*the unfolded names the locale does not bind again*)
+fun not_bound thy name unfolded =
+  filter_out (member (op =) (map (#1 o #1) (Locale.params_of thy name)) o #1) unfolded;
+
+(*the declaration warning (the unfolded definitions by source locale, then the names not bound),
+  then one rebinding warning for each parameter the locale declares itself that an import
+  eliminated; one string per warning; ctxt is the context the declaration leaves*)
+fun unfolded_definitions_message ctxt name =
+  (case unfolded_definitions ctxt name of
+    [] => []
+  | unfolded =>
+      let
+        val thy = Proof_Context.theory_of ctxt;
+        fun def_line (n, (_, v)) =
+          "  " ^ Syntax.string_of_term ctxt (Logic.mk_equals (Free (n, Term.fastype_of v), v));
+        val blocks = distinct (op =) (map (#1 o #2) unfolded) |> maps (fn l =>
+          ("The following definitions from `" ^ Locale.extern ctxt l ^ "` are unfolded.") ::
+            map def_line (filter (fn (_, (l', _)) => l' = l) unfolded));
+        val last =
+          (case not_bound thy name unfolded of
+            [] => []
+          | names =>
+              ["The names " ^ commas (map (fn (n, _) => "`" ^ n ^ "`") names) ^
+                " are not bound and shouldn't be used any more. Write their unfolded terms instead."]);
+        val sentences = Locale.own_params thy name |> map_filter (fn ((x, _), _) =>
+          AList.lookup (op =) unfolded x
+          |> Option.map (fn (l, _) => Locale.eliminated_name_message ctxt (x, l)));
+      in cat_lines (blocks @ last) :: sentences end);
+
+
 local
 
 fun assumes_to_notes (Assumes asms) axms =
@@ -1196,42 +1244,16 @@ fun gen_add_locale prep_include prep_decl light
     val deps' = map2 (fn (l, morph) => fn kinds => (l, morph $> b_satisfy, kinds)) deps kindss;
     val axioms = map (Element.conclude_witness pred_ctxt) b_axioms;
 
-    (* the definitions this header unfolds, from the final edges: name, source locale, value
-       at the eliminated position; the first occurrence of a name wins (plan section 3.2 item 1) *)
-    val unfolded =
-      build (deps' |> fold (fn (l, m, kinds) =>
-        fold2 (fn ((n, T), _) => fn kind =>
-            kind = Locale.Eliminated ? cons (n, (l, Morphism.term m (Free (n, T)))))
-          (Locale.params_of thy' l) kinds))
-      |> rev |> distinct (eq_fst (op =));
-    val param_names = map (#1 o #1) params;
-    val not_bound = filter_out (member (op =) param_names o #1) unfolded;
-    val written = map #1 (header_names raw_import raw_body);
-
+    (*the names the header unfolds and does not bind again join the eliminated names (plan
+      decision 1, D20); the warnings are printed in the context the declaration leaves*)
     fun declare_unfolded lthy =
-      if null unfolded then lthy
-      else
-        let
-          fun def_line (n, (_, v)) =
-            "  " ^ Syntax.string_of_term lthy (Logic.mk_equals (Free (n, Term.fastype_of v), v));
-          val blocks = distinct (op =) (map (#1 o #2) unfolded) |> maps (fn l =>
-            ("The following definitions from `" ^ Locale.extern lthy l ^ "` are unfolded.") ::
-              map def_line (filter (fn (_, (l', _)) => l' = l) unfolded));
-          val last =
-            if null not_bound then []
-            else
-              ["The names " ^ commas (map (fn (n, _) => "`" ^ n ^ "`") not_bound) ^
-                " are not bound and shouldn't be used any more. Write their unfolded terms instead."];
-          val _ = warning (cat_lines (blocks @ last));
-          val _ = written |> List.app (fn x =>
-            (case AList.lookup (op =) unfolded x of
-              SOME (l, _) => Locale.eliminated_name_warning lthy (x, l)
-            | NONE => ()));
-        in
-          lthy |> not (null not_bound) ?
-            Local_Theory.declaration {syntax = true, pervasive = false, pos = Binding.pos_of binding}
-              (Locale.eliminated_names_declaration not_bound)
-        end;
+      let
+        val names = not_bound (Proof_Context.theory_of lthy) name (unfolded_definitions lthy name);
+        val lthy' = lthy |> not (null names) ?
+          Local_Theory.declaration {syntax = true, pervasive = false, pos = Binding.pos_of binding}
+            (Locale.eliminated_names_declaration names);
+        val _ = List.app warning (unfolded_definitions_message lthy' name);
+      in lthy' end;
 
     val loc_ctxt = thy'
       |> Locale.register_locale' light binding (extra_tfrees, params)
