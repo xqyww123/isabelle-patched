@@ -110,7 +110,10 @@ sig
     (Proof.context -> {params: (string * typ) list, declared: term} -> unit) option
   val eliminated_names_of: Proof.context -> (string * term) Symtab.table
   val eliminated_names_declaration: (string * (string * term)) list -> Morphism.declaration
+  val eliminated_name_message: Proof.context -> string * string -> string
   val eliminated_name_warning: Proof.context -> string * string -> unit
+  val header_edges: theory -> string -> (string * morphism * position_kind list) list
+  val own_params: theory -> string -> ((string * typ) * mixfix) list
 
   (* Reasoning about locales *)
   val get_witnesses: Proof.context -> thm list
@@ -767,9 +770,11 @@ fun eliminated_names_declaration entries phi context =
   | Context.Theory _ => context);
 
 (*a name x eliminated by locale loc is written where it is not bound*)
-fun eliminated_name_warning ctxt (x, loc) =
-  warning ("The parameter `" ^ x ^ "` from locale `" ^ extern ctxt loc ^
-    "` is not bound any more and treated as a fresh variable here.");
+fun eliminated_name_message ctxt (x, loc) =
+  "The parameter `" ^ x ^ "` from locale `" ^ extern ctxt loc ^
+    "` is not bound any more and treated as a fresh variable here.";
+
+fun eliminated_name_warning ctxt = warning o eliminated_name_message ctxt;
 
 
 fun locale_notes_tagged thy loc =
@@ -896,18 +901,20 @@ fun header_edges thy name =
       Option.map (fn kinds => (name, m $> e, kinds)) header)
   |> rev;
 
-fun structure_names thy name =
-  map_filter (fn ((x, _), Mixfix.Structure _) => SOME x | _ => NONE) (params_of thy name);
+fun structure_names params =
+  map_filter (fn ((x, _), Mixfix.Structure _) => SOME x | _ => NONE) params;
 
-(*the (structure) parameters a locale declares itself: not the image of an inherited position
-  of a header edge*)
-fun own_structure_params thy name =
+(*the parameters a locale declares itself (its header's for clause and fixes elements): not the
+  image of an inherited position of a header edge*)
+fun own_params thy name =
   let
     val inherited =
       header_edges thy name |> maps (fn (l, _, kinds) =>
         map_filter (fn (((x, _), _), Inherited) => SOME x | _ => NONE)
           (params_of thy l ~~ kinds));
-  in filter_out (member (op =) inherited) (structure_names thy name) end;
+  in filter_out (member (op =) inherited o #1 o #1) (params_of thy name) end;
+
+fun own_structure_params thy name = structure_names (own_params thy name);
 
 (*the summary of a locale: the surviving (structure) names in order of first occurrence, the
   cut -- the first eliminated (structure) position of a header edge, or an import's own cut --
@@ -958,7 +965,7 @@ and structure_summary thy name memo =
                     SOME (i, t_src) => (names, SOME (Morphism.term (#2 (nth edges i)) t_src))
                   | NONE =>
                       if reachable then (names @ own_structure_params thy name, NONE)
-                      else (structure_names thy name, NONE));
+                      else (structure_names (params_of thy name), NONE));
               in ((summary, reachable), memo') end);
       in (summary, Symtab.update (name, summary) memo') end);
 
@@ -1014,7 +1021,8 @@ fun parent_implicit_structures thy name =
           Structure_Of t => SOME (Morphism.term morph t)
         | Structure_Head h => var h
         | Cancelled_Structure => NONE
-        | Inherited_Structure => (case structure_names thy l of h :: _ => var h | [] => NONE));
+        | Inherited_Structure =>
+            (case structure_names (params_of thy l) of h :: _ => var h | [] => NONE));
     in (l, reading) end);
 
 fun init name thy =
