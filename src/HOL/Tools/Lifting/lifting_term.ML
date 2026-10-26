@@ -69,21 +69,21 @@ fun equiv_match_err ctxt ty_pat ty =
        Pretty.str "don't match."])
   end
 
-fun get_quot_data (quotients: quotients) s =
+fun get_quot_data (quotients: quotients) ctxt s =
   case Symtab.lookup quotients s of
-    SOME qdata => qdata
+    SOME qdata => Lifting_Info.check_quotient ctxt qdata
   | NONE => raise QUOT_THM_INTERNAL (Pretty.block 
     [Pretty.str ("No quotient type " ^ quote s), 
      Pretty.brk 1, 
      Pretty.str "found."])
 
 fun get_quot_thm quotients ctxt s =
-  Thm.transfer' ctxt (#quot_thm (get_quot_data quotients s))
+  Thm.transfer' ctxt (#quot_thm (get_quot_data quotients ctxt s))
 
-fun has_pcrel_info quotients s = is_some (#pcr_info (get_quot_data quotients s))
+fun has_pcrel_info quotients ctxt s = is_some (#pcr_info (get_quot_data quotients ctxt s))
 
-fun get_pcrel_info quotients s =
-  case #pcr_info (get_quot_data quotients s) of
+fun get_pcrel_info quotients ctxt s =
+  case #pcr_info (get_quot_data quotients ctxt s) of
     SOME pcr_info => pcr_info
   | NONE => raise QUOT_THM_INTERNAL (Pretty.block 
     [Pretty.str ("No parametrized correspondce relation for " ^ quote s), 
@@ -91,10 +91,10 @@ fun get_pcrel_info quotients s =
      Pretty.str "found."])
 
 fun get_pcrel_def quotients ctxt s =
-  Thm.transfer' ctxt (#pcrel_def (get_pcrel_info quotients s))
+  Thm.transfer' ctxt (#pcrel_def (get_pcrel_info quotients ctxt s))
 
 fun get_pcr_cr_eq quotients ctxt s =
-  Thm.transfer' ctxt (#pcr_cr_eq (get_pcrel_info quotients s))
+  Thm.transfer' ctxt (#pcr_cr_eq (get_pcrel_info quotients ctxt s))
 
 fun get_rel_quot_thm ctxt s =
   (case Lifting_Info.lookup_quot_maps ctxt s of
@@ -261,19 +261,19 @@ fun prove_schematic_quot_thm (actions: 'a fold_quot_thm) quotients ctxt (rty, qt
         else
           lifting_step (rty, qty)
       | (_, Type (s', tys')) => 
-        (case try (get_quot_thm quotients ctxt) s' of
-          SOME quot_thm => 
-            let
-              val rty_pat = (fst o quot_thm_rty_qty) quot_thm
-            in
-              lifting_step (rty_pat, qty)              
-            end
-          | NONE =>
-            let                                               
-              val rty_pat = Type (s', map (fn _ => TFree ("a",[])) tys')
-            in
-              prove_schematic_quot_thm actions quotients ctxt (rty_pat, qty) fold_val
-            end)
+        (*a refused setup must not fall back to the identity quotient*)
+        if Symtab.defined quotients s' then
+          let
+            val rty_pat = (fst o quot_thm_rty_qty) (get_quot_thm quotients ctxt s')
+          in
+            lifting_step (rty_pat, qty)
+          end
+        else
+          let
+            val rty_pat = Type (s', map (fn _ => TFree ("a",[])) tys')
+          in
+            prove_schematic_quot_thm actions quotients ctxt (rty_pat, qty) fold_val
+          end
       | _ => (@{thm identity_quotient}, fold_val)
       )
   end
@@ -560,7 +560,7 @@ fun gen_parametrize_transfer_rule quotients ctxt thm =
                   end
                   handle QUOT_THM_INTERNAL _ => Conv.all_conv ctm
                 else
-                  if has_pcrel_info quotients q then
+                  if has_pcrel_info quotients ctxt q then
                     let 
                       val pcrel_def = Thm.symmetric (get_pcrel_def quotients ctxt q)
                     in

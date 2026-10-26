@@ -340,7 +340,7 @@ fun mk_transfer_thms quiet bnf_F bnf_G name consts thm Tss defs lthy = let
       |> Pretty.chunks |> Pretty.string_of |> warning |> K lthy;
     fun maybe_warn_transfer why = not quiet ? warn_transfer why;
   in
-    case Lifting_Info.lookup_quotients lthy name of
+    case Option.map (Lifting_Info.check_quotient lthy) (Lifting_Info.lookup_quotients lthy name) of
       SOME {pcr_info, quot_thm} =>
         (let
           val crel_def = mk_crel_def quot_thm;
@@ -2011,7 +2011,9 @@ fun prepare_common prepare_name prepare_sort prepare_term prepare_thm
           | NONE => if can (fn thm => thm RS @{thm type_definition.Rep}) thm
               then (thm, Typedef)
               else bad_input [thm])
-      | NONE => (case Lifting_Info.lookup_quotients lthy absT_name of
+      | NONE =>
+          (case Option.map (Lifting_Info.check_quotient lthy)
+              (Lifting_Info.lookup_quotients lthy absT_name) of
             SOME {quot_thm = qthm, ...} =>
               (case [qthm] RL @{thms Quotient_eq_onp_typedef Quotient_eq_onp_type_copy} of
                 thm :: _ => (thm, Typedef)

@@ -872,6 +872,7 @@ end
 
 fun lifting_restore qinfo ctxt =
   let
+    val _ = Lifting_Info.check_quotient (Context.proof_of ctxt) qinfo
     val _ = lifting_restore_sanity_check (Context.proof_of ctxt) qinfo
     val (_, qty) = quot_thm_rty_qty (#quot_thm qinfo)
     val qty_full_name = dest_Type_name qty
@@ -954,7 +955,7 @@ fun get_transfer_rel (qinfo : Lifting_Info.quotient) =
   in
     if is_some (#pcr_info qinfo) 
       then get_pcrel (#pcrel_def (the (#pcr_info qinfo)))
-      else quot_thm_crel (#quot_thm qinfo)
+      else #4 (dest_Quotient_concl (#quot_thm qinfo))
   end
 
 fun pointer_of_bundle_name bundle_name ctxt =

@@ -15,6 +15,8 @@ sig
   val quot_thm_rep: thm -> term
   val quot_thm_crel: thm -> term
   val quot_thm_rty_qty: thm -> typ * typ
+  val dest_Quotient_concl: thm -> term * term * term * term
+  val concl_rty_qty: thm -> typ * typ
   val Quotient_conv: conv -> conv -> conv -> conv -> conv
   val Quotient_R_conv: conv -> conv
 
@@ -46,14 +48,16 @@ fun dest_Quotient \<^Const_>\<open>Quotient _ _ for rel abs rep cr\<close> = (re
 
 val dest_Quotient_thm = dest_Quotient o HOLogic.dest_Trueprop o Thm.prop_of
 
+(*the conclusion alone, for a theorem that may carry premises*)
+val dest_Quotient_concl = dest_Quotient o HOLogic.dest_Trueprop o Thm.concl_of
+
 val quot_thm_rel = #1 o dest_Quotient_thm
 val quot_thm_abs = #2 o dest_Quotient_thm
 val quot_thm_rep = #3 o dest_Quotient_thm
 val quot_thm_crel = #4 o dest_Quotient_thm
 
-fun quot_thm_rty_qty quot_thm =
-  let val \<^Type>\<open>fun A B\<close> = fastype_of (quot_thm_abs quot_thm)
-  in (A, B) end
+val quot_thm_rty_qty = dest_funT o fastype_of o quot_thm_abs
+val concl_rty_qty = dest_funT o fastype_of o #2 o dest_Quotient_concl
 
 fun Quotient_conv R_conv Abs_conv Rep_conv T_conv =
   Conv.combination_conv (Conv.combination_conv
