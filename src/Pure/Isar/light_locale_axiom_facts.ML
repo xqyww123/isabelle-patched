@@ -7,6 +7,7 @@ nothing on (plan decisions 9 and 19).
 
 signature LIGHT_LOCALE_AXIOM_FACTS =
 sig
+  val light_predicate_of: Proof.context -> term -> string option
   val is_light_prop: Proof.context -> term -> bool
   val add: thm -> Context.generic -> Context.generic
   val add_attribute: attribute
@@ -23,10 +24,14 @@ struct
 
 (* light predicates *)
 
-fun is_light_prop ctxt t =
+(*the light predicate a proposition applies, by its head constant*)
+fun light_predicate_of ctxt t =
   (case Term.head_of (Object_Logic.drop_judgment ctxt t) of
-    Const (c, _) => Locale.is_light_predicate (Proof_Context.theory_of ctxt) c
-  | _ => false);
+    Const (c, _) =>
+      if Locale.is_light_predicate (Proof_Context.theory_of ctxt) c then SOME c else NONE
+  | _ => NONE);
+
+val is_light_prop = is_some oo light_predicate_of;
 
 
 (* predicate facts *)
