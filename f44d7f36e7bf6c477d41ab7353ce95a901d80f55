@@ -1,0 +1,5 @@
+tested 2026-10-27T20:44:44+08:00 in Isabelle2025-2-light_locale
+command: isabelle build -d contrib/light_locale -d contrib/light_locale/tests Light_Locale_Golden Light_Locale_Base Light_Locale_Test Light_Locale_Test_Serial Light_Locale_Corec_Check FOL ZF
+sessions: Pure FOL Tools HOL HOL-Cardinals HOL-Library HOL-Combinatorics HOL-Computational_Algebra HOL-Algebra Light_Locale_Golden HOL-Corec_Examples Light_Locale_Corec_Check Light_Locale Light_Locale_Base Light_Locale_Test Light_Locale_Test_Serial ZF
+dir: /home/qiyuan/Current/MLML/contrib/light_locale 02f2694896f1b3e957735b6e772fc525b31c5b20
+dir: /home/qiyuan/Current/MLML/contrib/light_locale 02f2694896f1b3e957735b6e772fc525b31c5b20
