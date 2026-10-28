@@ -50,9 +50,11 @@ sig
   val get_idents: Proof.context -> {structs: string list, fixes: string list}
   val put_idents: {structs: string list, fixes: string list} -> Proof.context -> Proof.context
   val default_struct: Proof.context -> string option
+  datatype 'a implicit_structure_spec = Inherit | Cancel | Declare of 'a
   val implicit_structure_: string
   val implicit_structure: Proof.context -> term option
-  val put_implicit_structure: term option -> Proof.context -> Proof.context
+  val inherited_struct: Proof.context -> string option
+  val put_implicit_structure: term implicit_structure_spec -> Proof.context -> Proof.context
   val pure_parse_ast_translation: (string * (Proof.context -> Ast.ast list -> Ast.ast)) list
   val pure_parse_translation: (string * (Proof.context -> term list -> term)) list
   val pure_print_ast_translation: (string * (Proof.context -> Ast.ast list -> Ast.ast)) list
@@ -231,27 +233,38 @@ val put_idents = Idents.put;
 
 val default_struct = try hd o #structs o get_idents;
 
-(*the implicit structure of light locales: one term, or none; a bare index position denotes it
-  through the placeholder, a fixed variable of this internal name (fixed by the writer,
-  Proof_Context.declare_implicit_structure); a value that contains the placeholder without
-  being it would make the replacement step (term check 1000) loop, so the setter rejects it*)
+(*the implicit structure of light locales: inherited (a bare index position reads the first
+  variable structure), cancelled (it is an error), or declared as one term -- then a bare index
+  position denotes the term through the placeholder, a fixed variable of this internal name
+  (fixed by the writer, Proof_Context.declare_implicit_structure); a value that contains the
+  placeholder without being it would make the replacement step (term check 1000) loop, so the
+  setter rejects it*)
+datatype 'a implicit_structure_spec = Inherit | Cancel | Declare of 'a;
+
 val implicit_structure_ = Name.internal "implicit_structure";
 
 structure Implicit_Structure = Proof_Data
 (
-  type T = term option;
-  fun init _ : T = NONE;
+  type T = term implicit_structure_spec;
+  fun init _ : T = Inherit;
 );
 
-val implicit_structure = Implicit_Structure.get;
+fun implicit_structure ctxt =
+  (case Implicit_Structure.get ctxt of Declare t => SOME t | _ => NONE);
 
-fun put_implicit_structure (SOME t) =
+(*the variable structure a bare index position reads: the first one while the implicit structure
+  is inherited, none while it is cancelled or declared -- the parser (struct_tr) and the printer
+  (Syntax_Phases.mark_atoms) both ask this function*)
+fun inherited_struct ctxt =
+  (case Implicit_Structure.get ctxt of Inherit => default_struct ctxt | _ => NONE);
+
+fun put_implicit_structure (spec as Declare t) =
       let fun is_placeholder (Free (x, _)) = x = implicit_structure_ | is_placeholder _ = false in
         if Term.exists_subterm is_placeholder t andalso not (is_placeholder t)
         then raise Fail "put_implicit_structure: placeholder inside the value"
-        else Implicit_Structure.put (SOME t)
+        else Implicit_Structure.put spec
       end
-  | put_implicit_structure NONE = Implicit_Structure.put NONE;
+  | put_implicit_structure spec = Implicit_Structure.put spec;
 
 fun indexdefault_ast_tr [] =
       Ast.Appl [Ast.Constant "_index",
@@ -268,7 +281,7 @@ fun index_tr [t] = t
   | index_tr ts = raise TERM ("index_tr", ts);
 
 fun struct_tr ctxt [Const ("_indexdefault", _)] =
-      (case (implicit_structure ctxt, default_struct ctxt) of
+      (case (implicit_structure ctxt, inherited_struct ctxt) of
         (SOME _, _) => Syntax.const (Lexicon.mark_fixed implicit_structure_)
       | (NONE, SOME x) => Syntax.const (Lexicon.mark_fixed x)
       | (NONE, NONE) => error "Illegal reference to implicit structure")

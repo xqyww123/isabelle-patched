@@ -15,6 +15,7 @@ sig
   val pcr_eq: pcr * pcr -> bool
   val quotient_eq: quotient * quotient -> bool
   val transform_quotient: morphism -> quotient -> quotient
+  val check_quotient: Proof.context -> quotient -> quotient
   val lookup_quotients: Proof.context -> string -> quotient option
   val lookup_quot_thm_quotients: Proof.context -> thm -> quotient option
   val update_quotients: string -> quotient -> Context.generic -> Context.generic
@@ -216,13 +217,31 @@ fun transform_pcr_info phi {pcrel_def, pcr_cr_eq} =
 fun transform_quotient phi {quot_thm, pcr_info} =
   {quot_thm = Morphism.thm phi quot_thm, pcr_info = Option.map (transform_pcr_info phi) pcr_info}
 
+(*refuses a quotient whose theorem has exported premises (Exported_Premises.count_of > 0), the
+  first a light locale predicate, as a setup made in the block of a light locale with assumptions
+  has outside that block; until the repair phase discharges the premise, also where the predicate
+  is a fact.  A plain error: Lifting's exceptions come after this file, and their handlers
+  re-render or swallow them.*)
+fun check_quotient ctxt (quotient as {quot_thm, ...}: quotient) =
+  (case
+    if Exported_Premises.count_of quot_thm > 0
+    then Light_Locale_Axiom_Facts.light_predicate_of ctxt (hd (Thm.prems_of quot_thm))
+    else NONE
+  of
+    NONE => quotient
+  | SOME locale =>
+      error ("You can only use the lifting of `" ^
+        Proof_Context.extern_type ctxt (dest_Type_name (snd (concl_rty_qty quot_thm))) ^
+        "` in the `" ^ Locale.extern ctxt locale ^ "` locale, a locale extending it, " ^
+        "or a theory where such a locale is installed by an interpretation."))
+
 fun lookup_quotients ctxt type_name =
   Symtab.lookup (get_quotients ctxt) type_name
   |> Option.map (transform_quotient (Morphism.transfer_morphism' ctxt))
 
 fun lookup_quot_thm_quotients ctxt quot_thm =
   let
-    val (_, qtyp) = quot_thm_rty_qty quot_thm
+    val (_, qtyp) = concl_rty_qty quot_thm
     val qty_full_name = dest_Type_name qtyp
     fun compare_data (data:quotient) = Thm.eq_thm_prop (#quot_thm data, quot_thm)
   in
@@ -237,7 +256,7 @@ fun update_quotients type_name qinfo context =
 
 fun delete_quotients quot_thm context =
   let
-    val (_, qtyp) = quot_thm_rty_qty quot_thm
+    val (_, qtyp) = concl_rty_qty quot_thm
     val qty_full_name = dest_Type_name qtyp
   in
     if is_some (lookup_quot_thm_quotients (Context.proof_of context) quot_thm)

@@ -37,9 +37,16 @@ sig
   val add_locale_cmd: binding -> binding -> Bundle.xname list ->
     expression -> Element.context list -> theory -> string * local_theory
   val add_light_locale: binding -> binding -> Bundle.name list ->
-    expression_i -> Element.context_i list -> theory -> string * local_theory
+    expression_i -> term Syntax_Trans.implicit_structure_spec -> Element.context_i list ->
+    theory -> string * local_theory
   val add_light_locale_cmd: binding -> binding -> Bundle.xname list ->
-    expression -> Element.context list -> theory -> string * local_theory
+    expression -> string Syntax_Trans.implicit_structure_spec -> Element.context list ->
+    theory -> string * local_theory
+
+  (* Light locale headers: eliminated parameters, unfolded definitions *)
+  val eliminated_params: theory -> string -> (string * int * term) list
+  val unfolded_definitions: Proof.context -> string -> (string * (string * term)) list
+  val unfolded_definitions_message: Proof.context -> string -> string list
 
   (* Processing of locale expressions *)
   val cert_goal_expression: expression_i -> Proof.context ->
@@ -376,27 +383,47 @@ fun check cs ctxt =
 
 in
 
-fun check_autofix insts eqnss elems concl ctxt =
+(*extras: further terms typed jointly -- a light header's implicit structure*)
+fun check_autofix' insts eqnss elems concl extras ctxt =
   let
     val inst_cs = map extract_inst insts;
     val eqns_cs = map extract_eqns eqnss;
     val elem_css = map extract_elem elems;
     val concl_cs = (map o map) mk_propp (map snd concl);
+    val extra_cs = [map mk_term extras];
     (* Type inference *)
     val (inst_cs' :: eqns_cs' :: css', ctxt') =
-      (fold_burrow o fold_burrow) check (inst_cs :: eqns_cs :: elem_css @ [concl_cs]) ctxt;
-    val (elem_css', [concl_cs']) = chop (length elem_css) css';
+      (fold_burrow o fold_burrow) check
+        (inst_cs :: eqns_cs :: elem_css @ [concl_cs, extra_cs]) ctxt;
+    val (elem_css', [concl_cs', extra_cs']) = chop (length elem_css) css';
   in
     ((map restore_inst (insts ~~ inst_cs'),
       map restore_eqns (eqnss ~~ eqns_cs'),
       map restore_elem (elems ~~ elem_css'),
-      map fst concl ~~ concl_cs'), ctxt')
+      map fst concl ~~ concl_cs',
+      map dest_term (flat extra_cs')), ctxt')
   end;
+
+fun check_autofix insts eqnss elems concl ctxt =
+  let val ((insts', eqnss', elems', concl', _), ctxt') =
+    check_autofix' insts eqnss elems concl [] ctxt
+  in ((insts', eqnss', elems', concl'), ctxt') end;
 
 end;
 
 
 (** Prepare locale elements **)
+
+(*the names a header's for clause and fixes elements write, from the text (the parameters would
+  carry inherited Structure mixfixes), each with its mixfix*)
+fun fixes_names fixes = map (fn (b, _, mx) => (Binding.name_of b, mx)) fixes;
+fun header_names raw_import raw_elems =
+  fixes_names (#2 raw_import) @
+    maps (fn Element.Fixes fixes => fixes_names fixes | _ => []) raw_elems;
+
+(*the (structure) parameters a header writes itself*)
+fun header_structure_names raw_import raw_elems =
+  header_names raw_import raw_elems |> map_filter (fn (x, Mixfix.Structure _) => SOME x | _ => NONE);
 
 fun declare_elem prep_var (Fixes fixes) ctxt =
       let val (vars, _) = fold_map prep_var fixes ctxt
@@ -481,8 +508,10 @@ fun finish_deps ctxt5 insts filled =
   in map2 refill (insts ~~ deps0) filled end;
 
 fun prep_full_context_statement
-    parse_typ parse_prop prep_obtains prep_var_elem prep_inst prep_eqns prep_attr prep_var_inst prep_expr
-    {strict, do_close, fixed_frees, light} raw_import init_body raw_elems raw_stmt ctxt1 =
+    parse_typ parse_prop parse_term prep_obtains prep_var_elem prep_inst prep_eqns prep_attr
+    prep_var_inst prep_expr
+    {strict, do_close, fixed_frees, light} raw_import structure_spec init_body raw_elems raw_stmt
+    ctxt1 =
   let
     val thy = Proof_Context.theory_of ctxt1;
 
@@ -599,35 +628,66 @@ fun prep_full_context_statement
     val (_, insts', eqnss', ctxt3, filled) =
       fold prep_insts_cumulative raw_insts (0, [], [], ctxt2, []);
 
-    (* the implicit structure of the header (plan section 3.2 item 6): when the imports give a
-       cut and the outer context has no implicit structure, the body reads bare index positions
-       as the untyped placeholder, each occurrence constrained by the cut's type with import i's
-       parameter type variables as that import's inference parameters (index i, as in
-       prep_insts_cumulative; its other type variables stay rigid); after the joint check the
-       placeholder becomes the cut under the import's final morphism, which is also returned for
-       the declaration's activation context (prep_locale_declaration) *)
+    (* the implicit structure of the header (plan section 3.2 item 6; header plan section 3.3):
+       structure_spec is the header's own element, Declare t, Cancel or Inherit.  imports_state is
+       how a bare index position reads without the element: the imports' cut (import i's term in
+       its own vocabulary), the first surviving variable structure h where a cancelled slot is
+       reachable, cancelled, or inherited -- unless the outer context has a declared implicit
+       structure, which a goal expression keeps whatever its imports give.  Under Declare, t and
+       the body's bare index positions share the inference parameter T_ph. *)
     val locs = map #1 raw_insts;
-    val header_cut =
-      (case Locale.implicit_structure_of_imports thy (locs ~~ kindss) of
-        SOME cut => if is_none (Syntax_Trans.implicit_structure ctxt3) then SOME cut else NONE
-      | NONE => NONE);
-    fun map_placeholder f =
-      Term.map_aterms (fn a as Free (x, _) =>
-        if x = Syntax_Trans.implicit_structure_ then f a else a | a => a);
+    val imports_state =
+      if is_some (Syntax_Trans.implicit_structure ctxt3) then Locale.Inherited_Structure
+      else
+        Locale.imports_structure_state thy (header_structure_names raw_import raw_elems)
+          (locs ~~ kindss);
+    val placeholder = Free (Syntax_Trans.implicit_structure_, dummyT);
+    val declare_placeholder = Proof_Context.declare_implicit_structure placeholder;
+    val decl_ = Name.internal "declared_structure";
+    val T_ph = Type_Infer.param (length locs) ("'struct", []);
+    fun map_free x f = Term.map_aterms (fn a as Free (y, _) => if y = x then f a else a | a => a);
+    val map_placeholder = map_free Syntax_Trans.implicit_structure_;
     fun map_elems f =
       map (Element.map_ctxt {binding = I, typ = I, term = f, pattern = f, fact = I, attrib = I});
-    val (declare_placeholder, constrain_placeholder) =
-      (case header_cut of
-        SOME (i, t_src) =>
-          let val T_par = paramify_at i (import_type_names thy (nth locs i)) (Term.fastype_of t_src) in
-            (Proof_Context.declare_implicit_structure
-                (Free (Syntax_Trans.implicit_structure_, dummyT)),
-             map_elems (map_placeholder (Type.constraint T_par)))
+    val cancel = Syntax_Trans.put_implicit_structure Syntax_Trans.Cancel;
+    (*reading under the imports: the context, and what the placeholder occurrences of a term read
+      there become.  Under a cut each occurrence is constrained by the cut's type with import i's
+      parameter type variables as that import's inference parameters (index i, as in
+      prep_insts_cumulative; its other type variables stay rigid) and named x: the placeholder for
+      the body, decl_ for t, since one joint check gives every Free of one name one type and the
+      body's bare positions (t) and t's own (the cut) differ -- a type error at such a position of
+      t prints decl_ (header plan section 3.3).  Under h the occurrence becomes h before the
+      check, which types h with the rest*)
+    fun imports_reading x =
+      (case imports_state of
+        Locale.Structure_Of (i, t_src) =>
+          let val T_par = paramify_at i (import_type_names thy (nth locs i)) (Term.fastype_of t_src)
+          in (declare_placeholder, map_placeholder (K (Type.constraint T_par (Free (x, dummyT))))) end
+      | Locale.Structure_Head h => (declare_placeholder, map_placeholder (K (Free (h, dummyT))))
+      | Locale.Cancelled_Structure => (cancel, I)
+      | Locale.Inherited_Structure => (I, I));
+    (*one case on the element: how the body reads bare index positions -- under Declare as the
+      untyped placeholder constrained by T_ph (the printer drops it, so a type error shows the bare
+      position), under Cancel as an error, under Inherit as the imports give -- and how t is read:
+      after all elements, with the body's reading taken out and the imports' put in*)
+    val ((body_install, body_constrain), read_structure) =
+      (case structure_spec of
+        Syntax_Trans.Declare t_raw =>
+          let
+            val (install, constrain) = imports_reading decl_;
+            fun read ctxt =
+              let val ctxt' = ctxt |> Syntax_Trans.put_implicit_structure Syntax_Trans.Inherit |> install
+              in [Type.constraint T_ph (constrain (parse_term ctxt' t_raw))] end;
+          in
+            ((declare_placeholder #> Variable.add_fixes_direct [decl_],
+              map_placeholder (Type.constraint T_ph)), read)
           end
-      | NONE => (I, I));
+      | Syntax_Trans.Cancel => ((cancel, I), K [])
+      | Syntax_Trans.Inherit => (imports_reading Syntax_Trans.implicit_structure_, K []));
 
     fun prep_stmt elems ctxt =
-      check_autofix insts' [] elems (prepare_stmt parse_prop prep_obtains ctxt raw_stmt) ctxt;
+      check_autofix' insts' [] elems (prepare_stmt parse_prop prep_obtains ctxt raw_stmt)
+        (read_structure ctxt) ctxt;
 
     val _ =
       if fixed_frees then ()
@@ -637,11 +697,11 @@ fun prep_full_context_statement
         | frees => error ("Illegal free variables in expression: " ^
             commas_quote (map (Syntax.string_of_term ctxt3 o Free) (rev frees))));
 
-    val ((insts, _, elems', concl), ctxt4) = ctxt3
-      |> declare_placeholder
+    val ((insts, _, elems', concl, structures), ctxt4) = ctxt3
+      |> body_install
       |> init_body
       |> fold_map prep_elem raw_elems
-      |>> constrain_placeholder
+      |>> map_elems body_constrain
       |-> prep_stmt;
 
 
@@ -654,28 +714,48 @@ fun prep_full_context_statement
     val fors' = finish_fixes parms fors;
     val fixed = map (fn (b, SOME T, mx) => ((Binding.name_of b, T), mx)) fors';
     val deps = finish_deps ctxt5 insts filled;
-    val implicit_structure =
-      Option.map (fn (i, t_src) => Morphism.term (#2 (nth deps i)) t_src) header_cut;
-    val elems'' =
-      map (finish_elem (ctxt1, ctxt5) parms do_close)
-        (case implicit_structure of
-          SOME t => map_elems (map_placeholder (K t)) elems'
-        | NONE => elems');
 
-  in ((fixed, deps, eqnss', elems'', concl, kindss, implicit_structure), (parms, ctxt5)) end;
+    (*one case on the element: the final structure state and the slot value in the final
+      vocabulary, and what the body's bare index positions become -- t' (t with the cut in place,
+      without schematic variables, past the guard) under Declare; under Inherit, the cut where
+      there is one*)
+    val imports_state' =
+      Locale.map_structure_state (fn (i, t_src) => Morphism.term (#2 (nth deps i)) t_src)
+        imports_state;
+    fun place_cut x =
+      (case imports_state' of Locale.Structure_Of cut => map_free x (K cut) | _ => I);
+    val (state, slot, place) =
+      (case structure_spec of
+        Syntax_Trans.Declare _ =>
+          let
+            val t' = Sign.no_vars ctxt5 (place_cut decl_ (the_single structures));
+            val _ =
+              (case Locale.light_structure_guard_of thy of
+                SOME guard => guard ctxt5 {params = parms, declared = t'}
+              | NONE => ());
+          in (Locale.Structure_Of t', Syntax_Trans.Declare t', map_elems (map_placeholder (K t'))) end
+      | Syntax_Trans.Cancel => (Locale.Cancelled_Structure, Syntax_Trans.Cancel, I)
+      | Syntax_Trans.Inherit =>
+          (imports_state', Syntax_Trans.Inherit,
+            map_elems (place_cut Syntax_Trans.implicit_structure_)));
+    val elems'' = map (finish_elem (ctxt1, ctxt5) parms do_close) (place elems');
+
+  in ((fixed, deps, eqnss', elems'', concl, kindss, {state = state, slot = slot}), (parms, ctxt5)) end;
 
 in
 
 fun cert_full_context_statement x =
-  prep_full_context_statement (K I) (K I) Obtain.cert_obtains
+  prep_full_context_statement (K I) (K I) (K I) Obtain.cert_obtains
     Proof_Context.cert_var make_inst Syntax.check_props (K I) Proof_Context.cert_var (K I) x;
 
 fun cert_read_full_context_statement x =
-  prep_full_context_statement Syntax.parse_typ Syntax.parse_prop Obtain.parse_obtains
+  prep_full_context_statement Syntax.parse_typ Syntax.parse_prop Syntax.parse_term
+    Obtain.parse_obtains
     Proof_Context.read_var make_inst Syntax.check_props (K I) Proof_Context.cert_var (K I) x;
 
 fun read_full_context_statement x =
-  prep_full_context_statement Syntax.parse_typ Syntax.parse_prop Obtain.parse_obtains
+  prep_full_context_statement Syntax.parse_typ Syntax.parse_prop Syntax.parse_term
+    Obtain.parse_obtains
     Proof_Context.read_var parse_inst Syntax.read_props Attrib.check_src Proof_Context.read_var check_expr x;
 
 end;
@@ -689,7 +769,7 @@ fun prep_statement prep activate raw_elems raw_stmt ctxt =
   let
     val ((_, _, _, elems, concl, _, _), _) =
       prep {strict = true, do_close = false, fixed_frees = true, light = false}
-        ([], []) I raw_elems raw_stmt ctxt;
+        ([], []) Syntax_Trans.Inherit I raw_elems raw_stmt ctxt;
     val ctxt' = ctxt
       |> Proof_Context.set_stmt true
       |> fold_map activate elems |> #2
@@ -711,16 +791,18 @@ fun fix_params params =
 
 local
 
-(*the locale declarations also return the position kinds of the header (plan section 3.2 item 2)*)
-fun prep_locale_declaration prep activate {light} raw_import init_body raw_elems ctxt =
+(*the locale declarations also return the position kinds of the header (plan section 3.2 item 2)
+  and the slot value, for the registration*)
+fun prep_locale_declaration prep activate {light} raw_import structure_spec init_body raw_elems
+    ctxt =
   let
     val thy = Proof_Context.theory_of ctxt;
-    val ((fixed, deps, eqnss, elems, _, kindss, implicit_structure), (parms, ctxt0)) =
+    val ((fixed, deps, eqnss, elems, _, kindss, {state, slot}), (parms, ctxt0)) =
       prep {strict = false, do_close = true, fixed_frees = false, light = light}
-        raw_import init_body raw_elems (Element.Shows []) ctxt;
+        raw_import structure_spec init_body raw_elems (Element.Shows []) ctxt;
     val _ = null (flat eqnss) orelse error "Illegal rewrites clause(s) in declaration of locale";
     (* Declare parameters and imported facts; a light header activates its heavy imports
-       syntax-only (plan decision 10); then, as in Locale.init, the header's implicit structure,
+       syntax-only (plan decision 10); then, as in Locale.init, the header's structure state,
        which the elements' attributes read like the body (plan section 3.2 item 3) *)
     val ctxt' = ctxt
       |> fix_params fixed
@@ -728,24 +810,27 @@ fun prep_locale_declaration prep activate {light} raw_import init_body raw_elems
             fold (fn dep => Context.proof_map (Locale.activate_facts_level
               (if Locale.is_light thy (#1 dep) then Locale.Full else Locale.Syntax_only) NONE dep)) deps
           else fold (Context.proof_map o Locale.activate_facts NONE) deps)
-      |> (case implicit_structure of
-            SOME t => Proof_Context.declare_implicit_structure t
-          | NONE => I);
+      |> Locale.install_structure_state (the o AList.lookup (op =) parms) state;
     val (elems', ctxt'') = ctxt'
       |> Proof_Context.set_stmt true
       |> fold_map activate elems
       ||> Proof_Context.restore_stmt ctxt';
-  in (((fixed, deps, elems', ctxt''), (parms, ctxt0)), kindss) end;
+  in (((fixed, deps, elems', ctxt''), (parms, ctxt0)), (kindss, slot)) end;
 
 in
 
 fun cert_locale_declaration x = prep_locale_declaration cert_full_context_statement Element.activate_i x;
 fun read_locale_declaration x = prep_locale_declaration read_full_context_statement Element.activate x;
 
-fun cert_declaration x = (#1 oooo cert_locale_declaration {light = false}) x;
-fun cert_read_declaration x =
-  (#1 oooo prep_locale_declaration cert_read_full_context_statement Element.activate {light = false}) x;
-fun read_declaration x = (#1 oooo read_locale_declaration {light = false}) x;
+fun cert_declaration raw_import init_body raw_elems ctxt =
+  #1 (cert_locale_declaration {light = false} raw_import Syntax_Trans.Inherit init_body
+    raw_elems ctxt);
+fun cert_read_declaration raw_import init_body raw_elems ctxt =
+  #1 (prep_locale_declaration cert_read_full_context_statement Element.activate {light = false}
+    raw_import Syntax_Trans.Inherit init_body raw_elems ctxt);
+fun read_declaration raw_import init_body raw_elems ctxt =
+  #1 (read_locale_declaration {light = false} raw_import Syntax_Trans.Inherit init_body
+    raw_elems ctxt);
 
 end;
 
@@ -763,7 +848,8 @@ fun prep_goal_expression prep expression ctxt =
     val thy = Proof_Context.theory_of ctxt;
 
     val ((fixed, deps, eqnss, _, _, _, _), _) =
-      prep {strict = true, do_close = true, fixed_frees = true, light = false} expression I []
+      prep {strict = true, do_close = true, fixed_frees = true, light = false} expression
+        Syntax_Trans.Inherit I []
         (Element.Shows []) ctxt;
     (* proof obligations *)
     val propss = map (props_of thy) deps;
@@ -1006,6 +1092,49 @@ fun define_preds binding parms (((exts, exts'), (ints, ints')), defs) thy =
 end;
 
 
+(** The definitions a light header unfolds (plan decision 1, D20) **)
+
+(*name, source locale, the value at the eliminated position, from the header edges in header
+  order; the first occurrence of a name wins (plan section 3.2 item 1)*)
+fun unfolded_definitions ctxt name =
+  let val thy = Proof_Context.theory_of ctxt in
+    build (Locale.header_edges thy name |> fold (fn (l, m, kinds) =>
+      fold2 (fn ((n, T), _) => fn kind =>
+          kind = Locale.Eliminated ? cons (n, (l, Morphism.term m (Free (n, T)))))
+        (Locale.params_of thy l) kinds))
+    |> rev |> distinct (eq_fst (op =))
+  end;
+
+(*the unfolded names the locale does not bind again*)
+fun not_bound thy name unfolded =
+  filter_out (member (op =) (map (#1 o #1) (Locale.params_of thy name)) o #1) unfolded;
+
+(*the declaration warning (the unfolded definitions by source locale, then the names not bound),
+  then one rebinding warning for each parameter the locale declares itself that an import
+  eliminated; one string per warning; ctxt is the context the declaration leaves*)
+fun unfolded_definitions_message ctxt name =
+  (case unfolded_definitions ctxt name of
+    [] => []
+  | unfolded =>
+      let
+        val thy = Proof_Context.theory_of ctxt;
+        fun def_line (n, (_, v)) =
+          "  " ^ Syntax.string_of_term ctxt (Logic.mk_equals (Free (n, Term.fastype_of v), v));
+        val blocks = distinct (op =) (map (#1 o #2) unfolded) |> maps (fn l =>
+          ("The following definitions from `" ^ Locale.extern ctxt l ^ "` are unfolded.") ::
+            map def_line (filter (fn (_, (l', _)) => l' = l) unfolded));
+        val last =
+          (case not_bound thy name unfolded of
+            [] => []
+          | names =>
+              ["The names " ^ commas (map (fn (n, _) => "`" ^ n ^ "`") names) ^
+                " are not bound and shouldn't be used any more. Write their unfolded terms instead."]);
+        val sentences = Locale.own_params thy name |> map_filter (fn ((x, _), _) =>
+          AList.lookup (op =) unfolded x
+          |> Option.map (fn (l, _) => Locale.eliminated_name_message ctxt (x, l)));
+      in cat_lines (blocks @ last) :: sentences end);
+
+
 local
 
 fun assumes_to_notes (Assumes asms) axms =
@@ -1024,7 +1153,7 @@ fun defines_to_notes ctxt (Defines defs) =
 val is_hyp = fn Assumes _ => true | Defines _ => true | _ => false;
 
 fun gen_add_locale prep_include prep_decl light
-    binding raw_predicate_binding raw_includes raw_import raw_body thy =
+    binding raw_predicate_binding raw_includes raw_import raw_structure raw_body thy =
   let
     val name = Sign.full_name thy binding;
     val _ = Locale.defined thy name andalso
@@ -1037,12 +1166,23 @@ fun gen_add_locale prep_include prep_decl light
       else ();
 
     val ctxt = Proof_Context.init_global thy;
+
+    (*a light header may not write (structure) parameters (header plan section 2 item 8), checked
+      before anything is read*)
+    val own_structures = header_structure_names raw_import raw_body;
+    val _ =
+      if light andalso not (null own_structures) then
+        (case Locale.light_own_structure_check_of thy of
+          SOME check => check ctxt own_structures
+        | NONE => ())
+      else ();
+
     val includes = map (prep_include ctxt) raw_includes;
 
-    val (((fixed, deps, body_elems, _), (parms, ctxt')), kindss) =
+    val (((fixed, deps, body_elems, _), (parms, ctxt')), (kindss, slot)) =
       ctxt
       |> Bundle.includes includes
-      |> prep_decl {light = light} raw_import I raw_body;
+      |> prep_decl {light = light} raw_import raw_structure I raw_body;
     val text as (((_, exts'), _), defs) = eval light ctxt' deps body_elems;
 
     val type_tfrees = TFrees.build (fold (TFrees.add_tfreesT o #2) parms);
@@ -1104,48 +1244,20 @@ fun gen_add_locale prep_include prep_decl light
     val deps' = map2 (fn (l, morph) => fn kinds => (l, morph $> b_satisfy, kinds)) deps kindss;
     val axioms = map (Element.conclude_witness pred_ctxt) b_axioms;
 
-    (* the definitions this header unfolds, from the final edges: name, source locale, value
-       at the eliminated position; the first occurrence of a name wins (plan section 3.2 item 1) *)
-    val unfolded =
-      build (deps' |> fold (fn (l, m, kinds) =>
-        fold2 (fn ((n, T), _) => fn kind =>
-            kind = Locale.Eliminated ? cons (n, (l, Morphism.term m (Free (n, T)))))
-          (Locale.params_of thy' l) kinds))
-      |> rev |> distinct (eq_fst (op =));
-    val param_names = map (#1 o #1) params;
-    val not_bound = filter_out (member (op =) param_names o #1) unfolded;
-    val written =
-      map (Binding.name_of o #1) (#2 raw_import) @
-      maps (fn Fixes fixes => map (Binding.name_of o #1) fixes | _ => []) raw_body;
-
+    (*the names the header unfolds and does not bind again join the eliminated names (plan
+      decision 1, D20); the warnings are printed in the context the declaration leaves*)
     fun declare_unfolded lthy =
-      if null unfolded then lthy
-      else
-        let
-          fun def_line (n, (_, v)) =
-            "  " ^ Syntax.string_of_term lthy (Logic.mk_equals (Free (n, Term.fastype_of v), v));
-          val blocks = distinct (op =) (map (#1 o #2) unfolded) |> maps (fn l =>
-            ("The following definitions from `" ^ Locale.extern lthy l ^ "` are unfolded.") ::
-              map def_line (filter (fn (_, (l', _)) => l' = l) unfolded));
-          val last =
-            if null not_bound then []
-            else
-              ["The names " ^ commas (map (fn (n, _) => "`" ^ n ^ "`") not_bound) ^
-                " are not bound and shouldn't be used any more. Write their unfolded terms instead."];
-          val _ = warning (cat_lines (blocks @ last));
-          val _ = written |> List.app (fn x =>
-            (case AList.lookup (op =) unfolded x of
-              SOME (l, _) => Locale.eliminated_name_warning lthy (x, l)
-            | NONE => ()));
-        in
-          lthy |> not (null not_bound) ?
-            Local_Theory.declaration {syntax = true, pervasive = false, pos = Binding.pos_of binding}
-              (Locale.eliminated_names_declaration not_bound)
-        end;
+      let
+        val names = not_bound (Proof_Context.theory_of lthy) name (unfolded_definitions lthy name);
+        val lthy' = lthy |> not (null names) ?
+          Local_Theory.declaration {syntax = true, pervasive = false, pos = Binding.pos_of binding}
+            (Locale.eliminated_names_declaration names);
+        val _ = List.app warning (unfolded_definitions_message lthy' name);
+      in lthy' end;
 
     val loc_ctxt = thy'
       |> Locale.register_locale' light binding (extra_tfrees, params)
-          (asm, rev defs) (a_intro, b_intro) axioms hyp_spec [] (rev notes) (rev deps')
+          (asm, rev defs) (a_intro, b_intro) axioms hyp_spec [] (rev notes) (rev deps') slot
       |> Named_Target.init includes name
       |> fold (fn (kind, facts) => Local_Theory.notes_kind kind facts #> snd) notes'
       |> declare_unfolded;
@@ -1154,8 +1266,12 @@ fun gen_add_locale prep_include prep_decl light
 
 in
 
-val add_locale = gen_add_locale (K I) cert_locale_declaration false;
-val add_locale_cmd = gen_add_locale Bundle.check_name read_locale_declaration false;
+fun add_locale binding pb includes expr elems =
+  gen_add_locale (K I) cert_locale_declaration false binding pb includes expr
+    Syntax_Trans.Inherit elems;
+fun add_locale_cmd binding pb includes expr elems =
+  gen_add_locale Bundle.check_name read_locale_declaration false binding pb includes expr
+    Syntax_Trans.Inherit elems;
 val add_light_locale = gen_add_locale (K I) cert_locale_declaration true;
 val add_light_locale_cmd = gen_add_locale Bundle.check_name read_locale_declaration true;
 

@@ -27,7 +27,8 @@ sig
   val locale_keyword: string parser
   val locale_expression: Expression.expression parser
   val context_element: Element.context parser
-  val locale_val: ((Expression.expression * Bundle.xname list) * Element.context list) parser
+  val locale_val': (string parser * 'a parser) list ->
+    ((Expression.expression * Bundle.xname list) * (Element.context list * 'a list)) parser
   val statement': (string * string list) list list parser
   val if_statement': (string * string list) list list parser
   val statement: (Attrib.binding * (string * string list) list) list parser
@@ -146,23 +147,36 @@ val locale_keyword' =
 
 val class_expression = plus1_unless locale_keyword' Parse.class;
 
-val locale_expression =
+(*stop: where the import list ends*)
+fun gen_locale_expression stop =
   let
     val expr2 = Parse.name_position;
     val expr1 =
       locale_prefix -- expr2 --
       instance >> (fn ((p, l), i) => (l, (p, i)));
-    val expr0 = plus1_unless locale_keyword' expr1;
+    val expr0 = plus1_unless stop expr1;
   in expr0 -- Scan.optional (Parse.$$$ "for" |-- Parse.!!! locale_fixes) [] end;
+
+val locale_expression = gen_locale_expression locale_keyword';
 
 val context_element = Parse.group (fn () => "context element") loc_element;
 
-val locale_context_elements = Scan.repeat1 context_element;
-
-val locale_val =
-  ((locale_expression -- Scan.optional opening []) || opening >> pair ([], []))
-  -- Scan.optional (Parse.$$$ "+" |-- Parse.!!! locale_context_elements) []
-  || locale_context_elements >> pair (([], []), []);
+(*a locale header: the import expression and an optional opening, then the elements after "+",
+  or the elements alone; the elements may include extra ones, each introduced by its keyword and
+  parsed by its body; the keywords also end the import list; the extras come back apart, the
+  context elements in their order*)
+fun locale_val' extras =
+  let
+    val extra = Scan.first (map (fn (kw, body) => kw |-- Parse.!!! body) extras);
+    val elements =
+      Scan.repeat1 (extra >> (fn x => (NONE, SOME x)) || context_element >> (fn e => (SOME e, NONE)))
+      >> (fn xs => (map_filter #1 xs, map_filter #2 xs));
+    val expression = gen_locale_expression (Scan.first (locale_keyword' :: map #1 extras));
+  in
+    ((expression -- Scan.optional opening []) || opening >> pair ([], []))
+    -- Scan.optional (Parse.$$$ "+" |-- Parse.!!! elements) ([], [])
+    || elements >> pair (([], []), [])
+  end;
 
 end;
 
