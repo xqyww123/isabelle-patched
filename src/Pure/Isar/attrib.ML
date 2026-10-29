@@ -555,7 +555,7 @@ val _ = Theory.setup
   setup \<^binding>\<open>consumes\<close>
     (Scan.lift (Scan.optional Parse.int 1) >> Rule_Cases.consumes)
     "number of consumed facts" #>
-  setup \<^binding>\<open>exported_premises\<close>
+  setup \<^binding>\<open>setclass\<close>
     (Scan.lift Parse.int >> (fn n =>
       Thm.rule_attribute [] (fn context => fn th =>
         let
@@ -567,10 +567,10 @@ val _ = Theory.setup
             if eq_list (op =) (Thm.get_tags th, Thm.get_tags th') then th'
             else Rule_Cases.save th th';
         in
-          if 0 <= n andalso n <= Thm.nprems_of th'' then Exported_Premises.put n th''
-          else error ("exported_premises: count out of range\n" ^ Thm.string_of_thm ctxt th'')
+          if 0 <= n andalso n <= Thm.nprems_of th'' then Setclass.put n th''
+          else error ("setclass: count out of range\n" ^ Thm.string_of_thm ctxt th'')
         end)))
-    "number of leading premises of the HHF normal form that are exported contextual assumptions" #>
+    "number of leading premises of the HHF normal form that are setclass premises" #>
   setup \<^binding>\<open>constraints\<close>
     (Scan.lift Parse.nat >> Rule_Cases.constraints)
     "number of equality constraints" #>

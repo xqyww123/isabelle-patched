@@ -195,35 +195,37 @@ fun unfold_prems_concls ctxt defs th =
 
 in
 
+(*the facts go into th's positions 1 .. n; a SORT_CONSTRAINT premise up to the last of the
+  leading K premises stays (Setclass.fill_leading)*)
 fun consume ctxt defs facts ((a, n), th) =
-  let val m = Int.min (length facts, n) in
+  let val (m, facts') = Setclass.fill_leading n facts th in
     th
     |> unfold_prems ctxt n defs
     |> unfold_prems_concls ctxt defs
-    |> Drule.multi_resolve (SOME ctxt) (take m facts)
+    |> Drule.multi_resolve (SOME ctxt) facts'
     |> Seq.map (pair (a, (n - m, drop m facts)))
   end;
 
 end;
 
-val lookup_consumes = Exported_Premises.lookup_consumes;
-val get_consumes = Exported_Premises.get_consumes;
-val put_consumes = Exported_Premises.put_consumes;
+val lookup_consumes = Setclass.lookup_consumes;
+val get_consumes = Setclass.get_consumes;
+val put_consumes = Setclass.put_consumes;
 
 fun add_consumes k th = put_consumes (SOME (k + get_consumes th)) th;
 
-(*the default is relative to the exported premises*)
+(*the default is relative to the leading K premises*)
 fun default_consumes n th =
   if is_some (lookup_consumes th) then th
-  else put_consumes (SOME (Exported_Premises.count_of th + n)) th;
+  else put_consumes (SOME (Setclass.leading_span th + n)) th;
 
 val save_consumes = put_consumes o lookup_consumes;
-val save_exported_premises = Exported_Premises.put o Exported_Premises.count_of;
+val save_setclass = Setclass.put o Setclass.count_of;
 
-(*a non-negative count is relative to the exported premises, a negative one is absolute*)
+(*a non-negative count is relative to the leading K premises, a negative one is absolute*)
 fun consumes n =
   Thm.mixed_attribute (apsnd (fn th =>
-    put_consumes (SOME (if n < 0 then n else Exported_Premises.count_of th + n)) th));
+    put_consumes (SOME (if n < 0 then n else Setclass.leading_span th + n)) th));
 
 
 (* equality constraints *)
@@ -373,7 +375,7 @@ fun internalize_params rule =
 
 fun save th =
   save_consumes th #>
-  save_exported_premises th #>
+  save_setclass th #>
   save_constraints th #>
   save_case_names th #>
   save_cases_hyp_names th #>
@@ -399,9 +401,9 @@ fun get th =
 (* params *)
 
 fun rename_params xss th =
-  let val k = Exported_Premises.count_of th in
+  let val span = Setclass.leading_span th in
     th
-    |> fold_index (fn (i, xs) => Thm.rename_params_rule (xs, k + i + 1)) xss
+    |> fold_index (fn (i, xs) => Thm.rename_params_rule (xs, span + i + 1)) xss
     |> save th
   end;
 
@@ -416,10 +418,10 @@ local
 fun equal_cterms ts us =
   is_equal (list_ord Thm.fast_term_ord (ts, us));
 
-(*the k exported premises stay in front, only the rule's own n consumed ones move*)
-fun prep_rule k n th =
+(*the first span premises stay in front; only the rule's own n consumed ones move*)
+fun prep_rule span n th =
   let
-    val th' = Thm.permute_prems k n th;
+    val th' = Thm.permute_prems span n th;
     val prems = Thm.take_cprems_of (Thm.nprems_of th' - n) th';
     val th'' = Drule.implies_elim_list th' (map Thm.assume prems);
   in (prems, (n, th'')) end;
@@ -430,10 +432,11 @@ fun mutual_rule _ [] = NONE
   | mutual_rule _ [th] = SOME ([0], th)
   | mutual_rule ctxt (ths as th :: _) =
       let
-        val k = Exported_Premises.count_of th;
-        val n = Exported_Premises.strong_consumes th;
+        val k = Setclass.count_of th;
+        val span = Setclass.leading_span th;
+        val n = Setclass.strong_consumes th;
         val ((_, ths'), ctxt') = Variable.import true ths ctxt;
-        val rules as (prems, _) :: _ = map (prep_rule k n) ths';
+        val rules as (prems, _) :: _ = map (prep_rule span n) ths';
         val (ns, rls) = split_list (map #2 rules);
       in
         if not (forall (equal_cterms prems o #1) rules) then NONE
@@ -444,8 +447,8 @@ fun mutual_rule _ [] = NONE
             |> Drule.implies_intr_list prems
             |> singleton (Variable.export ctxt' ctxt)
             |> save th
-            |> put_consumes (SOME k)
-            |> Exported_Premises.put k)
+            |> put_consumes (SOME span)
+            |> Setclass.put k)
       end;
 
 end;

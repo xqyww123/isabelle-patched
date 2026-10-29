@@ -131,7 +131,7 @@ fun morphism a {binding, typ, term, fact} =
     typ = map (pair a) typ,
     term = map (pair a) term,
     fact =
-      map (fn f => (a, fn context => fn ths => Exported_Premises.restore_counts ths (f context ths)))
+      map (fn f => (a, fn context => fn ths => Setclass.restore_counts ths (f context ths)))
         fact};
 
 (*syntactic test only!*)
@@ -244,7 +244,7 @@ fun instantiate_frees_morphism (cinstT, cinst) =
           if TFrees.is_empty instT then []
           else [K (Term_Subst.instantiateT_frees instT)],
          term = [K (Term_Subst.instantiate_frees (instT, inst))],
-         fact = [K (map (Exported_Premises.keeping_count (Thm.instantiate_frees (cinstT, cinst))))]}
+         fact = [K (map (Setclass.keeping_count (Thm.instantiate_frees (cinstT, cinst))))]}
     end;
 
 fun instantiate_morphism (cinstT, cinst) =
@@ -260,7 +260,7 @@ fun instantiate_morphism (cinstT, cinst) =
           if TVars.is_empty instT then []
           else [K (Term_Subst.instantiateT instT)],
          term = [K (Term_Subst.instantiate (instT, inst))],
-         fact = [K (map (Exported_Premises.keeping_count (Thm.instantiate (cinstT, cinst))))]}
+         fact = [K (map (Setclass.keeping_count (Thm.instantiate (cinstT, cinst))))]}
     end;
 
 end;

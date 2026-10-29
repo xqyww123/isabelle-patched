@@ -147,7 +147,7 @@ fun kind_extra (Kind {index, ...}) = index = 2;
 fun kind_index (Kind {index, ...}) = index;
 fun kind_is_elim (Kind {is_elim, ...}) = is_elim;
 fun kind_make_elim (Kind {is_elim, make_elim, ...}) =
-  is_elim ? Exported_Premises.put_major_prem_first #> make_elim ? Tactic.make_elim;
+  is_elim ? Setclass.put_major_prem_first #> make_elim ? Tactic.make_elim;
 
 val kind_index_ord = int_ord o apply2 kind_index;
 val kind_elim_ord = bool_ord o apply2 kind_is_elim;

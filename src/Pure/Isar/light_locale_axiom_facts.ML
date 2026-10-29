@@ -1,9 +1,9 @@
 (*  Title:      Pure/Isar/light_locale_axiom_facts.ML
 
-Unconditional facts "LF t" of light locale predicates, indexed by proposition; the term part
-of an export, the premise count of an export, and the export of light targets that pastes
-nothing on (plan decisions 9 and 19); the repair-phase tools on leading light premises (contracts
-in plan decision 19).
+Unconditional facts "LF t" of light locale predicates, indexed by proposition; the
+repair-phase tools on setclass premises, the premises headed by a light predicate (contracts in
+plan decision 19), which skip and ignore top-level SORT_CONSTRAINT premises; the term part of an
+export and the export of light targets that pastes nothing on (plan decision 9).
 *)
 
 signature LIGHT_LOCALE_AXIOM_FACTS =
@@ -13,17 +13,14 @@ sig
   val add: thm -> Context.generic -> Context.generic
   val add_attribute: attribute
   val retrieve: Proof.context -> term -> thm list
-  val count_leading: Proof.context -> thm -> int
-  val count_exported_leading: Proof.context -> thm -> int
-  val discharge_leading: Proof.context -> thm -> thm
+  val count_setclass_prems: Proof.context -> thm -> int
+  val discharge_setclass_prems: Proof.context -> thm -> thm
   val instance_tac: Proof.context -> int -> tactic
-  val close_leading_tac: Proof.context -> int -> int -> tactic
-  val resolve_leading: Proof.context -> thm list -> int -> tactic
+  val close_setclass_prems_tac: Proof.context -> int -> int -> tactic
+  val resolve_closing_setclass_prems: Proof.context -> thm list -> int -> tactic
   val discharge_morphism: Proof.context -> morphism
   val unchanged_by: morphism -> thm -> bool
   val replace_fact: string -> (thm -> thm) -> morphism -> morphism
-  val export_premise_count: local_theory -> Proof.context -> int
-  val premise_count: local_theory -> int
   val light_export: local_theory -> Proof.context -> thm -> thm
 end;
 
@@ -65,13 +62,14 @@ fun retrieve ctxt t =
   map (Thm.transfer' ctxt) (Item_Net.retrieve (Data.get (Context.Proof ctxt)) t);
 
 
-(* leading light premises *)
+(* setclass premises *)
 
-(*not bounded by K*)
-fun count_leading ctxt th = length (take_prefix (is_light_prop ctxt) (Thm.prems_of th));
-
-fun count_exported_leading ctxt th =
-  Int.min (Exported_Premises.count_of th, count_leading ctxt th);
+(*the leading ones, SORT_CONSTRAINT premises skipped; not bounded by K*)
+fun count_setclass_prems ctxt th =
+  Thm.prems_of th
+  |> take_prefix (fn P => Drule.is_sort_constraint P orelse is_light_prop ctxt P)
+  |> filter_out Drule.is_sort_constraint
+  |> length;
 
 (*the instantiation of a unifier, keyed by the variables' instantiated types; fresh variables
   are above maxidx*)
@@ -91,11 +89,13 @@ fun unifier_insts ctxt maxidx (t, u) =
 
 (*rule R: the first premise of th discharged by the fact F, whose variables are renamed apart;
   Pattern.match of F against the premise, else Pattern.unify with F on the left; the instantiation
-  may bind no variable of th outside that premise*)
-fun discharge_with ctxt th =
+  may bind no variable of th outside that premise, SORT_CONSTRAINT premises ignored*)
+fun discharge_prem_by ctxt th =
   let
     val (P, rest) = Thm.dest_implies (Thm.cprop_of th);
-    val ts = Thm.term_of rest :: Thm.terms_of_tpairs (Thm.tpairs_of th);
+    val ts =
+      filter_out Drule.is_sort_constraint (Logic.strip_imp_prems (Thm.term_of rest)) @
+      Logic.strip_imp_concl (Thm.term_of rest) :: Thm.terms_of_tpairs (Thm.tpairs_of th);
     (*F's renamed variables and those unification creates are above maxidx th, never in th*)
     val tvars = fold Term.add_tvar_names ts [];
     val vars = fold Term.add_var_names ts [];
@@ -123,35 +123,51 @@ fun discharge_with ctxt th =
       end
   end;
 
-fun discharge_first ctxt th =
-  (case Thm.prems_of th of
-    P :: _ =>
-      if is_light_prop ctxt P then get_first (discharge_with ctxt th) (retrieve ctxt P) else NONE
-  | [] => NONE);
+(*the first premise that is not SORT_CONSTRAINT, when it is a setclass premise: rotated to the
+  front, the others keeping their order, and discharged*)
+fun discharge_first_prem ctxt th =
+  let
+    val prems = Thm.prems_of th;
+    val j = find_index (not o Drule.is_sort_constraint) prems;
+  in
+    if j < 0 orelse not (is_light_prop ctxt (nth prems j)) then NONE
+    else
+      let
+        val th' = if j = 0 then th else Drule.rearrange_prems [j] th;
+      in get_first (discharge_prem_by ctxt th') (retrieve ctxt (nth prems j)) end
+  end;
 
 (*stops at the first premise it cannot discharge; th itself when none is discharged*)
-fun discharge_leading ctxt th =
-  Exported_Premises.shift_count th (perhaps (perhaps_loop (discharge_first ctxt)) th);
+fun discharge_setclass_prems ctxt th =
+  Setclass.shift_count th (perhaps (perhaps_loop (discharge_first_prem ctxt)) th);
 
 fun instance_tac ctxt = SUBGOAL (fn (goal, i) =>
   let val C = Logic.strip_assums_concl goal in
     if is_light_prop ctxt C then SOLVED' (resolve_tac ctxt (retrieve ctxt C)) i else no_tac
   end);
 
-(*no DETERM, no REPEAT*)
-fun close_leading_tac ctxt n i = EVERY (replicate n (instance_tac ctxt i));
+(*instance_tac on the first subgoal from i on that is not a SORT_CONSTRAINT*)
+fun next_instance_tac ctxt i st =
+  (case find_index (not o Drule.is_sort_constraint o Logic.strip_assums_concl)
+      (drop (i - 1) (Thm.prems_of st)) of
+    ~1 => no_tac st
+  | d => instance_tac ctxt (i + d) st);
 
-(*the rules' results in list order, each rule's leading light subgoals closed*)
-fun resolve_leading ctxt rules =
+(*no DETERM, no REPEAT*)
+fun close_setclass_prems_tac ctxt n i = EVERY (replicate n (next_instance_tac ctxt i));
+
+(*the rules' results in list order, each rule's leading setclass subgoals closed*)
+fun resolve_closing_setclass_prems ctxt rules =
   fold_rev (fn r => fn tac =>
-      (fn i => resolve_tac ctxt [r] i THEN close_leading_tac ctxt (count_leading ctxt r) i)
+      (fn i =>
+        resolve_tac ctxt [r] i THEN close_setclass_prems_tac ctxt (count_setclass_prems ctxt r) i)
       APPEND' tac)
     rules (K no_tac);
 
 (*rule R is the identity on an empty table*)
 fun discharge_morphism ctxt =
   if Item_Net.is_empty (Data.get (Context.Proof ctxt)) then Morphism.identity
-  else Morphism.thm_morphism "Light_Locale_Axiom_Facts.discharge" (discharge_leading ctxt);
+  else Morphism.thm_morphism "Light_Locale_Axiom_Facts.discharge" (discharge_setclass_prems ctxt);
 
 
 (* the term part of an export *)
@@ -173,17 +189,12 @@ fun replace_fact name thm phi =
     fact = [K (map thm)]};
 
 
-(* premise counts and the export that pastes nothing on *)
-
-fun export_premise_count lthy ctxt = Thm.nprems_of (Assumption.export lthy ctxt Drule.dummy_thm);
-
-fun premise_count lthy =
-  export_premise_count lthy (Proof_Context.init_global (Proof_Context.theory_of lthy));
+(* the export that pastes nothing on *)
 
 (*unfold the fixed variables defined between lthy and ctxt, generalise the ones ctxt does not
-  know, add no assumption; K and the rule-case tags are copied back by Rule_Cases.save and stay
-  right since no premise moves -- for th without a top-level SORT_CONSTRAINT premise; other tags
-  are not copied back*)
+  know, add no assumption; K is copied back by Rule_Cases.save and stays right, since only
+  top-level SORT_CONSTRAINT premises can go, which K does not count; the rule-case tags too, for
+  th without such a premise; other tags are not copied back*)
 fun light_export lthy ctxt th =
   let
     val defined =

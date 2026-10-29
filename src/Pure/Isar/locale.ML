@@ -695,13 +695,15 @@ fun activate_err msg kind (name, morph) context =
     (pretty_reg (Context.proof_of context) Morphism.identity (name, morph) |>
       Pretty.string_of));
 
-fun init_element elem context =
+fun gen_init_element export elem context =
   context
   |> Context.mapping I (Thm.unchecked_hyps #> Context_Position.not_really)
-  |> Element.init elem
+  |> Element.gen_init export elem
   |> Context.mapping I (fn ctxt =>
       let val ctxt0 = Context.proof_of context
       in ctxt |> Context_Position.restore_visible ctxt0 |> Thm.restore_hyps ctxt0 end);
+
+val init_element = gen_init_element Assumption.assume_export;
 
 
 (* Potentially lazy notes *)
@@ -1025,15 +1027,22 @@ fun parent_implicit_structures thy name =
             (case structure_names (params_of thy l) of h :: _ => var h | [] => NONE));
     in (l, reading) end);
 
+(*the light locale's own assumption: pasted as by assume_export (a goal too, as in a heavy
+  locale); its premises are setclass premises, K grows by their number (head of setclass.ML)*)
+fun setclass_export is_goal asms =
+  let val (exp, term_exp) = Assumption.assume_export is_goal asms
+  in (fn th => Setclass.put (Setclass.count_of th + length asms) (exp th), term_exp) end;
+
 fun init name thy =
   let
     val context = Context.Proof (Proof_Context.init_global thy);
     val marked = Idents.get context;
+    val export = if is_light thy name then setclass_export else Assumption.assume_export;
   in
     context
     |> Context_Position.set_visible_generic false
     |> pair empty_idents
-    |> activate_all name thy init_element
+    |> activate_all name thy (gen_init_element export)
     |-> (fn marked' => Idents.put (merge_idents (marked, marked')))
     |> Context_Position.restore_visible_generic context
     |> Context.proof_of
