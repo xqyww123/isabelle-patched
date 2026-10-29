@@ -95,7 +95,8 @@ fun expand defs =
 
 val expand_term = Envir.expand_term_defs dest_Free o map (abs_def o Thm.term_of);
 
-fun def_export _ defs = (expand defs, expand_term defs);
+(*K kept: the premises are rewritten in place, any new one comes at the end*)
+fun def_export _ defs = (Setclass.keeping_count (expand defs), expand_term defs);
 
 
 (* define *)
@@ -222,7 +223,7 @@ val no_unfold_abs_def = Config.put unfold_abs_def false;
 
 in
 
-val unfold = Exported_Premises.keeping_count oo gen_unfold Raw_Simplifier.rewrite_rule;
+val unfold = Setclass.keeping_count oo gen_unfold Raw_Simplifier.rewrite_rule;
 val unfold_goals = gen_unfold Raw_Simplifier.rewrite_goals_rule;
 val unfold_tac = PRIMITIVE oo unfold_goals;
 
@@ -236,7 +237,7 @@ end
 (* fold object-level rules *)
 
 fun fold ctxt rews =
-  Exported_Premises.keeping_count
+  Setclass.keeping_count
     (Raw_Simplifier.fold_rule ctxt (map (meta_rewrite_rule ctxt) rews));
 fun fold_tac ctxt rews = Raw_Simplifier.fold_goals_tac ctxt (map (meta_rewrite_rule ctxt) rews);
 

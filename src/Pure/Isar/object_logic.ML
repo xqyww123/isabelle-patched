@@ -222,7 +222,7 @@ fun rulify_term ctxt =
 fun rulify_tac ctxt = rewrite_goal_tac ctxt (get_rulify ctxt);
 
 fun gen_rulify full ctxt =
-  Exported_Premises.keeping_count
+  Setclass.keeping_count
     (Conv.fconv_rule (Raw_Simplifier.rewrite_wrt ctxt full (get_rulify ctxt))
       #> Variable.gen_all ctxt
       #> Thm.strip_shyps

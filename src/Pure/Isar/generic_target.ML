@@ -236,27 +236,15 @@ fun store_as_is lthy ctxt phi th =
   if Light_Locale_Axiom_Facts.unchanged_by phi th then th
   else Light_Locale_Axiom_Facts.light_export lthy ctxt th;
 
-(*th' is th's copy in ctxt. For an untagged th, th' gets K = the number of premises the export
-  from lthy to ctxt pastes on Drule.dummy_thm, which is the number pasted on th when every layer
-  pastes the same number on every theorem; a tagged th gives th' itself, whose K Pure's own
-  transformations already updated*)
-fun put_premise_count lthy ctxt th th' =
-  if Exported_Premises.count_of th = 0
-  then Exported_Premises.put (Light_Locale_Axiom_Facts.export_premise_count lthy ctxt) th'
-  else th';
-
-fun light_morphism name write lthy ctxt =
+(*the standard morphism, except for theorems stored as they are; K comes from the export's
+  layers (head of setclass.ML)*)
+fun light_standard_morphism lthy ctxt =
   let val phi = Local_Theory.standard_morphism lthy ctxt in
-    Light_Locale_Axiom_Facts.replace_fact name (fn th =>
+    Light_Locale_Axiom_Facts.replace_fact "Generic_Target.light_standard" (fn th =>
       if is_exported_form lthy th then store_as_is lthy ctxt phi th
-      else write lthy ctxt th (Morphism.thm phi th)) phi
+      else Morphism.thm phi th) phi
     |> Morphism.set_context' lthy
   end;
-
-(*copies kept inside the block: no writer -- an untagged theorem gets K only on its theory copy*)
-val light_standard_morphism = light_morphism "Generic_Target.light_standard" (K (K (K I)));
-
-val light_export_morphism = light_morphism "Generic_Target.light_export" put_premise_count;
 
 fun background_abbrev (b, global_rhs) params =
   Local_Theory.background_theory_result (Sign.add_abbrev Print_Mode.internal (b, global_rhs))
@@ -407,7 +395,7 @@ fun thm_definition (name_pos, thm) lthy =
       |> Local_Defs.contract lthy defs (Thm.cprop_of thm)
       (*import assumes/defines: the kernel steps clear every tag; contract restores thm's
         proposition, so keep_count carries thm's K over*)
-      |> Exported_Premises.keep_count thm
+      |> Setclass.keep_count thm
       |> Goal.norm_result lthy
       |> name_thm2 name_pos;
 
@@ -453,7 +441,7 @@ fun notes target_notes kind facts lthy =
   end;
 
 (*light target: theorems in exported form keep their statement, the others are exported as in
-  a theory target and tagged with the number of exported premises; attributes are evaluated
+  a theory target, K written by the light locale's assumption layer; attributes are evaluated
   on the whole table once, in the block, the rest runs on the theory copies*)
 fun light_notes locale kind facts lthy =
   let
@@ -472,9 +460,7 @@ fun light_notes locale kind facts lthy =
             (*local copy: th as the attributes left it, as stock's local notes store it*)
             |>> pair (name_thm2 np th)
           end
-        else
-          let val th' = Goal.norm_result lthy1 th
-          in thm_definition (np, th') lthy1 |>> apsnd (put_premise_count lthy1 thy_ctxt th') end
+        else thm_definition (np, Goal.norm_result lthy1 th) lthy1
       end;
     val ((local_facts, global_facts), lthy') = prepare_notes export (flat groups) lthy;
     val hook_facts =
@@ -542,7 +528,7 @@ fun theory_declaration decl =
   background_declaration decl #> standard_declaration (K true) decl;
 
 fun light_theory_declaration decl =
-  gen_background_declaration light_export_morphism decl #>
+  gen_background_declaration light_standard_morphism decl #>
   light_standard_declaration (K true) decl;
 
 fun target_registration lthy {inst, mixin, export} =
