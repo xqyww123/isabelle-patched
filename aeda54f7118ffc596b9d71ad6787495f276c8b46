@@ -1,0 +1,5 @@
+tested 2026-10-29T15:26:47+08:00 in Isabelle2025-2-fast_abbrev_printing
+command: isabelle build -j 1 -o threads=8 -d contrib/isabelle-base-features/golden -d contrib/isabelle-base-features/fast_abbrev_printing/tests Pure HOL HOL-Algebra Fast_Abbrev_Printing_Fixture Fast_Abbrev_Printing_Golden Fast_Abbrev_Printing_Fixture_Check Fast_Abbrev_Printing_Golden_Check
+sessions: Pure Golden_Harness Fast_Abbrev_Printing_Fixture Fast_Abbrev_Printing_Fixture_Check Tools HOL HOL-Cardinals HOL-Library HOL-Combinatorics HOL-Computational_Algebra HOL-Algebra Fast_Abbrev_Printing_Golden Fast_Abbrev_Printing_Golden_Check
+dir: /home/qiyuan/Current/MLML/contrib/isabelle-base-features ed012215473ad411edac3ee454ff502083c56951
+dir: /home/qiyuan/Current/MLML/contrib/isabelle-base-features ed012215473ad411edac3ee454ff502083c56951
