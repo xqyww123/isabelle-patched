@@ -566,7 +566,7 @@ fun gen_export (mk_tfrees, frees) maxidx ths =
   let
     val tfrees = mk_tfrees (map Thm.full_prop_of ths);
     val idx = fold Thm.maxidx_thm ths maxidx + 1;
-  in map (Exported_Premises.keeping_count (Thm.generalize (tfrees, frees) idx)) ths end;
+  in map (Setclass.keeping_count (Thm.generalize (tfrees, frees) idx)) ths end;
 
 fun exportT inner outer = gen_export (exportT_inst inner outer, Names.empty) (maxidx_of outer);
 fun export inner outer = gen_export (export_inst inner outer) (maxidx_of outer);

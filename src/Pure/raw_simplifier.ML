@@ -1553,13 +1553,6 @@ fun fold_goals_tac ctxt defs = EVERY (map (rewrite_goals_tac ctxt) (rev_defs def
 
 local
 
-(*HHF normalisation deletes the top-level SORT_CONSTRAINT premises (sort_constraint_eq), keeps
-  the other leading premises in front and adds premises only at the end: K loses the deleted
-  ones among its leading K*)
-val keep_count_without_sort_constraints =
-  Exported_Premises.with_count (fn k => fn th => fn _ =>
-    k - length (filter Drule.is_sort_constraint (take k (Thm.prems_of th))));
-
 fun gen_norm_hhf protect ss ctxt0 th0 =
   let
     val (ctxt, th) = Thm.join_transfer_context (ctxt0, th0);
@@ -1569,7 +1562,9 @@ fun gen_norm_hhf protect ss ctxt0 th0 =
         Conv.fconv_rule (rewrite_cterm (true, false, false) (K (K NONE)) (put_simpset ss ctxt)) th;
   in
     th' |> Thm.adjust_maxidx_thm ~1 |> Variable.gen_all ctxt
-    |> keep_count_without_sort_constraints th0
+    (*deletes only top-level SORT_CONSTRAINT premises (sort_constraint_eq), which K does not
+      count, and adds premises only at the end*)
+    |> Setclass.keep_count th0
   end;
 
 val hhf_ss =

@@ -187,13 +187,13 @@ ML_file "cterm_items.ML";
 ML_file "more_pattern.ML";
 ML_file "more_unify.ML";
 ML_file "more_thm.ML";
-ML_file "exported_premises.ML";
+ML_file "setclass.ML";
 
 ML_file "facts.ML";
 ML_file "global_theory.ML";
 ML_file "pure_thy.ML";
 ML_file "drule.ML";
-ML_file "more_exported_premises.ML";
+ML_file "more_setclass.ML";
 ML_file "morphism.ML";
 ML_file "variable.ML";
 ML_file "conv.ML";

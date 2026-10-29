@@ -112,13 +112,13 @@ struct
 fun vars_of tm =
   rev (distinct (op =) (Term.fold_aterms (fn t as Var _ => cons t | _ => I) tm []));
 
-(*the variables of prem that do not occur in the exported premises of th*)
+(*the variables of prem that do not occur in the leading K premises of th*)
 fun own_vars_of th prem =
   let
-    val exported =
+    val leading =
       fold (Term.fold_aterms (fn t as Var _ => insert (op =) t | _ => I))
-        (take (Exported_Premises.count_of th) (Thm.prems_of th)) [];
-  in filter_out (member (op =) exported) (vars_of prem) end;
+        (Setclass.leading_prems th) [];
+  in filter_out (member (op =) leading) (vars_of prem) end;
 
 local
 
@@ -132,7 +132,7 @@ in
 (*a rule without own premises is keyed on its first premise, as in stock*)
 fun left_var_prem thm =
   mk_var (hd
-    (case Exported_Premises.own_prems thm of
+    (case Setclass.own_prems thm of
       prem :: _ => own_vars_of thm prem
     | [] => maps vars_of (Thm.take_prems_of 1 thm)))
   handle List.Empty => raise THM ("No variables in major premise of rule", 0, [thm]);
@@ -240,8 +240,8 @@ structure Data = Generic_Data
 (
   type T = (rules * rules) * (rules * rules) * (rules * rules) * simpset;
   val empty =
-    ((init_rules (left_var_prem o #2), init_rules (Exported_Premises.own_major_prem o #2)),
-     (init_rules (right_var_concl o #2), init_rules (Exported_Premises.own_major_prem o #2)),
+    ((init_rules (left_var_prem o #2), init_rules (Setclass.own_major_prem o #2)),
+     (init_rules (right_var_concl o #2), init_rules (Setclass.own_major_prem o #2)),
      (init_rules (left_var_concl o #2), init_rules (Thm.concl_of o #2)),
      simpset_of ((empty_simpset \<^context>
       |> Simplifier.add_proc rearrange_eqs_simproc) |> Simplifier.add_simp Drule.norm_hhf_eq));
@@ -312,10 +312,10 @@ val find_coinductP = find_rules (#2 o #3) I;
 
 end;
 
-(*the i-th chained fact (from 0) selects the rules with i exported premises*)
+(*the i-th chained fact (from 0) selects the rules with K = i*)
 fun rules_of_chained_facts find ctxt facts =
   flat (map_index (fn (i, fact) =>
-    filter (fn r => Exported_Premises.count_of r = i) (find ctxt (Thm.concl_of fact))) facts);
+    filter (fn r => Setclass.count_of r = i) (find ctxt (Thm.concl_of fact))) facts);
 
 
 
@@ -506,7 +506,8 @@ fun get_casesT ctxt ((SOME t :: _) :: _) = find_casesT ctxt (Term.fastype_of t)
 
 fun get_casesP ctxt = rules_of_chained_facts find_casesP ctxt;
 
-(*instantiations address the rule's own variables: positions of exported ones are skipped*)
+(*instantiations address the rule's own variables: positions of the leading K premises' ones
+  are skipped*)
 fun pad own (x :: xs) ts =
       if member (op =) own x then (case ts of t :: ts' => t :: pad own xs ts' | [] => [])
       else NONE :: pad own xs ts
@@ -521,7 +522,7 @@ fun cases_context_tactic simp insts opt_rule facts i : context_tactic =
         (if null insts then r
          else
            (align_left "Rule has fewer premises than arguments given"
-              (Exported_Premises.own_prems r) insts
+              (Setclass.own_prems r) insts
              |> map (fn (prem, ts) => (prem, pad (own_vars_of r prem) (vars_of prem) ts))
              |> maps (prep_inst ctxt align_left I)
              |> infer_instantiate ctxt) r)
@@ -873,7 +874,7 @@ fun get_coinductT ctxt (SOME t :: _) = find_coinductT ctxt (Term.fastype_of t)
 fun get_coinductP ctxt goal = find_coinductP ctxt (Logic.strip_assums_concl goal);
 
 fun main_prop_of th =
-  if Exported_Premises.strong_consumes th > 0 then Exported_Premises.own_major_prem th
+  if Setclass.strong_consumes th > 0 then Setclass.own_major_prem th
   else Thm.concl_of th;
 
 in

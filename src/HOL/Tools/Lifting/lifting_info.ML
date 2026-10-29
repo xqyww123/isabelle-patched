@@ -217,16 +217,15 @@ fun transform_pcr_info phi {pcrel_def, pcr_cr_eq} =
 fun transform_quotient phi {quot_thm, pcr_info} =
   {quot_thm = Morphism.thm phi quot_thm, pcr_info = Option.map (transform_pcr_info phi) pcr_info}
 
-(*refuses a quotient whose theorem has exported premises (Exported_Premises.count_of > 0), the
-  first a light locale predicate, as a setup made in the block of a light locale with assumptions
-  has outside that block; until the repair phase discharges the premise, also where the predicate
-  is a fact.  A plain error: Lifting's exceptions come after this file, and their handlers
-  re-render or swallow them.*)
+(*refuses a quotient whose theorem's first leading K premise (head of setclass.ML) is a light
+  locale predicate, as a setup made in the block of a light locale with assumptions has outside
+  that block; until the repair phase discharges the premise, also where the predicate is a fact.
+  A plain error: Lifting's exceptions come after this file, and their handlers re-render or
+  swallow them.*)
 fun check_quotient ctxt (quotient as {quot_thm, ...}: quotient) =
   (case
-    if Exported_Premises.count_of quot_thm > 0
-    then Light_Locale_Axiom_Facts.light_predicate_of ctxt (hd (Thm.prems_of quot_thm))
-    else NONE
+    get_first (Light_Locale_Axiom_Facts.light_predicate_of ctxt)
+      (take 1 (Setclass.leading_prems quot_thm))
   of
     NONE => quotient
   | SOME locale =>

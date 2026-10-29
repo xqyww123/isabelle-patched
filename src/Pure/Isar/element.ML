@@ -53,6 +53,7 @@ sig
   val satisfy_morphism: witness list -> morphism
   val eq_term_morphism: Proof.context -> term list -> morphism option
   val eq_morphism: Proof.context -> thm list -> morphism option
+  val gen_init: Assumption.export -> context_i -> Context.generic -> Context.generic
   val init: context_i -> Context.generic -> Context.generic
   val activate_i: context_i -> Proof.context -> context_i * Proof.context
   val activate: (typ, term, Facts.ref) ctxt -> Proof.context -> context_i * Proof.context
@@ -366,7 +367,7 @@ fun instantiate_normalize_morphism insts =
   Morphism.instantiate_frees_morphism insts $>
   Morphism.term_morphism "beta_norm" Envir.beta_norm $>
   Morphism.thm_morphism "beta_conversion"
-    (Exported_Premises.keeping_count (Conv.fconv_rule (Thm.beta_conversion true)));
+    (Setclass.keeping_count (Conv.fconv_rule (Thm.beta_conversion true)));
 
 
 (* satisfy hypotheses *)
@@ -402,7 +403,7 @@ fun satisfy_thm witns thm =
     (case find_witness witns (Thm.term_of hyp) of
       NONE => I
     | SOME w => Thm.implies_intr hyp #> compose_witness w))
-  |> Exported_Premises.keep_count thm;
+  |> Setclass.keep_count thm;
 
 val satisfy_morphism = Morphism.thm_morphism "Element.satisfy" o satisfy_thm;
 
@@ -454,7 +455,7 @@ fun eq_morphism _ [] = NONE
            {binding = [],
             typ = [],
             term = [rewrite_term o Morphism.the_theory],
-            fact = [map o Exported_Premises.keeping_count o rewrite o Morphism.the_theory]};
+            fact = [map o Setclass.keeping_count o rewrite o Morphism.the_theory]};
       in SOME phi end;
 
 
@@ -463,16 +464,17 @@ fun eq_morphism _ [] = NONE
 
 (* init *)
 
-fun init (Fixes fixes) = Context.map_proof (Proof_Context.add_fixes fixes #> #2)
-  | init (Constrains _) = I
-  | init (Assumes asms) = Context.map_proof (fn ctxt =>
+(*export: the export rule of the Assumes layer*)
+fun gen_init _ (Fixes fixes) = Context.map_proof (Proof_Context.add_fixes fixes #> #2)
+  | gen_init _ (Constrains _) = I
+  | gen_init export (Assumes asms) = Context.map_proof (fn ctxt =>
       let
         val asms' = Attrib.map_specs (map (Attrib.attribute ctxt)) asms;
         val (_, ctxt') = ctxt
           |> fold Proof_Context.augment (maps (map #1 o #2) asms')
-          |> Proof_Context.add_assms Assumption.assume_export asms';
+          |> Proof_Context.add_assms export asms';
       in ctxt' end)
-  | init (Defines defs) = Context.map_proof (fn ctxt =>
+  | gen_init _ (Defines defs) = Context.map_proof (fn ctxt =>
       let
         val defs' = Attrib.map_specs (map (Attrib.attribute ctxt)) defs;
         val asms = defs' |> map (fn (b, (t, ps)) =>
@@ -482,8 +484,10 @@ fun init (Fixes fixes) = Context.map_proof (Proof_Context.add_fixes fixes #> #2)
           |> fold Proof_Context.augment (map #1 asms)
           |> Proof_Context.add_assms Local_Defs.def_export (map #2 asms);
       in ctxt' end)
-  | init (Notes (kind, facts)) = Attrib.generic_notes kind facts #> #2
-  | init (Lazy_Notes (kind, ths)) = Attrib.lazy_notes kind ths;
+  | gen_init _ (Notes (kind, facts)) = Attrib.generic_notes kind facts #> #2
+  | gen_init _ (Lazy_Notes (kind, ths)) = Attrib.lazy_notes kind ths;
+
+val init = gen_init Assumption.assume_export;
 
 
 (* activate *)

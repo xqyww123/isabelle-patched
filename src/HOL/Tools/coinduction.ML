@@ -55,12 +55,12 @@ fun coinduction_context_tactic raw_vars opt_raw_thms prems =
             Pattern.matches thy (Thm.concl_of thm, concl)) raw_thms of
           SOME thm => thm
         | NONE => error "No matching coinduction rule found")
-      val skip = Integer.max 1 (Exported_Premises.strong_consumes raw_thm) - 1;
+      val skip = Integer.max 1 (Setclass.strong_consumes raw_thm) - 1;
       val cases = Rule_Cases.get raw_thm |> fst;
-      val k = Exported_Premises.count_of raw_thm;
+      val k = Setclass.count_of raw_thm;
     in
-      (*the first k chained facts discharge the exported premises; if they cannot, the method fails*)
-      (case try (Exported_Premises.discharge prems) raw_thm of
+      (*the first k chained facts discharge the leading K premises; if they cannot, the method fails*)
+      (case try (Setclass.discharge prems) raw_thm of
         NONE => Seq.empty
       | SOME thm0 =>
         ((Object_Logic.rulify_tac ctxt THEN'

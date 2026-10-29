@@ -32,11 +32,9 @@ struct
 type export = bool -> cterm list -> (thm -> thm) * (term -> term);
 
 val term_export = fold_rev (fn (e: export, As) => #2 (e false As));
-(*one shift over all layers: an intermediate count of 0 would lose K for good; the layers'
-  preconditions: file head of exported_premises.ML*)
-fun thm_export is_goal exps th =
-  fold_rev (fn (e: export, As) => #1 (e is_goal As)) exps th
-  |> Exported_Premises.shift_count th;
+(*K layer by layer: a layer writes K itself or goes through restore_count (head of setclass.ML)*)
+fun thm_export is_goal =
+  fold_rev (fn (e: export, As) => fn th => Setclass.restore_count th (#1 (e is_goal As) th));
 
 
 
