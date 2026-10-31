@@ -385,6 +385,31 @@ lemma gfp_while_lattice:
   shows "gfp f = while (\<lambda>A. f A \<noteq> A) f top"
 unfolding while_def using assms by (rule gfp_the_while_option_lattice)
 
+subsection \<open>\<open>T_while_option\<close>\<close>
+
+text \<open>Step counting for while-loops: add a counter.\<close>
+
+definition T_while_option2
+  :: "('a \<Rightarrow> bool) \<Rightarrow> ('a \<Rightarrow> 'a) \<Rightarrow> ('a \<Rightarrow> nat) \<Rightarrow> ('a \<Rightarrow> nat) \<Rightarrow> 'a \<times> nat \<Rightarrow> ('a \<times> nat) option" where
+"T_while_option2 b f T_b T_f = while_option (\<lambda>(x,n). b x) (\<lambda>(x,n). (f x, n + T_b x + T_f x))"
+
+definition T_while_option :: "('a \<Rightarrow> bool) \<Rightarrow> ('a \<Rightarrow> 'a) \<Rightarrow> ('a \<Rightarrow> nat) \<Rightarrow> ('a \<Rightarrow> nat) \<Rightarrow> 'a \<Rightarrow> nat" where
+"T_while_option b f T_b T_f x = snd (the (T_while_option2 b f T_b T_f (x,0)))"
+
+lemma T_while_option_eq_T_while_option2:
+  "while_option b f s = map_option fst (T_while_option2 b f tb tf (s,n0))"
+unfolding T_while_option2_def
+  using while_option_commute[of "\<lambda>(s,_). b s" b fst "(\<lambda>(s, n). (f s, n + tb s + tf s))" f "(s,n0)"]
+  by (simp add: split_def)
+
+lemma T_while_option_if_T_while_option2:
+  "T_while_option2 b f tb tf (s,n0) = Some (t,n) \<Longrightarrow> while_option b f s = Some t"
+by(simp add: T_while_option_eq_T_while_option2[of b f s tb tf n0])
+
+lemma T_while_option2_if_T_while_option:
+  "while_option b f s = Some t \<Longrightarrow> \<exists>n. T_while_option2 b f tb tf (s,n0) = Some (t,n)"
+by(simp add: T_while_option_eq_T_while_option2[of b f s tb tf n0])
+
 
 subsection \<open>\<open>while_Some\<close> and \<open>while_saturate\<close>\<close>
 
@@ -413,6 +438,9 @@ lemma while_saturate_code[code]: "while_saturate f M =
 unfolding while_saturate_def Let_def while_Some_def
 by (auto intro!: while_option_cong split: if_splits)
 
+lemma while_saturate_saturated: "while_saturate F S0 = Some S \<Longrightarrow> F S \<subseteq> S"
+by (metis (mono_tags, lifting) while_option_stop while_saturate_def)
+
 text \<open>Termination:\<close>
 
 lemma while_option_sat_finite_subset_Some: fixes C :: "'a set"
@@ -437,6 +465,28 @@ corollary while_saturate_finite_subset_Some:
   shows "\<exists>S. while_saturate f M = Some S"
 unfolding while_saturate_def
 using while_option_sat_finite_subset_Some assms by blast 
+
+text \<open>Hoare-like proof rules, for the whole set and for all elements of the set:\<close>
+
+theorem while_saturate_rule:
+  assumes "\<And>S. P S \<Longrightarrow> P (S \<union> F S)"
+     and "while_saturate F S = Some T"
+     and "P S"
+   shows "P T"
+using assms[unfolded while_saturate_def] while_option_rule[of P]
+by (metis (lifting))
+
+theorem while_saturate_rule1:
+  assumes "\<And>S y. (\<And>x. x \<in> S \<Longrightarrow> P x) \<Longrightarrow> y \<in> F S \<Longrightarrow> P y"
+     and "while_saturate F S = Some T"
+     and "\<And>x. x \<in> S \<Longrightarrow> P x"
+     and "y \<in> T"
+   shows "P y"
+using while_saturate_rule[OF _ assms(2), of \<open>\<lambda>S. \<forall>s\<in>S. P s\<close>]
+by (metis Un_iff assms(1,3,4))
+
+lemma while_saturate_incr: "while_saturate F S0 = Some S \<Longrightarrow> S0 \<subseteq> S"
+by (simp add: le_supI1 while_saturate_rule)
 
 text \<open>Correctness: finds the least saturated/closed set above \<open>M\<close>\<close>
 

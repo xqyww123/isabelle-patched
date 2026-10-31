@@ -7,6 +7,7 @@ tooltips, hyperlinks etc.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -27,15 +28,17 @@ import org.gjt.sp.jedit.textarea.{TextAreaExtension, TextAreaPainter, TextArea, 
 
 
 class Rich_Text_Area(
-  view: View,
-  text_area: TextArea,
+  editor_context: JEdit_Editor.Static_Context,
   get_rendering: () => JEdit_Rendering,
-  close_action: () => Unit,
-  get_search_pattern: () => Option[Regex],
-  caret_update: () => Unit,
-  caret_visible: Boolean,
-  enable_hovering: Boolean
+  close_action: () => Unit = () => (),
+  get_search_pattern: () => Option[Regex] = () => None,
+  caret_update: () => Unit = () => (),
+  caret_visible: Boolean = false,
+  enable_hovering: Boolean = false
 ) {
+  private val view = editor_context.view
+  private val view_editor_context: JEdit_Editor.Dynamic_Context = JEdit_Editor.Context(view)
+  private val text_area = editor_context.text_area
   private val buffer = text_area.getBuffer
 
 
@@ -59,7 +62,7 @@ class Rich_Text_Area(
   /* original painters */
 
   private def pick_extension(name: String): TextAreaExtension = {
-    text_area.getPainter.getExtensions.iterator.filter(x => x.getClass.getName == name).toList
+    text_area.getPainter.getExtensions.iterator.filter(x => x.class_name == name).toList
     match {
       case List(x) => x
       case _ => error("Expected exactly one " + name)
@@ -74,6 +77,15 @@ class Rich_Text_Area(
 
   @volatile private var caret_focus_modifier = false
 
+  def caret_focus_reset(): Unit =
+    if (caret_focus_modifier) {
+      caret_focus_modifier = false
+      caret_update()
+    }
+
+  def caret_focus_down(e: MouseEvent): Unit =
+    if (!e.isConsumed() && e.getClickCount > 0) caret_focus_reset()
+
   def caret_focus_range: Text.Range =
     if (caret_focus_modifier) Text.Range.full
     else JEdit_Lib.visible_range(text_area) getOrElse Text.Range.offside
@@ -81,17 +93,13 @@ class Rich_Text_Area(
   private val key_listener =
     JEdit_Lib.key_listener(
       key_pressed = { (evt: KeyEvent) =>
-        val mod = PIDE.options.string("jedit_focus_modifier")
+        val mods = Word.explode(PIDE.options.string("jedit_focus_modifier"))
         val old = caret_focus_modifier
-        caret_focus_modifier = (mod.nonEmpty && mod == JEdit_Lib.modifier_string(evt))
+        caret_focus_modifier = mods.contains(JEdit_Lib.modifier_string(evt))
         if (caret_focus_modifier != old) caret_update()
       },
-      key_released = { _ =>
-        if (caret_focus_modifier) {
-          caret_focus_modifier = false
-          caret_update()
-        }
-      })
+      key_released = { _ => caret_focus_reset() }
+    )
 
 
   /* common painter state */
@@ -117,7 +125,7 @@ class Rich_Text_Area(
       painter_gfx_range = JEdit_Lib.gfx_range(text_area)
       caret_focus =
         if (caret_enabled && !painter_rendering.snapshot.is_outdated) {
-          painter_rendering.caret_focus(JEdit_Lib.caret_range(text_area), caret_focus_range)
+          painter_rendering.caret_focus(editor_context.caret_range, caret_focus_range)
         }
         else Rendering.Focus.empty
     }
@@ -202,7 +210,7 @@ class Rich_Text_Area(
       ignore_control = JEdit_Options.auto_hovering())
 
   private val hyperlink_area =
-    new Active_Area[PIDE.editor.Hyperlink](
+    new Active_Area[JEdit_Editor.Hyperlink](
       _.hyperlink, require_control = true, cursor = Cursor.HAND_CURSOR)
 
   private val active_area =
@@ -222,29 +230,25 @@ class Rich_Text_Area(
   }
 
   private val mouse_listener = new MouseAdapter {
+    override def mouseDragged(e: MouseEvent): Unit =
+      robust_body(()) { caret_focus_down(e) }
     override def mousePressed(e: MouseEvent): Unit = {
       robust_body(()) {
+        caret_focus_down(e)
         if (!e.isConsumed() && e.getClickCount == 1) {
           hyperlink_area.info match {
-            case Some(Text.Info(range, link)) =>
-              if (!link.external) {
-                try {
-                  text_area.moveCaretPosition(range.start)
-                  PIDE.plugin.navigator.record(Isabelle_Navigator.Pos(buffer, range.start))
-                }
-                catch {
-                  case _: ArrayIndexOutOfBoundsException =>
-                  case _: IllegalArgumentException =>
-                }
-                text_area.requestFocus()
-              }
-              link.follow(view)
+            case Some(Text.Info(_, link)) if link.external =>
+              link.follow(editor_context)
+              e.consume()
+            case Some(info) =>
+              text_area.requestFocus()
+              new Selection_Popup.Hyperlink(editor_context, info).select()
               e.consume()
             case None =>
           }
           active_area.text_info match {
             case Some((text, Text.Info(_, markup))) =>
-              Active.action(view, text, markup)
+              Active.action(view_editor_context, text, markup)
               close_action()
               e.consume()
             case None =>
@@ -277,7 +281,7 @@ class Rich_Text_Area(
       robust_body(()) {
         val x = evt.getX
         val y = evt.getY
-        val control = JEdit_Lib.command_modifier(evt)
+        val control = GUI.command_modifier(evt, only = true)
 
         if ((control || enable_hovering) && !buffer.isLoading) {
           JEdit_Lib.buffer_lock(buffer) {
@@ -291,7 +295,7 @@ class Rich_Text_Area(
                   }
                   else area.reset()
                 }
-                if (JEdit_Lib.alt_modifier(evt)) {
+                if (GUI.alt_modifier(evt)) {
                   highlight_area.info.map(_.range) match {
                     case Some(range) =>
                       text_area.requestFocus()
@@ -315,13 +319,15 @@ class Rich_Text_Area(
                   JEdit_Lib.pixel_range(text_area, x, y) match {
                     case None =>
                     case Some(range) =>
-                      rendering.tooltip(range, control) match {
+                      rendering.tooltip(range, control = control) match {
                         case None =>
                         case Some(tip) =>
                           val painter = text_area.getPainter
                           val loc = new Point(x, y + painter.getLineHeight / 2)
                           val results = snapshot.command_results(tip.range)
-                          Pretty_Tooltip(view, painter, loc, rendering, results, tip.info)
+                          val unicode_symbols = Isabelle_Encoding.is_active(buffer = buffer)
+                          Pretty_Tooltip(view, painter, loc, rendering, results, tip.info,
+                            focus = true, propagate_keys = true, unicode_symbols = unicode_symbols)
                       }
                   }
                 }
@@ -427,7 +433,7 @@ class Rich_Text_Area(
           c <- PIDE.session.debugger.focus().iterator
           pos <- c.debug_position.iterator
         } yield pos).toList
-      if (debug_positions.exists(PIDE.editor.is_hyperlink_position(rendering.snapshot, offset, _)))
+      if (debug_positions.exists(JEdit_Editor.is_hyperlink_position(rendering.snapshot, offset, _)))
         rendering.caret_debugger_color
       else rendering.caret_invisible_color
     }
@@ -442,7 +448,7 @@ class Rich_Text_Area(
           val field = classOf[JEditChunk].getDeclaredField("lastSubstFont")
           field.setAccessible(true)
           field.set(null, null)
-          val res = Option(JEditChunk.getSubstFont(codepoint))
+          val res = proper_value(JEditChunk.getSubstFont(codepoint))
           cache += (codepoint -> res)
           res
         })
@@ -575,7 +581,7 @@ class Rich_Text_Area(
               try {
                 val line_start = buffer.getLineStartOffset(line)
                 val caret_range =
-                  if (caret_enabled) JEdit_Lib.caret_range(text_area)
+                  if (caret_enabled) editor_context.caret_range
                   else Text.Range.offside
                 gfx.clipRect(x0, y + line_height * i, Int.MaxValue, line_height)
                 val w =

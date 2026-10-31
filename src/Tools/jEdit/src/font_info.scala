@@ -6,6 +6,7 @@ Font information, derived from main jEdit view font.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -55,7 +56,7 @@ object Font_Info {
 
     // owned by GUI thread
     private var steps = 0
-    private val delay = Delay.last(PIDE.session.input_delay, gui = true) {
+    private val delay = GUI.Delay.last(PIDE.session.input_delay) {
       change_size { size =>
         var i = size.round
         while (steps != 0 && i > 0) {

@@ -6,6 +6,7 @@ Support for sending text mails via SMTP.
 
 package isabelle
 
+import scala.language.unsafeNulls
 
 import java.util.{Properties => JProperties}
 import jakarta.mail.internet.{InternetAddress, MimeMessage}
@@ -77,7 +78,7 @@ object Mail {
         transport.close()
       }
       catch {
-        case exn: Throwable => error("Could not connect to SMTP server: " + exn.getMessage)
+        case exn: Throwable => error("Could not connect to SMTP server: " + Exn.message(exn))
       }
     }
 
@@ -99,7 +100,7 @@ object Mail {
       }
 
       try { JTransport.send(message) }
-      catch { case exn: Throwable => error("Sending mail failed: " + exn.getMessage) }
+      catch { case exn: Throwable => error("Sending mail failed: " + Exn.message(exn)) }
     }
   }
 }

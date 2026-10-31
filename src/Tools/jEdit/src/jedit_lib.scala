@@ -6,11 +6,14 @@ Misc library functions for jEdit.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
 import java.io.{File => JFile}
-import java.awt.{Component, Container, Toolkit}
+import java.util.Locale
+import java.text.{CharacterIterator, BreakIterator}
+import java.awt.{Component, Container}
 import java.awt.event.{InputEvent, KeyEvent, KeyListener}
 import java.awt.font.FontRenderContext
 import javax.swing.{ImageIcon, JScrollBar, JWindow}
@@ -21,9 +24,9 @@ import scala.jdk.CollectionConverters._
 import scala.annotation.tailrec
 
 import org.gjt.sp.jedit.{jEdit, Buffer, View, GUIUtilities, Debug, EditPane}
-import org.gjt.sp.jedit.io.{FileVFS, VFSManager}
+import org.gjt.sp.jedit.io.{VFSFile, FileVFS, VFSManager}
 import org.gjt.sp.jedit.gui.{KeyEventWorkaround, KeyEventTranslator}
-import org.gjt.sp.jedit.buffer.{BufferListener, BufferAdapter, JEditBuffer, LineManager}
+import org.gjt.sp.jedit.buffer.{BufferListener, BufferAdapter, JEditBuffer, LineManager, UndoManager}
 import org.gjt.sp.jedit.textarea.{JEditTextArea, TextArea, TextAreaPainter, Selection, AntiAlias}
 
 import com.formdev.flatlaf.extras.FlatSVGIcon
@@ -33,7 +36,7 @@ object JEdit_Lib {
   /* jEdit directories */
 
   def directories: List[JFile] =
-    (Option(jEdit.getSettingsDirectory).toList ::: List(jEdit.getJEditHome)).map(new JFile(_))
+    (proper_value(jEdit.getSettingsDirectory).toList ::: List(jEdit.getJEditHome)).map(new JFile(_))
 
 
   /* window geometry measurement */
@@ -64,13 +67,21 @@ object JEdit_Lib {
   }
 
 
-  /* plain files */
+  /* virtual file-systems */
 
-  def is_file(name: String): Boolean =
-    name != null && name.nonEmpty && VFSManager.getVFSForPath(name).isInstanceOf[FileVFS]
+  def get_local_file(name: String): Option[JFile] =
+    if (name != null && name.nonEmpty && VFSManager.getVFSForPath(name).isInstanceOf[FileVFS]) {
+      Some(new JFile(name))
+    }
+    else None
 
-  def check_file(name: String): Option[JFile] =
-    if (is_file(name)) Some(new JFile(name)) else None
+  def is_virtual_dir(view: View, name: String): Boolean =
+    try {
+      val vfs = VFSManager.getVFSForPath(name)
+      val vfs_file = vfs._getFile((), name, view)
+      vfs_file != null && vfs_file.getType == VFSFile.DIRECTORY
+    }
+    catch { case ERROR(_) => false }
 
 
   /* buffers */
@@ -93,9 +104,11 @@ object JEdit_Lib {
   def buffer_line_manager(buffer: JEditBuffer): LineManager =
     Untyped.get[LineManager](buffer, "lineMgr")
 
-  def buffer_name(buffer: Buffer): String = buffer.getSymlinkPath
-
-  def buffer_file(buffer: Buffer): Option[JFile] = check_file(buffer_name(buffer))
+  def buffer_name(buffer: JEditBuffer): String =
+    buffer match {
+      case buf: Buffer => buf.getSymlinkPath
+      case _ => ""
+    }
 
 
   /* main jEdit components */
@@ -112,16 +125,26 @@ object JEdit_Lib {
   def jedit_views(): Iterator[View] =
     jEdit.getViewManager().getViews().asScala.iterator
 
-  def jedit_view(view: View = null): View =
-    if (view == null) jEdit.getActiveView else view
+  def jedit_view(view: Option[View] = None): Option[View] =
+    proper_value(view getOrElse jEdit.getActiveView)
 
   def jedit_edit_panes(view: View): Iterator[EditPane] =
     if (view == null) Iterator.empty
-    else view.getEditPanes().iterator.filter(_ != null)
+    else {
+      for {
+        edit_pane <- view.getEditPanes().iterator
+        if edit_pane != null && edit_pane.getTextArea != null
+      } yield edit_pane
+    }
+
+  def jedit_edit_panes(): Iterator[EditPane] =
+    jedit_views().flatMap(jedit_edit_panes)
+
+  def jedit_edit_panes(buffer: JEditBuffer): Iterator[EditPane] =
+    jedit_edit_panes().filter(_.getBuffer == buffer)
 
   def jedit_text_areas(view: View): Iterator[JEditTextArea] =
-    if (view == null) Iterator.empty
-    else view.getEditPanes().iterator.filter(_ != null).map(_.getTextArea).filter(_ != null)
+    jedit_edit_panes(view).map(_.getTextArea)
 
   def jedit_text_areas(): Iterator[JEditTextArea] =
     jedit_views().flatMap(jedit_text_areas)
@@ -195,11 +218,29 @@ object JEdit_Lib {
     }
   }
 
+  def undo_manager(buffer: JEditBuffer): UndoManager =
+    Untyped.class_field(classOf[JEditBuffer], "undoMgr").get(buffer).asInstanceOf[UndoManager]
+
+  def char_iterator(buffer: JEditBuffer): CharacterIterator =
+    new TextArea.LineCharacterBreaker.CharIterator(buffer.getSegment(0, buffer.getLength))
+
+  def grapheme_iterator(
+    buffer: JEditBuffer,
+    locale: Locale = Library.locale_root
+  ): BreakIterator = {
+    val it = BreakIterator.getCharacterInstance(locale)
+    assert(it.class_name.containsSlice("GraphemeBreakIterator"),
+      "Bad character break iterator instance: " + it.class_name)
+
+    it.setText(char_iterator(buffer))
+    it
+  }
+
 
   /* point range */
 
   def point_range(buffer: JEditBuffer, offset: Text.Offset): Text.Range =
-    if (offset < 0) Text.Range.offside
+    if (buffer == null || offset < 0) Text.Range.offside
     else
       buffer_lock(buffer) {
         def text(i: Text.Offset): Char = buffer.getText(i, 1).charAt(0)
@@ -224,8 +265,15 @@ object JEdit_Lib {
   def line_range(buffer: JEditBuffer, line: Int): Text.Range =
     Text.Range(buffer.getLineStartOffset(line), buffer.getLineEndOffset(line) min buffer.getLength)
 
-  def caret_range(text_area: TextArea): Text.Range =
-    point_range(text_area.getBuffer, text_area.getCaretPosition)
+  def trim_line_range(buffer: JEditBuffer, line: Int): Text.Range = {
+    val range = line_range(buffer, line)
+    get_text(buffer, range) match {
+      case None => range
+      case Some(text) =>
+        val n = Library.trim_line(text).length
+        Text.Range(range.start, range.start + n)
+    }
+  }
 
   def selection_ranges(text_area: TextArea): List[Text.Range] = {
     val buffer = text_area.getBuffer
@@ -238,9 +286,13 @@ object JEdit_Lib {
               r = Text.Range(rect.getStart(buffer, l), rect.getEnd(buffer, l))
               if !r.is_singularity
             } yield r)
-        case sel: Selection => List(Text.Range(sel.getStart, sel.getEnd))
+        case sel: Selection =>
+          List(Text.Range(sel.getStart, sel.getEnd)).filterNot(_.is_singularity)
       })
   }
+
+  def selection_range(text_area: TextArea, offset: Text.Offset): Option[Text.Range] =
+    selection_ranges(text_area).find(_.touches(offset))
 
   def visible_range(text_area: TextArea): Option[Text.Range] = {
     val buffer = text_area.getBuffer
@@ -399,12 +451,16 @@ object JEdit_Lib {
     Text.Edit.make(ins, edit_range.start, edit_text)
   }
 
-  def buffer_listener(handle: (Buffer, Text.Edit) => Unit): BufferListener =
+  def buffer_listener(
+    handle: (Buffer, Text.Edit) => Unit,
+    loaded: Buffer => Unit = _ => ()
+  ): BufferListener =
     new BufferAdapter {
       override def contentInserted(buf: JEditBuffer, line: Int, i: Int, lines: Int, n: Int): Unit =
         handle(buf.asInstanceOf[Buffer], buffer_edit(true, buf, i, n))
       override def preContentRemoved(buf: JEditBuffer, line: Int, i: Int, lines: Int, n: Int): Unit =
         handle(buf.asInstanceOf[Buffer], buffer_edit(false, buf, i, n))
+      override def bufferLoaded(buf: JEditBuffer): Unit = loaded(buf.asInstanceOf[Buffer])
     }
 
 
@@ -441,22 +497,13 @@ object JEdit_Lib {
   }
 
   def special_key(evt: KeyEvent): Boolean = {
-    // cf. 5.2.0/jEdit/org/gjt/sp/jedit/gui/KeyEventWorkaround.java
+    // cf. jEdit/org/gjt/sp/jedit/gui/KeyEventWorkaround.java
     val mod = evt.getModifiersEx
     (mod & InputEvent.CTRL_DOWN_MASK) != 0 && (mod & InputEvent.ALT_DOWN_MASK) == 0 ||
     (mod & InputEvent.CTRL_DOWN_MASK) == 0 && (mod & InputEvent.ALT_DOWN_MASK) != 0 &&
       !Debug.ALT_KEY_PRESSED_DISABLED ||
     (mod & InputEvent.META_DOWN_MASK) != 0
   }
-
-  def command_modifier(evt: InputEvent): Boolean =
-    (evt.getModifiersEx & Toolkit.getDefaultToolkit.getMenuShortcutKeyMaskEx) != 0
-
-  def shift_modifier(evt: InputEvent): Boolean =
-    (evt.getModifiersEx & InputEvent.SHIFT_DOWN_MASK) != 0
-
-  def alt_modifier(evt: InputEvent): Boolean =
-    (evt.getModifiersEx & InputEvent.ALT_DOWN_MASK) != 0
 
   def modifier_string(evt: InputEvent): String =
     KeyEventTranslator.getModifierString(evt) match {

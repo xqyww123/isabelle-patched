@@ -12,39 +12,48 @@ import scala.annotation.tailrec
 
 
 object Consumer_Thread {
-  def fork_bulk[A](name: String = "", daemon: Boolean = false)(
-      bulk: A => Boolean,
-      consume: List[A] => (List[Exn.Result[Unit]], Boolean),
-      timeout: Option[Time] = None,
-      limit: Int = 0,
-      finish: () => Unit = () => ()): Consumer_Thread[A] =
-    new Consumer_Thread[A](name, daemon, bulk, consume, timeout, limit, finish)
+  def fork_bulk[A](
+    name: String,
+    consume: List[A] => (List[Exn.Result[Unit]], Boolean),
+    bulk: A => Boolean = (_: A) => true,
+    daemon: Boolean = false,
+    timeout: Option[Time] = None,
+    limit: Int = 0,
+    finish: () => Unit = () => (),
+    log: Logger = Logger.console
+  ): Consumer_Thread[A] = {
+    new Consumer_Thread[A](name, consume, bulk, daemon, timeout, limit, finish, log)
+  }
 
-  def fork[A](name: String = "", daemon: Boolean = false)(
-      consume: A => Boolean,
-      limit: Int = 0,
-      finish: () => Unit = () => ()
-    ): Consumer_Thread[A] = {
-    def consume_single(args: List[A]): (List[Exn.Result[Unit]], Boolean) = {
-      assert(args.length == 1)
-      Exn.capture { consume(args.head) } match {
-        case Exn.Res(cont) => (List(Exn.Res(())), cont)
-        case Exn.Exn(exn) => (List(Exn.Exn(exn)), true)
+  def fork[A](
+    name: String,
+    consume: A => Boolean,
+    daemon: Boolean = false,
+    limit: Int = 0,
+    finish: () => Unit = () => (),
+    log: Logger = Logger.console
+  ): Consumer_Thread[A] = {
+    fork_bulk(name, bulk = _ => false, daemon = daemon, limit = limit, finish = finish, log = log,
+      consume = { (args: List[A]) =>
+        assert(args.length == 1)
+        Exn.capture { consume(args.head) } match {
+          case Exn.Res(cont) => (List(Exn.Res(())), cont)
+          case Exn.Exn(exn) => (List(Exn.Exn(exn)), true)
+        }
       }
-    }
-
-    fork_bulk(name = name, daemon = daemon)(
-      _ => false, consume_single, limit = limit, finish = finish)
+    )
   }
 }
 
 final class Consumer_Thread[A] private(
-  name: String, daemon: Boolean,
-  bulk: A => Boolean,
+  name: String,
   consume: List[A] => (List[Exn.Result[Unit]], Boolean),
-  timeout: Option[Time] = None,
+  bulk: A => Boolean,
+  daemon: Boolean,
+  timeout: Option[Time],
   limit: Int,
-  finish: () => Unit
+  finish: () => Unit,
+  log: Logger
 ) {
   /* thread */
 
@@ -52,15 +61,15 @@ final class Consumer_Thread[A] private(
   private val mailbox = Mailbox[Option[Request]](limit = limit)
 
   private val thread = Isabelle_Thread.fork(name = name, daemon = daemon) { main_loop(Nil) }
+  private def thread_name: String = proper_string(thread.getName).getOrElse("")
   def is_active(): Boolean = active && thread.isAlive
-  def check_thread(): Boolean = Thread.currentThread == thread
+  def check_thread(): Boolean = Isabelle_Thread.current == thread
 
-  private def failure(exn: Throwable): Unit =
-    Output.error_message(
-      "Consumer thread failure: " + quote(thread.getName) + "\n" + Exn.print(exn))
+  private def failure_prefix: String =
+    "Failure of consumer thread " + quote(thread_name)
 
   private def robust_finish(): Unit =
-    try { finish() } catch { case exn: Throwable => failure(exn) }
+    Exn.capture_trace(log.error_message, prefix = failure_prefix) { finish() }
 
 
   /* requests */
@@ -79,7 +88,7 @@ final class Consumer_Thread[A] private(
   private def request(req: Request): Unit = {
     synchronized {
       if (is_active()) mailbox.send(Some(req))
-      else error("Consumer thread not active: " + quote(thread.getName))
+      else error("Consumer thread not active: " + quote(thread_name))
     }
     req.await()
   }
@@ -98,7 +107,8 @@ final class Consumer_Thread[A] private(
       (req.ack, res) match {
         case (Some(a), _) => a.change(_ => Some(res))
         case (None, Exn.Res(_)) =>
-        case (None, Exn.Exn(exn)) => failure(exn)
+        case (None, Exn.Exn(exn)) =>
+          for (msg <- Exn.print_failure(exn, prefix = failure_prefix)) log.error_message(msg)
       }
     }
 

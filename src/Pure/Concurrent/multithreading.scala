@@ -41,7 +41,7 @@ object Multithreading {
       }
 
       def logical_cores(): Int =
-        if (ssh.is_local) Runtime.getRuntime.availableProcessors()
+        if (ssh.is_local) Runtime.getRuntime.nn.availableProcessors.nn
         else {
           Library.trim_line(ssh.execute("nproc").check.out) match {
             case Value.Nat(n) => n
@@ -56,7 +56,7 @@ object Multithreading {
   /* max_threads */
 
   def max_threads(
-    value: Int = Value.Int.unapply(System.getProperty("isabelle.threads", "0")) getOrElse 0,
+    value: Int = Isabelle_System.get_property_int("isabelle.threads"),
     default: => Int = num_processors()
   ): Int = {
     if (value > 0) value else (default max 1) min 8

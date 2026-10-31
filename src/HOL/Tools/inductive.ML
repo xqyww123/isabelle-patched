@@ -35,15 +35,15 @@ sig
   val mk_cases: Proof.context -> term -> thm
   val inductive_forall_def: thm
   val rulify: Proof.context -> thm -> thm
-  val inductive_cases: (Attrib.binding * term list) list -> bool -> local_theory ->
+  val inductive_cases: {verbose: bool} -> (Attrib.binding * term list) list -> local_theory ->
     (string * thm list) list * local_theory
-  val inductive_cases_cmd: (Attrib.binding * string list) list -> bool -> local_theory ->
+  val inductive_cases_cmd: {verbose: bool} -> (Attrib.binding * string list) list -> local_theory ->
     (string * thm list) list * local_theory
   val ind_cases_rules: Proof.context ->
     string list -> (binding * string option * mixfix) list -> thm list
-  val inductive_simps: (Attrib.binding * term list) list -> bool -> local_theory ->
+  val inductive_simps: {verbose: bool} -> (Attrib.binding * term list) list -> local_theory ->
     (string * thm list) list * local_theory
-  val inductive_simps_cmd: (Attrib.binding * string list) list -> bool -> local_theory ->
+  val inductive_simps_cmd: {verbose: bool} -> (Attrib.binding * string list) list -> local_theory ->
     (string * thm list) list * local_theory
   type flags =
     {quiet_mode: bool, verbose: bool, alt_name: binding, coind: bool,
@@ -238,8 +238,8 @@ fun print_inductives verbose ctxt =
     [Pretty.block
       (Pretty.breaks
         (Pretty.str "(co)inductives:" ::
-          map (Pretty.mark_str o #1)
-            (Name_Space.markup_entries verbose ctxt space consts))),
+          map (Pretty.marks_str o #1)
+            (Name_Space.markups_entries verbose ctxt space consts))),
      Pretty.big_list "monotonicity rules:" (map (Thm.pretty_thm_item ctxt) monos)]
   end |> Pretty.chunks |> Pretty.writeln;
 
@@ -581,7 +581,7 @@ fun simp_case_tac ctxt i =
 
 in
 
-fun mk_cases_tac ctxt = ALLGOALS (simp_case_tac ctxt) THEN prune_params_tac ctxt;
+fun mk_cases_tac ctxt = ALLGOALS (simp_case_tac ctxt) THEN Simplifier.prune_params_tac ctxt;
 
 fun mk_cases ctxt prop =
   let
@@ -607,7 +607,7 @@ end;
 
 (* inductive_cases *)
 
-fun gen_inductive_cases prep_att prep_prop args int lthy =
+fun gen_inductive_cases prep_att prep_prop {verbose} args lthy =
   let
     val thmss =
       map snd args
@@ -617,7 +617,7 @@ fun gen_inductive_cases prep_att prep_prop args int lthy =
         args thmss;
     val (res, lthy') = lthy |> Local_Theory.notes facts
     val _ =
-      Proof_Display.print_results {interactive = int, pos = Position.thread_data ()}
+      Proof_Display.print_results {verbose = verbose, pos = Position.thread_data ()}
         lthy' ((Thm.theoremK, ""), res); 
   in (res, lthy') end;
 
@@ -672,14 +672,14 @@ fun mk_simp_eq ctxt prop =
 
 (* inductive simps *)
 
-fun gen_inductive_simps prep_att prep_prop args int lthy =
+fun gen_inductive_simps prep_att prep_prop {verbose} args lthy =
   let
     val facts = args |> map (fn ((a, atts), props) =>
       ((a, map (prep_att lthy) atts),
         map (Thm.no_attributes o single o mk_simp_eq lthy o prep_prop lthy) props));
     val (res, lthy') = lthy |> Local_Theory.notes facts
     val _ =
-      Proof_Display.print_results {interactive = int, pos = Position.thread_data ()}
+      Proof_Display.print_results {verbose = verbose, pos = Position.thread_data ()}
         lthy' ((Thm.theoremK, ""), res)
   in (res, lthy') end;
 
@@ -875,7 +875,7 @@ fun prove_coindrule quiet_mode preds cs argTs bs xs params intr_ts mono
         funpow n (fn thm => thm RS @{thm meta_fun_cong}) thm RS @{thm Pure.symmetric})
       ns rec_preds_defs;
     val simps = simp_thms3 @ pred_defs_sym;
-    val simproc = Simplifier.the_simproc ctxt "HOL.defined_All";
+    val simproc = \<^simproc>\<open>HOL.defined_All\<close>;
     val simplify =
       asm_full_simplify (Ctr_Sugar_Util.ss_only simps ctxt |> Simplifier.add_proc simproc);
     val coind = (mono RS (fp_def RS @{thm def_coinduct}))
@@ -1313,14 +1313,14 @@ val _ =
     (ind_decl true);
 
 val _ =
-  Outer_Syntax.local_theory' \<^command_keyword>\<open>inductive_cases\<close>
+  Outer_Syntax.local_theory \<^command_keyword>\<open>inductive_cases\<close>
     "create simplified instances of elimination rules"
-    (Parse.and_list1 Parse_Spec.simple_specs >> (#2 ooo inductive_cases_cmd));
+    (Parse.and_list1 Parse_Spec.simple_specs >> (#2 oo inductive_cases_cmd {verbose = true}));
 
 val _ =
-  Outer_Syntax.local_theory' \<^command_keyword>\<open>inductive_simps\<close>
+  Outer_Syntax.local_theory \<^command_keyword>\<open>inductive_simps\<close>
     "create simplification rules for inductive predicates"
-    (Parse.and_list1 Parse_Spec.simple_specs >> (#2 ooo inductive_simps_cmd));
+    (Parse.and_list1 Parse_Spec.simple_specs >> (#2 oo inductive_simps_cmd {verbose = true}));
 
 val _ =
   Outer_Syntax.command \<^command_keyword>\<open>print_inductives\<close>

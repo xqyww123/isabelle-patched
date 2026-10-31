@@ -204,13 +204,13 @@ class Query_Operation(
     for {
       (snapshot, command) <- query_command()
       link <- editor.hyperlink_command(snapshot, command.id, focus = true)
-    } link.follow(editor_context)
+    } editor.navigator_recording(editor_context) { link.follow(editor_context) }
 
 
   /* main */
 
   private val main =
-    Session.Consumer[Session.Commands_Changed](getClass.getName) {
+    Session.Consumer[Session.Commands_Changed](this.class_name) {
       case changed =>
         val state = current_state.value
         state.location match {

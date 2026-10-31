@@ -91,13 +91,14 @@ lemma rel_interior: "rel_interior S = {x \<in> S. \<exists>T. open T \<and> x \<
 proof
   show "?lhs \<subseteq> ?rhs"
     by (force simp add: rel_interior_def openin_open)
-  { fix x T
-    assume *: "x \<in> S" "open T" "x \<in> T" "T \<inter> affine hull S \<subseteq> S"
-    then have **: "x \<in> T \<inter> affine hull S"
+  have "\<exists>Tb. (\<exists>Ta. open Ta \<and> Tb = affine hull S \<inter> Ta) \<and> x \<in> Tb \<and> Tb \<subseteq> S"
+    if *: "x \<in> S" "open T" "x \<in> T" "T \<inter> affine hull S \<subseteq> S" for x T
+  proof -
+    from that have **: "x \<in> T \<inter> affine hull S"
       using hull_inc by auto
-    with * have "\<exists>Tb. (\<exists>Ta. open Ta \<and> Tb = affine hull S \<inter> Ta) \<and> x \<in> Tb \<and> Tb \<subseteq> S"
+    with * show ?thesis
       by (rule_tac x = "T \<inter> (affine hull S)" in exI) auto
-  }
+  qed
   then show "?rhs \<subseteq> ?lhs"
     by (force simp add: rel_interior_def openin_open)
 qed
@@ -777,17 +778,17 @@ proof (clarsimp simp: open_contains_cball convex_hull_explicit)
     assume "y \<in> cball ?a (Min i)"
     then have y: "norm (?a - y) \<le> Min i"
       unfolding dist_norm[symmetric] by auto
-    { fix x
-      assume "x \<in> T"
-      then have "Min i \<le> b x"
+    have "x + (y - ?a) \<in> S" if "x \<in> T" for x
+    proof -
+      from that have "Min i \<le> b x"
         by (simp add: i_def obt(1))
       then have "x + (y - ?a) \<in> cball x (b x)"
         using y unfolding mem_cball dist_norm by auto
       moreover have "x \<in> S"
         using \<open>x\<in>T\<close> \<open>T\<subseteq>S\<close> by auto
-      ultimately have "x + (y - ?a) \<in> S"
+      ultimately show ?thesis
         using y b by blast
-    }
+    qed
     moreover
     have *: "inj_on (\<lambda>v. v + (y - ?a)) T"
       unfolding inj_on_def by auto
@@ -1307,6 +1308,172 @@ next
   ultimately show ?thesis by blast
 qed
 
+lemma any_closest_point_affine_orthogonal:
+  fixes S :: "('a::euclidean_space) set"
+  assumes "affine S" "b \<in> S" "\<And>x. x \<in> S \<Longrightarrow> dist a b \<le> dist a x"
+  shows "\<And>x. x \<in> S \<Longrightarrow> orthogonal (x - b) (a - b)"
+proof -
+  fix x assume "x \<in> S"
+  have convS: "convex S" using assms(1) affine_imp_convex by blast
+  have closS: "closed S" using assms(1) affine_closed by blast
+  have le1: "(a - b) \<bullet> (x - b) \<le> 0"
+    using any_closest_point_dot[OF convS closS assms(2) \<open>x \<in> S\<close>] assms(3) by blast
+  have "2 *\<^sub>R b - x \<in> S"
+    by (metis \<open>x \<in> S\<close> assms(1,2) diff_diff_eq2 mem_affine_3_minus2 scaleR_2 scaleR_one)
+  then have le2: "(a - b) \<bullet> ((2 *\<^sub>R b - x) - b) \<le> 0"
+    using any_closest_point_dot[OF convS closS assms(2)] assms(3) by blast
+  then show "orthogonal (x - b) (a - b)"
+    using le1 by (simp add: inner_diff_right algebra_simps orthogonal_def inner_commute)
+qed
+
+lemma orthogonal_any_closest_point:
+  fixes S :: "('a::euclidean_space) set"
+  assumes "b \<in> S" "\<And>x. x \<in> S \<Longrightarrow> orthogonal (x - b) (a - b)"
+  shows "\<And>x. x \<in> S \<Longrightarrow> dist a b \<le> dist a x"
+proof -
+  fix x assume "x \<in> S"
+  have orth: "orthogonal (x - b) (a - b)"
+    using assms(2)[OF \<open>x \<in> S\<close>] .
+  have "orthogonal (a - b) (x - b)"
+    using orth by (simp add: orthogonal_commute)
+  then have "orthogonal (a - b) (b - x)"
+    using orthogonal_clauses(3)[of "a - b" "x - b"] by (simp add: algebra_simps)
+  then have "(norm ((a - b) + (b - x)))\<^sup>2 = (norm (a - b))\<^sup>2 + (norm (b - x))\<^sup>2"
+    by (rule norm_add_Pythagorean)
+  then have "(norm (a - x))\<^sup>2 \<ge> (norm (a - b))\<^sup>2"
+    by (simp add: algebra_simps)
+  then have "norm (a - x) \<ge> norm (a - b)"
+    by (simp add: power2_le_iff_abs_le)
+  then show "dist a b \<le> dist a x"
+    by (simp add: dist_norm)
+qed
+
+lemma closest_point_affine_orthogonal:
+  fixes S :: "('a::euclidean_space) set"
+  assumes "affine S" "S \<noteq> {}" "x \<in> S"
+  shows "orthogonal (x - closest_point S a) (a - closest_point S a)"
+proof -
+  have "closed S" using assms(1) affine_closed by blast
+  have "closest_point S a \<in> S"
+    using closest_point_in_set[OF \<open>closed S\<close> assms(2)] .
+  have "\<And>y. y \<in> S \<Longrightarrow> dist a (closest_point S a) \<le> dist a y"
+    using closest_point_le[OF \<open>closed S\<close>] by (simp add: dist_commute)
+  then show ?thesis
+    using any_closest_point_affine_orthogonal[OF assms(1) \<open>closest_point S a \<in> S\<close>] assms(3)
+    by blast
+qed
+
+lemma closest_point_affine_orthogonal_eq:
+  fixes S :: "('a::euclidean_space) set"
+  assumes "affine S" "b \<in> S"
+  shows "(closest_point S a = b) \<longleftrightarrow> (\<forall>x. x \<in> S \<longrightarrow> orthogonal (x - b) (a - b))"
+proof
+  assume eq: "closest_point S a = b"
+  show "\<forall>x. x \<in> S \<longrightarrow> orthogonal (x - b) (a - b)"
+    using \<open>affine S\<close> closest_point_affine_orthogonal eq by blast
+next
+  assume orth: "\<forall>x. x \<in> S \<longrightarrow> orthogonal (x - b) (a - b)"
+  have "\<forall>z\<in>S. dist a b \<le> dist a z"
+    using orthogonal_any_closest_point[OF \<open>b \<in> S\<close>] orth by blast
+  then have "b = closest_point S a"
+    by (simp add: affine_closed affine_imp_convex assms closest_point_unique)
+  then show "closest_point S a = b" by simp
+qed
+
+
+subsection\<open>The relative frontier of a set\<close>
+
+definition\<^marker>\<open>tag important\<close> "rel_frontier S = closure S - rel_interior S"
+
+lemma rel_frontier_empty [simp]: "rel_frontier {} = {}"
+  by (simp add: rel_frontier_def)
+
+lemma rel_frontier_eq_empty:
+    fixes S :: "'n::euclidean_space set"
+    shows "rel_frontier S = {} \<longleftrightarrow> affine S"
+  unfolding rel_frontier_def
+  using rel_interior_subset_closure  by (auto simp add: rel_interior_eq_closure [symmetric])
+
+lemma rel_frontier_sing [simp]:
+    fixes a :: "'n::euclidean_space"
+    shows "rel_frontier {a} = {}"
+  by (simp add: rel_frontier_def)
+
+lemma rel_frontier_affine_hull:
+  fixes S :: "'a::euclidean_space set"
+  shows "rel_frontier S \<subseteq> affine hull S"
+using closure_affine_hull rel_frontier_def by fastforce
+
+lemma rel_frontier_cball [simp]:
+    fixes a :: "'n::euclidean_space"
+    shows "rel_frontier(cball a r) = (if r = 0 then {} else sphere a r)"
+proof (cases rule: linorder_cases [of r 0])
+  case less then show ?thesis
+    by (force simp: sphere_def)
+next
+  case equal then show ?thesis by simp
+next
+  case greater then show ?thesis
+    by simp (metis centre_in_ball empty_iff frontier_cball frontier_def interior_cball interior_rel_interior_gen rel_frontier_def)
+qed
+
+lemma rel_frontier_translation:
+  fixes a :: "'a::euclidean_space"
+  shows "rel_frontier((\<lambda>x. a + x) ` S) = (\<lambda>x. a + x) ` (rel_frontier S)"
+  by (simp add: rel_frontier_def translation_diff rel_interior_translation closure_translation)
+
+lemma rel_frontier_nonempty_interior:
+  fixes S :: "'n::euclidean_space set"
+  shows "interior S \<noteq> {} \<Longrightarrow> rel_frontier S = frontier S"
+  by (metis frontier_def interior_rel_interior_gen rel_frontier_def)
+
+lemma rel_frontier_frontier:
+  fixes S :: "'n::euclidean_space set"
+  shows "affine hull S = UNIV \<Longrightarrow> rel_frontier S = frontier S"
+  by (simp add: frontier_def rel_frontier_def rel_interior_interior)
+
+lemma closest_point_in_rel_frontier:
+   "\<lbrakk>closed S; S \<noteq> {}; x \<in> affine hull S - rel_interior S\<rbrakk>
+   \<Longrightarrow> closest_point S x \<in> rel_frontier S"
+  by (simp add: closest_point_in_rel_interior closest_point_in_set rel_frontier_def)
+
+lemma closed_rel_frontier [iff]:
+  fixes S :: "'n::euclidean_space set"
+  shows "closed (rel_frontier S)"
+proof -
+  have *: "closedin (top_of_set (affine hull S)) (closure S - rel_interior S)"
+    by (simp add: closed_subset closedin_diff closure_affine_hull openin_rel_interior)
+  show ?thesis
+  proof (rule closedin_closed_trans[of "affine hull S" "rel_frontier S"])
+    show "closedin (top_of_set (affine hull S)) (rel_frontier S)"
+      by (simp add: "*" rel_frontier_def)
+  qed simp
+qed
+
+lemma closed_rel_boundary:
+  fixes S :: "'n::euclidean_space set"
+  shows "closed S \<Longrightarrow> closed(S - rel_interior S)"
+  by (metis closed_rel_frontier closure_closed rel_frontier_def)
+
+lemma compact_rel_boundary:
+  fixes S :: "'n::euclidean_space set"
+  shows "compact S \<Longrightarrow> compact(S - rel_interior S)"
+  by (metis bounded_diff closed_rel_boundary closure_eq compact_closure compact_imp_closed)
+
+lemma bounded_rel_frontier:
+  fixes S :: "'n::euclidean_space set"
+  shows "bounded S \<Longrightarrow> bounded(rel_frontier S)"
+by (simp add: bounded_closure bounded_diff rel_frontier_def)
+
+lemma compact_rel_frontier_bounded:
+  fixes S :: "'n::euclidean_space set"
+  shows "bounded S \<Longrightarrow> compact(rel_frontier S)"
+using bounded_rel_frontier closed_rel_frontier compact_eq_bounded_closed by blast
+
+lemma compact_rel_frontier:
+  fixes S :: "'n::euclidean_space set"
+  shows "compact S \<Longrightarrow> compact(rel_frontier S)"
+by (meson compact_eq_bounded_closed compact_rel_frontier_bounded)
 
 subsubsection\<^marker>\<open>tag unimportant\<close> \<open>Various point-to-set separating/supporting hyperplane theorems\<close>
 
@@ -1574,15 +1741,16 @@ lemma convex_halfspace_intersection:
   assumes "closed S" "convex S"
   shows "S = \<Inter>{h. S \<subseteq> h \<and> (\<exists>a b. h = {x. inner a x \<le> b})}"
 proof -
-  { fix z
-    assume "\<forall>T. S \<subseteq> T \<and> (\<exists>a b. T = {x. inner a x \<le> b}) \<longrightarrow> z \<in> T"  "z \<notin> S"
-    then have \<section>: "\<And>a b. S \<subseteq> {x. inner a x \<le> b} \<Longrightarrow> z \<in> {x. inner a x \<le> b}"
+  have False
+    if "\<forall>T. S \<subseteq> T \<and> (\<exists>a b. T = {x. inner a x \<le> b}) \<longrightarrow> z \<in> T"  "z \<notin> S" for z
+  proof -
+    from that have *: "\<And>a b. S \<subseteq> {x. inner a x \<le> b} \<Longrightarrow> z \<in> {x. inner a x \<le> b}"
       by blast
     obtain a b where "inner a z < b" "(\<forall>x\<in>S. inner a x > b)"
       using \<open>z \<notin> S\<close> assms separating_hyperplane_closed_point by blast
-    then have False
-      using \<section> [of "-a" "-b"] by fastforce
-  }
+    then show ?thesis
+      using * [of "-a" "-b"] by fastforce
+  qed
   then show ?thesis
     by force
 qed
@@ -1685,6 +1853,17 @@ lemma islimpt_Icc [simp]:
 lemma connected_imp_perfect_aff_dim:
      "\<lbrakk>connected S; aff_dim S \<noteq> 0; a \<in> S\<rbrakk> \<Longrightarrow> a islimpt S"
   using aff_dim_sing connected_imp_perfect by blast
+
+lemma limpt_of_convex:
+  fixes S :: "'a::real_normed_vector set"
+  assumes "convex S" "x \<in> S"
+  shows "x islimpt S \<longleftrightarrow> S \<noteq> {x}"
+proof -
+  have "\<And>u. \<lbrakk>\<not> x islimpt S; u \<in> S\<rbrakk> \<Longrightarrow> u = x"
+  using assms connected_imp_perfect convex_connected by blast
+  with assms show ?thesis
+    by (auto simp: islimpt_finite)
+qed
 
 subsection\<^marker>\<open>tag unimportant\<close> \<open>On \<open>real\<close>, \<open>is_interval\<close>, \<open>convex\<close> and \<open>connected\<close> are all equivalent\<close>
 
@@ -1962,7 +2141,8 @@ lemma convex_on_bounded_continuous:
     and "\<forall>x\<in>S. \<bar>f x\<bar> \<le> b"
   shows "continuous_on S f"
 proof -
-  have "\<exists>d>0. \<forall>x'. norm (x' - x) < d \<longrightarrow> \<bar>f x' - f x\<bar> < e" if "x \<in> S" "e > 0" for x and e :: real
+  have "\<exists>d>0. \<forall>x'. norm (x' - x) < d \<longrightarrow> \<bar>f x' - f x\<bar> < e"
+    if "x \<in> S" "e > 0" for x and e :: real
   proof -
     define B where "B = \<bar>b\<bar> + 1"
     then have B:  "0 < B""\<And>x. x\<in>S \<Longrightarrow> \<bar>f x\<bar> \<le> B"
@@ -1985,8 +2165,10 @@ proof -
           unfolding mem_cball dist_norm
           apply (rule order_trans[of _ "2 * norm (x - y)"])
           using as
-          by (auto simp: field_simps norm_minus_commute)
-        {
+           apply (auto simp: field_simps norm_minus_commute)
+          done
+        have "f y - f x < e"
+        proof -
           define w where "w = x + t *\<^sub>R (y - x)"
           have "w \<in> S"
             using \<open>k>0\<close> by (auto simp: dist_norm t_def w_def k[THEN subsetD])
@@ -2005,10 +2187,10 @@ proof -
             by (simp add: w field_simps)
           also have "... < e"
             using B(2)[OF \<open>w\<in>S\<close>] and B(2)[OF \<open>x\<in>S\<close>] 2 \<open>t > 0\<close> by (auto simp: field_simps)
-          finally have th1: "f y - f x < e" .
-        }
-        moreover
-        {
+          finally show ?thesis .
+        qed
+        moreover have "f x - f y < e"
+        proof -
           define w where "w = x - t *\<^sub>R (y - x)"
           have "w \<in> S"
             using \<open>k > 0\<close> by (auto simp: dist_norm t_def w_def k[THEN subsetD])
@@ -2034,8 +2216,8 @@ proof -
             using \<open>t > 0\<close> by (simp add: add_divide_distrib) 
           also have "\<dots> < e + f y"
             using \<open>t > 0\<close> * \<open>e > 0\<close> by (auto simp: field_simps)
-          finally have "f x - f y < e" by auto
-        }
+          finally show ?thesis by auto
+        qed
         ultimately show ?thesis by auto
       qed (use \<open>0<e\<close> in auto)
     qed (use \<open>0<e\<close> \<open>0<k\<close> \<open>0<B\<close> in \<open>auto simp: field_simps\<close>)

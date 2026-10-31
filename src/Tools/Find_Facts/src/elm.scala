@@ -7,6 +7,7 @@ applications".
 
 package isabelle.find_facts
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -36,13 +37,13 @@ object Elm {
       new Project(name, dir, main, head)
     }
 
-    def get_digest(output_file: Path): SHA1.Digest =
+    def get_digest(output_file: Path): Message_Digest.T =
       Exn.capture {
         val html = HTML.parse_document(File.read(output_file))
         val elem = html.head.getElementsByTag("meta").attr("name", "shasum")
         Library.the_single(elem.eachAttr("content").asScala.toList)
       } match {
-        case Exn.Res(s) => SHA1.fake_digest(s)
+        case Exn.Res(s) => Message_Digest.parse(s)
         case _ => SHA1.digest_empty
       }
   }
@@ -56,21 +57,20 @@ object Elm {
     def sources: List[Path] =
       for {
         src_dir <- src_dirs
-        path = dir + Path.explode(src_dir)
-        file <- File.find_files(path.file, _.getName.endsWith(".elm"))
-        rel_path <- File.relative_path(dir, File.path(file))
-      } yield rel_path
+        path <- File.find_files(dir + Path.explode(src_dir), _.file_name.endsWith(".elm"))
+        relative_path <- File.get_relative_path(dir, path)
+      } yield relative_path
 
-    def sources_shasum: SHA1.Shasum = {
-      val meta_info = SHA1.shasum_meta_info(SHA1.digest(JSON.Format(definition)))
-      val head_digest = SHA1.shasum(SHA1.digest(XML.string_of_body(head)), "head")
+    def sources_shasum: Shasum = {
+      val meta_info = Shasum.make_meta_info(SHA1.digest(JSON.Format(definition)))
+      val head_digest = Shasum.make(SHA1.digest(XML.string_of_body(head)), "head")
       val source_digest =
-        SHA1.shasum_sorted(for (src <- sources) yield SHA1.digest(dir + src) -> src.implode)
+        Shasum.make_sorted(for (src <- sources) yield SHA1.digest(dir + src) -> src.implode)
       meta_info ::: head_digest ::: source_digest
     }
 
     def build_html(output_file: Path, progress: Progress = new Progress): Unit = {
-      val digest = sources_shasum.digest
+      val digest = SHA1.digest(sources_shasum)
       if (digest != Project.get_digest(output_file)) {
         progress.echo("Building web application " + output_file.absolute + " ...")
 
@@ -85,8 +85,7 @@ object Elm {
         }
 
         val file = HTML.parse_document(File.read(output_file))
-        file.head.appendChild(
-          Element("meta").attr("name", "shasum").attr("content", digest.toString))
+        file.head.appendChild(Element("meta").attr("name", "shasum").attr("content", digest.rep))
         file.head.append(XML.string_of_body(head))
         val html = file.html
         File.write(output_file, html)

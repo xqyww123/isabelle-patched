@@ -18,6 +18,7 @@ object Value {
       }
     def parse(s: java.lang.String): scala.Boolean =
       unapply(s) getOrElse error("Bad boolean: " + quote(s))
+    def obj(x: scala.Boolean): java.lang.Boolean = java.lang.Boolean.valueOf(x).nn
   }
 
   object Nat {
@@ -40,6 +41,7 @@ object Value {
       catch { case _: NumberFormatException => None }
     def parse(s: java.lang.String): scala.Int =
       unapply(s) getOrElse error("Bad integer: " + quote(s))
+    def obj(x: scala.Int): java.lang.Integer = java.lang.Integer.valueOf(x).nn
   }
 
   object Long {
@@ -49,22 +51,24 @@ object Value {
       catch { case _: NumberFormatException => None }
     def parse(s: java.lang.String): scala.Long =
       unapply(s) getOrElse error("Bad long integer: " + quote(s))
+    def obj(x: scala.Long): java.lang.Long = java.lang.Long.valueOf(x).nn
   }
 
   object Double {
-    def apply(x: scala.Double): java.lang.String = x.toString
+    def apply(x: scala.Double): java.lang.String = {
+      val y = x.toLong
+      if (y.toDouble == x) Long(y) else x.toString
+    }
     def unapply(s: java.lang.String): Option[scala.Double] =
       try { Some(java.lang.Double.parseDouble(s)) }
       catch { case _: NumberFormatException => None }
     def parse(s: java.lang.String): scala.Double =
       unapply(s) getOrElse error("Bad real: " + quote(s))
+    def obj(x: scala.Double): java.lang.Double = java.lang.Double.valueOf(x).nn
   }
 
   object Seconds {
-    def apply(t: Time): java.lang.String = {
-      val s = t.seconds
-      if (s.toInt.toDouble == s) s.toInt.toString else t.toString
-    }
+    def apply(t: Time): java.lang.String = Double(t.seconds)
     def unapply(s: java.lang.String): Option[Time] = Double.unapply(s).map(Time.seconds)
     def parse(s: java.lang.String): Time =
       unapply(s) getOrElse error("Bad real (for seconds): " + quote(s))

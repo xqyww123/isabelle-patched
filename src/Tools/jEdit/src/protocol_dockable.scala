@@ -6,6 +6,7 @@ Dockable window for protocol messages.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -28,7 +29,7 @@ class Protocol_Dockable(view: View, position: String) extends Dockable(view, pos
   /* main */
 
   private val main =
-    Session.Consumer[Prover.Message](getClass.getName) {
+    Session.Consumer[Prover.Message](this.class_name) {
       case input: Prover.Input =>
         GUI_Thread.later { text_area.append(input.toString + "\n\n") }
 

@@ -518,23 +518,23 @@ local
 
 fun memoize verbose cache_dir f arg =
   let
-    val hash = SHA1.rep (SHA1.digest arg)
+    val hash = Message_Digest.rep (SHA1.digest_bytes arg)
     val file = cache_dir + Path.explode hash
   in
-    (case try File.read file of
+    (case try Bytes.read file of
       NONE =>
       let val result = f arg in
-        File.write file result;
+        Bytes.write file (Bytes.terminate_lines result);
         result
       end
-    | SOME s =>
+    | SOME bytes =>
       let
         val () =
           if verbose then
             writeln ("Found problem with key " ^ hash ^ " in cache.")
           else
             ()
-      in s end)
+      in Bytes.split_lines (Bytes.trim_line bytes) end)
   end
 in
 
@@ -586,7 +586,7 @@ fun run_sledgehammer (params as {verbose, spy, provers, falsify, induction_rules
             s
 
         fun massage_message proof_or_inconsistency s =
-          let val s' = strip_time s in
+          let val s' = strip_time (Protocol_Message.clean_output s) in
             if member (op =) (Synchronized.value seen_messages) s' then
               "Duplicate " ^ proof_or_inconsistency
             else

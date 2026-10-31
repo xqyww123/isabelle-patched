@@ -8,7 +8,6 @@ package isabelle
 
 
 import java.awt.Color
-import java.util.Locale
 
 
 object Color_Value {
@@ -24,11 +23,11 @@ object Color_Value {
   }
 
   def print(c: Color): String = {
-    val r = java.lang.Integer.valueOf(c.getRed)
-    val g = java.lang.Integer.valueOf(c.getGreen)
-    val b = java.lang.Integer.valueOf(c.getBlue)
-    val a = java.lang.Integer.valueOf(c.getAlpha)
-    Word.uppercase(String.format(Locale.ROOT, "%02x%02x%02x%02x", r, g, b, a))
+    val r = Value.Int.obj(c.getRed)
+    val g = Value.Int.obj(c.getGreen)
+    val b = Value.Int.obj(c.getBlue)
+    val a = Value.Int.obj(c.getAlpha)
+    Word.uppercase(Library.format("%02x%02x%02x%02x", r, g, b, a))
   }
 
   def apply(s: String): Color =
@@ -41,4 +40,7 @@ object Color_Value {
           c
       }
     }
+
+  def option(options: Options, name: String): Color =
+    apply(options.string(name + Options.theme_suffix()))
 }

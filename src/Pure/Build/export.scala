@@ -25,7 +25,8 @@ object Export {
   val PROOFS_PREFIX: String = "proofs/"
 
   def explode_name(s: String): List[String] = space_explode('/', s)
-  def implode_name(elems: Iterable[String]): String = elems.mkString("/")
+  def implode_name(elems: Iterable[String], terminate: Boolean = false): String =
+    elems.mkString("", "/", if (terminate) "/" else "")
 
 
   /* SQL data model */
@@ -283,9 +284,8 @@ object Export {
     }
 
     private val consumer =
-      Consumer_Thread.fork_bulk[(Entry, Boolean)](name = "export")(
-        bulk = _ => true,
-        consume = args => (args.grouped(20).toList.flatMap(consume), true))
+      Consumer_Thread.fork_bulk[(Entry, Boolean)]("export",
+        args => (args.grouped(20).toList.flatMap(consume), true))
 
     def make_entry(session_name: String, args: Protocol.Export.Args, body: Bytes): Unit = {
       if (!progress.stopped && !body.is_empty) {
@@ -659,10 +659,7 @@ Usage: isabelle export [OPTIONS] SESSION
         /* build */
 
         if (!no_build) {
-          val results =
-            progress.interrupt_handler {
-              Build.build_logic(options, session_name, progress = progress, dirs = dirs)
-            }
+          val results = Build.build_logic(options, session_name, progress = progress, dirs = dirs)
           if (!results.ok) sys.exit(results.rc)
         }
 

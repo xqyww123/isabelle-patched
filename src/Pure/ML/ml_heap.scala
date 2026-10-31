@@ -10,26 +10,20 @@ package isabelle
 object ML_Heap {
   /** heap file with SHA1 digest **/
 
-  private val sha1_prefix = "SHA1:"
-  private val sha1_length = sha1_prefix.length + SHA1.digest_length
-
-  def read_file_digest(heap: Path): Option[SHA1.Digest] = {
+  def read_file_digest(heap: Path): Option[Message_Digest.T] = {
     if (heap.is_file) {
-      val bs = Bytes.read_file(heap, offset = File.size(heap) - sha1_length)
-      if (bs.size == sha1_length) {
-        val s = bs.text
-        if (s.startsWith(sha1_prefix)) Some(SHA1.fake_digest(s.substring(sha1_prefix.length)))
-        else None
-      }
+      val n = SHA1.print_length
+      val bs = Bytes.read_file(heap, offset = File.size(heap) - n)
+      if (bs.size == n) Library.try_unprefix(SHA1.prefix, bs.text).map(SHA1.parse)
       else None
     }
     else None
   }
 
-  def write_file_digest(heap: Path): SHA1.Digest =
+  def write_file_digest(heap: Path): Message_Digest.T =
     read_file_digest(heap) getOrElse {
       val digest = SHA1.digest(heap)
-      File.append(heap, sha1_prefix + digest.toString)
+      File.append(heap, digest.print_prefix)
       digest
     }
 
@@ -86,7 +80,7 @@ object ML_Heap {
         name = "slices_size")
     }
 
-    def read_digests(db: SQL.Database, names: Iterable[String]): Map[String, SHA1.Digest] =
+    def read_digests(db: SQL.Database, names: Iterable[String]): Map[String, Message_Digest.T] =
       if (names.isEmpty) Map.empty
       else {
         db.execute_query_statement(
@@ -95,7 +89,7 @@ object ML_Heap {
           List.from[(String, String)],
           res => res.string(Base.name) -> res.string(Base.heap_digest)
         ).collect({
-          case (name, digest) if digest.nonEmpty => name -> SHA1.fake_digest(digest)
+          case (name, digest) if digest.nonEmpty => name -> SHA1.parse(digest)
         }).toMap
       }
 
@@ -137,7 +131,7 @@ object ML_Heap {
       db: SQL.Database,
       name: String,
       heap_size: Long,
-      heap_digest: Option[SHA1.Digest],
+      heap_digest: Option[Message_Digest.T],
       log_db: Option[Log_DB]
     ): Unit = {
       clean_entry(db, name)
@@ -148,7 +142,7 @@ object ML_Heap {
         { stmt =>
           stmt.string(1) = name
           stmt.long(2) = heap_size
-          stmt.string(3) = heap_digest.map(_.toString)
+          stmt.string(3) = heap_digest.map(_.rep)
           stmt.string(4) = log_db.map(_.uuid)
           stmt.bytes(5) = log_db.map(_.content)
         })
@@ -158,7 +152,7 @@ object ML_Heap {
       db: SQL.Database,
       name: String,
       heap_size: Long,
-      heap_digest: Option[SHA1.Digest],
+      heap_digest: Option[Message_Digest.T],
       log_db: Option[Log_DB]
     ): Unit =
       db.execute_statement(
@@ -167,7 +161,7 @@ object ML_Heap {
         body =
           { stmt =>
             stmt.long(1) = heap_size
-            stmt.string(2) = heap_digest.map(_.toString)
+            stmt.string(2) = heap_digest.map(_.rep)
             stmt.string(3) = log_db.map(_.uuid)
             stmt.bytes(4) = log_db.map(_.content)
           })
@@ -178,7 +172,7 @@ object ML_Heap {
       private_data.clean_entry(db, session_name)
     }
 
-  def read_digests(db: SQL.Database, names: Iterable[String]): Map[String, SHA1.Digest] =
+  def read_digests(db: SQL.Database, names: Iterable[String]): Map[String, Message_Digest.T] =
     if (names.isEmpty) Map.empty
     else {
       private_data.transaction_lock(db, create = true, label = "ML_Heap.read_digests") {
@@ -202,7 +196,7 @@ object ML_Heap {
     val heap_digest = session.heap.map(write_file_digest)
     val heap_size =
       session.heap match {
-        case Some(heap) => File.size(heap) - sha1_length
+        case Some(heap) => File.size(heap) - SHA1.print_length
         case None => 0L
       }
 

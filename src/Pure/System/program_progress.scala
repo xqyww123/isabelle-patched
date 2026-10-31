@@ -54,7 +54,7 @@ abstract class Program_Progress(
   default_heading: String = "Running",
   default_title: String = "program",
   override val verbose: Boolean = false
-) extends Progress {
+) extends Progress with Progress.Local_Interrupts {
   private var _finished_programs: List[Program_Progress.Program] = Nil
   private var _running_program: Option[Program_Progress.Program] = None
 
@@ -84,7 +84,7 @@ abstract class Program_Progress(
   override def output(msgs: Progress.Output): Unit = synchronized {
     for (msg <- msgs) {
       val message = msg.message
-      val writeln_msg = if (message.kind == Progress.Kind.writeln) message.text else ""
+      val writeln_msg = if (message.kind == Output.Kind.writeln) message.text else ""
       detect_program(writeln_msg).map(Word.explode) match {
         case Some(a :: bs) =>
           stop_program()

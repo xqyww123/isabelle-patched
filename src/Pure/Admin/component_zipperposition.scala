@@ -31,7 +31,8 @@ object Component_Zipperposition {
 
       /* platform */
 
-      val platform_name = Isabelle_Platform.local.ISABELLE_PLATFORM()
+      val platform_context = Isabelle_Platform.Bash_Context(windows = false, apple = false)
+      val platform_name = platform_context.ISABELLE_PLATFORM
       val platform_dir =
         Isabelle_System.make_directory(component_dir.path + Path.basic(platform_name))
 
@@ -43,8 +44,8 @@ object Component_Zipperposition {
 
       progress.echo("Building Zipperposition for " + platform_name + " ...")
       progress.bash(cwd = build_dir, echo = progress.verbose,
-        script = "isabelle_opam install -y --destdir=" + File.bash_path(build_dir) +
-          " zipperposition=" + Bash.string(version)).check
+        script = "export OPAMCLI=2.0; isabelle_opam install -y --unlock-base --destdir=" +
+          File.bash_path(build_dir) + " zipperposition=" + Bash.string(version)).check
 
 
       /* install */
@@ -57,7 +58,7 @@ object Component_Zipperposition {
       Isabelle_System.copy_file(build_dir + Path.basic("bin") + prg_path, platform_dir + exe_path)
 
       if (!Platform.is_windows) {
-        Executable.library_closure(platform_dir + exe_path, filter = Set("libgmp"))
+        platform_context.library_closure(platform_dir + exe_path, filter = Set("libgmp"))
       }
 
 

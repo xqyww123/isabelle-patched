@@ -18,10 +18,10 @@ sig
     Error of string | EOF
   val control_kind: kind
   val str_of_kind: kind -> string
-  type file = {src_path: Path.T, lines: string list, digest: SHA1.digest, pos: Position.T}
+  type file = {src_path: Path.T, lines: string list, pos: Position.T}
   type T
   type src = T list
-  type name_value = {name: string, kind: string, print: Proof.context -> Markup.T * xstring}
+  type name_value = {name: string, kind: string, print: Proof.context -> Markup.T list * xstring}
   datatype value =
     Source of src |
     Literal of bool * Markup.T |
@@ -79,6 +79,7 @@ sig
   val put_files: file Exn.result list -> T -> T
   val get_output: T -> XML.body option
   val put_output: XML.body -> T -> T
+  val no_output: T
   val get_value: T -> value option
   val reports_of_value: T -> Position.report list
   val name_value: name_value -> value
@@ -101,6 +102,7 @@ sig
   val ident_or_symbolic: string -> bool
   val read_cartouche: Symbol_Pos.T list -> T
   val tokenize: Keyword.keywords -> {strict: bool} -> Symbol_Pos.T list -> T list
+  val explode_input: Keyword.keywords -> Input.source -> T list
   val explode: Keyword.keywords -> Position.T -> string -> T list
   val explode0: Keyword.keywords -> string -> T list
   val print_name: Keyword.keywords -> string -> string
@@ -184,9 +186,9 @@ val delimited_kind =
   args.ML).  Note that an assignable ref designates an intermediate
   state of internalization -- it is NOT meant to persist.*)
 
-type file = {src_path: Path.T, lines: string list, digest: SHA1.digest, pos: Position.T};
+type file = {src_path: Path.T, lines: string list, pos: Position.T};
 
-type name_value = {name: string, kind: string, print: Proof.context -> Markup.T * xstring};
+type name_value = {name: string, kind: string, print: Proof.context -> Markup.T list * xstring};
 
 datatype T = Token of (Symbol_Pos.text * Position.range) * (kind * string) * slot
 
@@ -344,11 +346,11 @@ val token_kind_markup =
 
 fun keyword_reports tok = map (fn markup => ((pos_of tok, markup), ""));
 
-fun command_markups keywords x =
-  if Keyword.is_theory_end keywords x then [Markup.keyword2 |> Markup.keyword_properties]
+fun command_markups kind =
+  if Symset.member Keyword.theory_end_kinds kind then [Markup.keyword2 |> Markup.keyword_properties]
   else
-    (if Keyword.is_proof_asm keywords x then [Markup.keyword3]
-     else if Keyword.is_improper keywords x then [Markup.keyword1, Markup.improper]
+    (if Symset.member Keyword.proof_asm_kinds kind then [Markup.keyword3]
+     else if Symset.member Keyword.improper_kinds kind then [Markup.keyword1, Markup.improper]
      else [Markup.keyword1])
     |> map Markup.command_properties;
 
@@ -364,7 +366,7 @@ fun completion_report tok =
 
 fun reports keywords tok =
   if is_command tok then
-    keyword_reports tok (command_markups keywords (content_of tok))
+    keyword_reports tok (command_markups (Keyword.command_kind keywords (content_of tok)))
   else if is_kind Keyword tok then
     keyword_reports tok
       [keyword_markup (false, Markup.keyword2 |> Markup.keyword_properties) (content_of tok)]
@@ -433,6 +435,9 @@ fun get_output (Token (_, _, Value (SOME (Output output)))) = output
 
 fun put_output output (Token (x, y, Slot)) = Token (x, y, Value (SOME (Output (SOME output))))
   | put_output _ tok = raise Fail ("Cannot put document output here" ^ Position.here (pos_of tok));
+
+val no_output =
+  Token (("text", Position.no_range), (Command, "text"), Value (SOME (Output (SOME []))));
 
 
 (* access values *)
@@ -580,7 +585,7 @@ fun pretty_value ctxt tok =
     SOME (Literal markup) =>
       let val x = content_of tok
       in Pretty.mark_str (keyword_markup markup x, x) end
-  | SOME (Name ({print, ...}, _)) => Pretty.quote (Pretty.mark_str (print ctxt))
+  | SOME (Name ({print, ...}, _)) => Pretty.quote (Pretty.marks_str (print ctxt))
   | SOME (Typ T) => Syntax.pretty_typ ctxt T
   | SOME (Term t) => Syntax.pretty_term ctxt t
   | SOME (Fact (_, ths)) =>
@@ -611,7 +616,7 @@ fun pretty_src ctxt src =
     val (head, args) = dest_src src;
     val prt_name =
       (case get_name head of
-        SOME {print, ...} => Pretty.mark_str (print ctxt)
+        SOME {print, ...} => Pretty.marks_str (print ctxt)
       | NONE => Pretty.str (content_of head));
   in Pretty.block (Pretty.breaks (Pretty.quote prt_name :: map (pretty_value ctxt) args)) end;
 
@@ -632,7 +637,7 @@ fun check_src ctxt get_table src =
           val _ = Context_Position.report ctxt pos Markup.operator;
           val kind = Name_Space.kind_of (Name_Space.space_of_table table);
           fun print ctxt' =
-            Name_Space.markup_extern ctxt' (Name_Space.space_of_table (get_table ctxt')) name;
+            Name_Space.markups_extern ctxt' (Name_Space.space_of_table (get_table ctxt')) name;
           val value = name_value {name = name, kind = kind, print = print};
           val head' = closure (assign (SOME value) head);
         in (head' :: args, x) end)
@@ -753,6 +758,9 @@ end;
 fun tokenize keywords strict syms =
   Source.of_list syms |> make_source keywords strict |> Source.exhaust;
 
+fun explode_input keywords =
+  tokenize keywords {strict = false} o Input.source_explode;
+
 fun explode keywords pos text =
   Symbol_Pos.explode (text, pos) |> tokenize keywords {strict = false};
 
@@ -834,8 +842,8 @@ fun syntax_generic scan src0 context =
             | SOME {kind, print, ...} =>
                 let
                   val ctxt' = Context.proof_of context';
-                  val (markup, xname) = print ctxt';
-                in plain_words kind ^ " " ^ quote (Markup.markup markup xname) end);
+                  val (markups, xname) = print ctxt';
+                in plain_words kind ^ " " ^ quote (Markup.markups markups xname) end);
           val print_args =
             if null args2 then "" else ":\n  " ^ implode_space (map print args2);
         in
@@ -847,6 +855,18 @@ fun syntax_generic scan src0 context =
 fun syntax scan src = apsnd Context.the_proof o syntax_generic scan src o Context.Proof;
 
 fun read ctxt scan src = syntax (Scan.lift scan) src ctxt |> #1;
+
+
+(* ML toplevel pretty-printing *)
+
+val _ =
+  ML_system_pp (fn depth => fn _ => fn Token ((_, (pos, _)), (kind, x), value) =>
+    ML_Pretty.block [
+      ML_system_pretty (kind, depth) |> Pretty.from_ML |> Pretty.mark_position pos |> Pretty.to_ML,
+      ML_Pretty.brk 1,
+      (case value of
+        Slot => ML_system_pretty (x, depth)
+      | _ => ML_Pretty.pair ML_system_pretty ML_system_pretty ((x, value), depth))]);
 
 end;
 

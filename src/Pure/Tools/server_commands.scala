@@ -62,7 +62,7 @@ object Server_Commands {
       progress: Progress = new Progress
     ) : (JSON.Object.T, Build.Results, Options, Sessions.Background) = {
       val options =
-        Options.init(prefs = args.preferences, specs = args.options.map(Options.Spec.make))
+        Options.init(prefs = args.preferences, update = args.options.map(Options.Spec.make))
       val dirs = args.dirs.map(Path.explode)
 
       val session_background =
@@ -122,14 +122,14 @@ object Server_Commands {
 
     def command(
       args: Args,
-      progress: Progress = new Progress,
-      log: Logger = new Logger
+      log: Logger,
+      progress: Progress = new Progress
     ) : (JSON.Object.T, (UUID.T, Headless.Session)) = {
       val (_, _, options, session_background) =
         try { Session_Build.command(args.build, progress = progress) }
         catch { case exn: Server.Error => error(exn.message) }
 
-      val resources = Headless.Resources(options, session_background, log = log)
+      val resources = Headless.Resources(options, session_background, log)
 
       val session = resources.start_session(print_mode = args.print_mode, progress = progress)
 
@@ -147,7 +147,7 @@ object Server_Commands {
       { case (context, Session_Start(args)) =>
           context.make_task { task =>
             val (res, entry) =
-              Session_Start.command(args, progress = task.progress, log = context.server.log)
+              Session_Start.command(args, context.server.log, progress = task.progress)
             context.server.add_session(entry)
             res
           }
@@ -180,6 +180,7 @@ object Server_Commands {
     sealed case class Args(
       session_id: UUID.T,
       theories: List[String],
+      options: List[String] = Nil,
       master_dir: String = "",
       pretty_margin: Double = Pretty.default_margin,
       unicode_symbols: Boolean = false,
@@ -194,6 +195,7 @@ object Server_Commands {
       for {
         session_id <- JSON.uuid(json, "session_id")
         theories <- JSON.strings(json, "theories")
+        options <- JSON.strings_default(json, "options")
         master_dir <- JSON.string_default(json, "master_dir")
         pretty_margin <- JSON.double_default(json, "pretty_margin", Pretty.default_margin)
         unicode_symbols <- JSON.bool_default(json, "unicode_symbols")
@@ -205,10 +207,11 @@ object Server_Commands {
         commit_cleanup_delay = JSON.seconds(json, "commit_cleanup_delay")
       }
       yield {
-        Args(session_id, theories, master_dir = master_dir, pretty_margin = pretty_margin,
-          unicode_symbols = unicode_symbols, export_pattern = export_pattern,
-          check_delay = check_delay, check_limit = check_limit, watchdog_timeout = watchdog_timeout,
-          nodes_status_delay = nodes_status_delay, commit_cleanup_delay = commit_cleanup_delay)
+        Args(session_id, theories, options = options, master_dir = master_dir,
+          pretty_margin = pretty_margin, unicode_symbols = unicode_symbols,
+          export_pattern = export_pattern, check_delay = check_delay, check_limit = check_limit,
+          watchdog_timeout = watchdog_timeout, nodes_status_delay = nodes_status_delay,
+          commit_cleanup_delay = commit_cleanup_delay)
       }
 
     def command(args: Args,
@@ -217,7 +220,9 @@ object Server_Commands {
       progress: Progress = new Progress
     ): (JSON.Object.T, Headless.Use_Theories_Result) = {
       val result =
-        session.use_theories(args.theories, master_dir = args.master_dir,
+        session.use_theories(args.theories,
+          options = args.options.map(Options.Spec.make),
+          master_dir = args.master_dir,
           check_delay = args.check_delay.getOrElse(session.default_check_delay),
           check_limit = args.check_limit.getOrElse(session.default_check_limit),
           watchdog_timeout = args.watchdog_timeout.getOrElse(session.default_watchdog_timeout),

@@ -18,10 +18,10 @@ sig
   val method_error: string -> Position.T ->
     {context: Proof.context, facts: thm list, goal: thm} -> 'a Seq.result
   val show_results: bool Config.T
-  val print_results: {interactive: bool, pos: Position.T} -> Proof.context ->
+  val print_results: {verbose: bool, pos: Position.T} -> Proof.context ->
     ((string * string) * (string * thm list) list) -> unit
   val print_theorem: Position.T -> Proof.context -> string * thm list -> unit
-  val print_consts: bool -> Position.T -> Proof.context ->
+  val print_consts: {verbose: bool, pos: Position.T} -> Proof.context ->
     (string * typ -> bool) -> (string * typ) list -> unit
   val markup_extern_label: Position.T -> (Markup.T * xstring) option
   val print_label: Position.T -> string
@@ -44,7 +44,7 @@ fun pretty_theory verbose ctxt =
     val prt_typ_no_tvars = prt_typ o Logic.unvarifyT_global;
     fun prt_term t = Pretty.quote (Syntax.pretty_term ctxt t);
     val prt_term_no_vars = prt_term o Logic.unvarify_global;
-    fun prt_const (c, ty) = [Pretty.mark_str c, Pretty.str " ::", Pretty.brk 1, prt_typ_no_tvars ty];
+    fun prt_const (c, ty) = [Pretty.marks_str c, Pretty.str " ::", Pretty.brk 1, prt_typ_no_tvars ty];
 
     fun pretty_classrel (c, []) = prt_cls c
       | pretty_classrel (c, cs) = Pretty.block
@@ -88,10 +88,10 @@ fun pretty_theory verbose ctxt =
       Name_Space.extern_entries verbose ctxt type_space (Symtab.dest arities)
       |> map (apfst #1);
 
-    val cnsts = Name_Space.markup_entries verbose ctxt const_space constants;
+    val cnsts = Name_Space.markups_entries verbose ctxt const_space constants;
     val log_cnsts = map_filter (fn (c, (ty, NONE)) => SOME (c, ty) | _ => NONE) cnsts;
     val abbrevs = map_filter (fn (c, (ty, SOME t)) => SOME (c, (ty, t)) | _ => NONE) cnsts;
-    val cnstrs = Name_Space.markup_entries verbose ctxt const_space constraints;
+    val cnstrs = Name_Space.markups_entries verbose ctxt const_space constraints;
   in
     Pretty.chunks
      [Pretty.big_list "classes:" (map pretty_classrel clsses),
@@ -104,7 +104,7 @@ fun pretty_theory verbose ctxt =
       Pretty.big_list "constraints:" (map (Pretty.block o prt_const) cnstrs),
       Pretty.block
         (Pretty.breaks (Pretty.str "oracles:" ::
-          map Pretty.mark_str (Thm.extern_oracles verbose ctxt)))]
+          map Pretty.marks_str (Thm.extern_oracles verbose ctxt)))]
   end;
 
 
@@ -294,16 +294,11 @@ fun method_error kind pos {context = ctxt, facts, goal} = Seq.Error (fn () =>
 
 (* results *)
 
-val interactive =
-  Config.declare_bool ("interactive", \<^here>) (K false);
-
 val show_results =
   Attrib.setup_config_bool \<^binding>\<open>show_results\<close>
-    (fn context =>
-      Config.get_generic context interactive orelse
-      Options.default_bool \<^system_option>\<open>show_results\<close>);
+    (fn _ => Options.default_bool \<^system_option>\<open>show_results\<close>);
 
-fun no_print int ctxt = not (Config.get (Config.put interactive int ctxt) show_results);
+fun no_print verbose ctxt = not (verbose andalso Config.get ctxt show_results);
 
 local
 
@@ -318,8 +313,8 @@ fun pretty_facts ctxt =
 
 in
 
-fun print_results {interactive, pos} ctxt ((kind, name), facts) =
-  if kind = "" orelse no_print interactive ctxt then ()
+fun print_results {verbose, pos} ctxt ((kind, name), facts) =
+  if kind = "" orelse no_print verbose ctxt then ()
   else if name = "" then
     Pretty.writeln_urgent
       (Pretty.block (Pretty.mark_position pos (Pretty.keyword1 kind) :: Pretty.brk 1 ::
@@ -333,7 +328,7 @@ fun print_results {interactive, pos} ctxt ((kind, name), facts) =
           Pretty.block1 (Pretty.str "(" :: pretty_facts ctxt facts @ [Pretty.str ")"])]);
 
 fun print_theorem pos ctxt fact =
-  print_results {interactive = true, pos = pos} ctxt ((Thm.theoremK, ""), [fact]);
+  print_results {verbose = true, pos = pos} ctxt ((Thm.theoremK, ""), [fact]);
 
 end;
 
@@ -360,8 +355,8 @@ fun pretty_consts pos ctxt pred cs =
 
 in
 
-fun print_consts int pos ctxt pred cs =
-  if null cs orelse no_print int ctxt then ()
+fun print_consts {verbose, pos} ctxt pred cs =
+  if null cs orelse no_print verbose ctxt then ()
   else Pretty.writeln (pretty_consts pos ctxt pred cs);
 
 end;

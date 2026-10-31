@@ -7,6 +7,7 @@ implicit process environment and explicit options.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -37,7 +38,7 @@ object JEdit_Session {
   }
 
   def sessions_structure(
-    options: Options = PIDE.options.value,
+    options: Options = PIDE.options,
     dirs: List[Path] = session_dirs
   ): Sessions.Structure = {
     Sessions.load_structure(session_options(options), dirs = dirs)
@@ -151,7 +152,7 @@ object JEdit_Session {
   def session_start(): Unit = {
     val session = PIDE.session
     val store = session.store
-    val session_background = session.resources.session_background
+    val session_background = session.resources.current_background
 
     session.phase_changed += PIDE.plugin.session_phase_changed
 
@@ -163,8 +164,14 @@ object JEdit_Session {
 
 class JEdit_Session(_session_options: => Options) extends Session {
   override def session_options: Options = _session_options
+  override def interactive: Boolean = true
   override val resources: JEdit_Resources = JEdit_Resources(session_options)
   override val store: Store = Store(JEdit_Session.session_options(session_options))
 
   override def auto_resolve: Boolean = session_options.bool("jedit_auto_resolve")
+
+  override def update_options(options: Options): Unit = {
+    super.update_options(options)
+    JEdit_Editor.flush_edits(reparse = true)
+  }
 }

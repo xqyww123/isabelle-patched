@@ -102,6 +102,9 @@ definition map_restrict_set :: "'a set \<Rightarrow> ('a \<rightharpoonup> 'b) \
 
 parametric_constant map_restrict_set_transfer[transfer_rule]: map_restrict_set_def
 
+lemma map_restrict_set_conv_restrict_map: "map_restrict_set A m = Map.restrict_map m A"
+  unfolding map_restrict_set_def map_filter_def Map.restrict_map_def ..
+
 definition map_pred :: "('a \<Rightarrow> 'b \<Rightarrow> bool) \<Rightarrow> ('a \<rightharpoonup> 'b) \<Rightarrow> bool" where
 "map_pred P m \<longleftrightarrow> (\<forall>x. case m x of None \<Rightarrow> True | Some y \<Rightarrow> P x y)"
 
@@ -109,28 +112,6 @@ parametric_constant map_pred_transfer[transfer_rule]: map_pred_def
 
 definition rel_map_on_set :: "'a set \<Rightarrow> ('b \<Rightarrow> 'c \<Rightarrow> bool) \<Rightarrow> ('a \<rightharpoonup> 'b) \<Rightarrow> ('a \<rightharpoonup> 'c) \<Rightarrow> bool" where
 "rel_map_on_set S P = eq_onp (\<lambda>x. x \<in> S) ===> rel_option P"
-
-definition set_of_map :: "('a \<rightharpoonup> 'b) \<Rightarrow> ('a \<times> 'b) set" where
-"set_of_map m = {(k, v)|k v. m k = Some v}"
-
-lemma set_of_map_alt_def: "set_of_map m = (\<lambda>k. (k, the (m k))) ` dom m"
-unfolding set_of_map_def dom_def
-by auto
-
-lemma set_of_map_finite: "finite (dom m) \<Longrightarrow> finite (set_of_map m)"
-unfolding set_of_map_alt_def
-by auto
-
-lemma set_of_map_inj: "inj set_of_map"
-proof
-  fix x y
-  assume "set_of_map x = set_of_map y"
-  hence "(x a = Some b) = (y a = Some b)" for a b
-    unfolding set_of_map_def by auto
-  hence "x k = y k" for k
-    by (metis not_None_eq)
-  thus "x = y" ..
-qed
 
 lemma dom_comp: "dom (m \<circ>\<^sub>m n) \<subseteq> dom n"
 unfolding map_comp_def dom_def
@@ -613,6 +594,15 @@ lift_definition fmsubset :: "('a, 'b) fmap \<Rightarrow> ('a, 'b) fmap \<Rightar
   is map_le
 .
 
+lemma fmsubset_refl[simp]: "m \<subseteq>\<^sub>f m"
+  by transfer (rule map_le_refl)
+
+lemma fmsubset_trans[trans]: "m\<^sub>1 \<subseteq>\<^sub>f m\<^sub>2 \<Longrightarrow> m\<^sub>2 \<subseteq>\<^sub>f m\<^sub>3 \<Longrightarrow> m\<^sub>1 \<subseteq>\<^sub>f m\<^sub>3"
+  by transfer (rule map_le_trans)
+
+lemma fmsubset_antisym: "m\<^sub>1 \<subseteq>\<^sub>f m\<^sub>2 \<Longrightarrow> m\<^sub>2 \<subseteq>\<^sub>f m\<^sub>1 \<Longrightarrow> m\<^sub>1 = m\<^sub>2"
+  by transfer (rule map_le_antisym)
+
 lemma fmsubset_alt_def: "m \<subseteq>\<^sub>f n \<longleftrightarrow> fmpred (\<lambda>k v. fmlookup n k = Some v) m"
 by transfer' (auto simp: map_pred_def map_le_def dom_def split: option.splits)
 
@@ -657,16 +647,16 @@ unfolding fmfilter_alt_defs by (rule fmfilter_subset)
 lemma fmsubset_restrict_fset[simp]: "fmrestrict_fset S m \<subseteq>\<^sub>f m"
 unfolding fmfilter_alt_defs by (rule fmfilter_subset)
 
-lift_definition fset_of_fmap :: "('a, 'b) fmap \<Rightarrow> ('a \<times> 'b) fset" is set_of_map
-  by (rule set_of_map_finite)
+lift_definition fset_of_fmap :: "('a, 'b) fmap \<Rightarrow> ('a \<times> 'b) fset" is Map.graph
+  by simp
 
 lemma fset_of_fmap_inj[intro, simp]: "inj fset_of_fmap"
   apply rule
   apply transfer'
-  using set_of_map_inj unfolding inj_def by auto
+  using inj_on_graph unfolding inj_def by auto
 
 lemma fset_of_fmap_iff[simp]: "(a, b) |\<in>| fset_of_fmap m \<longleftrightarrow> fmlookup m a = Some b"
-by transfer' (auto simp: set_of_map_def)
+  by transfer' (auto simp: Map.graph_def)
 
 lemma fset_of_fmap_iff': "(a, b) \<in> fset (fset_of_fmap m) \<longleftrightarrow> fmlookup m a = Some b"
   by simp
@@ -1021,7 +1011,7 @@ lemma fmmap_subset[intro]: "m \<subseteq>\<^sub>f n \<Longrightarrow> fmmap f m 
 
 lemma fmmap_fset_of_fmap: "fset_of_fmap (fmmap f m) = (\<lambda>(k, v). (k, f v)) |`| fset_of_fmap m"
   including fset.lifting
-  by transfer' (auto simp: set_of_map_def)
+  by transfer' (auto simp: Map.graph_def)
 
 lemma fmmap_fmupd: "fmmap f (fmupd x y m) = fmupd x (f y) (fmmap f m)"
   by transfer' (auto simp: fun_eq_iff map_upd_def)

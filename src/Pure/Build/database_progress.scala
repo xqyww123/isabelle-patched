@@ -123,7 +123,7 @@ object Database_Progress {
         SortedMap.from[Long, Progress.Message],
         { res =>
           val serial = res.long(Messages.serial)
-          val kind = Progress.Kind.fromOrdinal(res.int(Messages.kind))
+          val kind = Output.Kind.fromOrdinal(res.int(Messages.kind))
           val text = res.string(Messages.text)
           val verbose = res.bool(Messages.verbose)
           serial -> Progress.Message(kind, text, verbose = verbose)
@@ -156,7 +156,7 @@ class Database_Progress(
   context_uuid: String = UUID.random_string(),
   timeout: Option[Time] = None,
   tick_expire: Int = 50)
-extends Progress with Progress.Status {
+extends Progress with Progress.Local_Interrupts with Progress.Status {
   database_progress =>
 
   override def now(): Date = db.now()
@@ -170,7 +170,7 @@ extends Progress with Progress.Status {
   private var _agent_uuid: String = ""
   private var _context: Long = -1
   private var _serial: Long = 0
-  private var _consumer: Consumer_Thread[Progress.Output] = null
+  private var _consumer: Option[Consumer_Thread[Progress.Output]] = None
 
   def agent_uuid: String = synchronized { _agent_uuid }
 
@@ -194,9 +194,9 @@ extends Progress with Progress.Status {
           })
       }
       db.execute_statement(Database_Progress.private_data.Agents.table.insert(), { stmt =>
-        val java = ProcessHandle.current()
+        val java = ProcessHandle.current().nn
         val java_pid = java.pid
-        val java_start = Date.instant(java.info.startInstant.get)
+        val java_start = Date.instant(java.info.nn.startInstant.nn.get.nn)
 
         stmt.string(1) = _agent_uuid
         stmt.string(2) = context_uuid
@@ -240,21 +240,20 @@ extends Progress with Progress.Status {
       else Nil
     }
 
-    _consumer = Consumer_Thread.fork_bulk[Progress.Output](name = "Database_Progress.consumer")(
-      bulk = _ => true,
+    _consumer = Some(Consumer_Thread.fork_bulk[Progress.Output]("Database_Progress.consumer",
       timeout = timeout,
       consume = { bulk_outputs =>
         val bulk_output = bulk_outputs.flatten
         val results =
           if (bulk_output.isEmpty) consume(Nil)
           else bulk_output.grouped(200).toList.flatMap(consume)
-        (results, true) })
+        (results, true) }))
   }
 
   def close(): Unit = synchronized {
     if (_context > 0) {
-      _consumer.shutdown()
-      _consumer = null
+      _consumer.foreach(_.shutdown())
+      _consumer = None
 
       Database_Progress.private_data.transaction_lock(db, label = "Database_Progress.exit") {
         Database_Progress.private_data.update_agent(db, _agent_uuid, _serial, stop_now = true)
@@ -303,7 +302,7 @@ extends Progress with Progress.Status {
 
   private def sync(): Unit = sync_database {}
 
-  override def status_output(msgs: Progress.Output): Unit = sync_context { _consumer.send(msgs) }
+  override def status_output(msgs: Progress.Output): Unit = sync_context { _consumer.get.send(msgs) }
 
   override def verbose: Boolean = base_progress.verbose
 

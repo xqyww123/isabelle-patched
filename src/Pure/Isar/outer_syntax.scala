@@ -84,7 +84,7 @@ final class Outer_Syntax private(
     val completion_keywords = (keywords.minor.iterator ++ keywords.major.iterator).toList
     val completion_abbrevs =
       completion_keywords.flatMap(name =>
-        (if (Keyword.theory_block.contains(keywords.kinds(name)))
+        (if (Keyword.theory_block_kinds.contains(keywords.kinds(name)))
           List((name, name + "\nbegin\n\u0007\nend"))
          else Nil) :::
         (if (Completion.Word_Parsers.is_word(name)) List((name, name)) else Nil)) :::
@@ -100,21 +100,18 @@ final class Outer_Syntax private(
 
   def complete(
     history: Completion.History,
-    unicode: Boolean,
+    unicode_symbols: Boolean,
     explicit: Boolean,
     start: Text.Offset,
     text: CharSequence,
     caret: Int,
     context: Completion.Language_Context
   ): Option[Completion.Result] = {
-    completion.complete(history, unicode, explicit, start, text, caret, context)
+    completion.complete(history, unicode_symbols, explicit, start, text, caret, context)
   }
 
 
   /* build */
-
-  def + (header: Document.Node.Header): Outer_Syntax =
-    add_keywords(header.keywords).add_abbrevs(header.abbrevs)
 
   def ++ (other: Outer_Syntax): Outer_Syntax =
     if (this eq other) this

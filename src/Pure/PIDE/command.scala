@@ -18,7 +18,7 @@ object Command {
     command_offset: Symbol.Offset,
     name: Document.Node.Name,
     src_path: Path,
-    content: Option[(SHA1.Digest, Symbol.Text_Chunk)]
+    content: Option[(Message_Digest.T, Symbol.Text_Chunk)]
   ) {
     def chunk_file: Symbol.Text_Chunk.File =
       Symbol.Text_Chunk.File(name.node)
@@ -282,6 +282,7 @@ object Command {
     }
 
     def accumulate(
+        log: Logger,
         now: Date,
         self_id: Document_ID.Generic => Boolean,
         other_id: (Document.Node.Name, Document_ID.Generic) =>
@@ -303,7 +304,7 @@ object Command {
                       add_status(now, markup).
                       add_markup(Text.Info(command.core_range, elem), status = true)
                   case _ =>
-                    Output.warning("Ignored status message: " + msg)
+                    log.warning("Ignored status message: " + msg)
                     state
                 }
             }
@@ -312,7 +313,7 @@ object Command {
         case XML.Elem(Markup(Markup.REPORT, atts0), msgs) =>
           msgs.foldLeft(this) {
             case (state, msg) =>
-              def bad(): Unit = Output.warning("Ignored report message: " + msg)
+              def bad(): Unit = log.warning("Ignored report message: " + msg)
 
               msg match {
                 case XML.Elem(Markup(name, atts), args) =>
@@ -362,7 +363,7 @@ object Command {
               st
 
             case _ =>
-              Output.warning("Ignored message without serial number: " + message)
+              log.warning("Ignored message without serial number: " + message)
               this
           }
       }
@@ -430,28 +431,30 @@ object Command {
   /* blobs: inlined errors and auxiliary files */
 
   def blobs_info(
-    resources: Resources,
+    session: Session,
     syntax: Outer_Syntax,
     get_blob: Document.Node.Name => Option[Document.Blobs.Item],
     can_import: Document.Node.Name => Boolean,
     node_name: Document.Node.Name,
     span: Command_Span.Span
   ): Blobs_Info = {
+    val resources = session.resources
     span.name match {
       // inlined errors
       case Thy_Header.THEORY =>
         val reader = span.content_reader
-        val header = resources.check_thy(node_name, span.content_reader)
-        val imports_pos = header.imports_pos
+        val thy =
+          resources.check_thy(node_name, span.content_reader)
+            .eval_conditions(session.conditions)
         val raw_imports =
           try {
-            val read_imports = Thy_Header.read(node_name, reader).imports.map(_._1)
-            if (imports_pos.length == read_imports.length) read_imports else error("")
+            val read_imports = Thy_Header.read(node_name, reader).imports_no_pos
+            if (thy.imports.length == read_imports.length) read_imports else error("")
           }
-          catch { case _: Throwable => List.fill(header.imports.length)("") }
+          catch { case _: Throwable => List.fill(thy.imports.length)("") }
 
         val errors =
-          for { ((import_name, pos), s) <- imports_pos zip raw_imports if !can_import(import_name) }
+          for { ((import_name, pos), s) <- thy.imports zip raw_imports if !can_import(import_name) }
           yield {
             val completion =
               if (Url.is_base_name(s)) resources.complete_import_name(node_name, s) else Nil
@@ -518,7 +521,7 @@ final class Command private(
   def blobs_undefined: List[Document.Node.Name] =
     for (case Exn.Res(blob) <- blobs if blob.content.isEmpty) yield blob.name
 
-  def blobs_defined: List[(Document.Node.Name, SHA1.Digest)] =
+  def blobs_defined: List[(Document.Node.Name, Message_Digest.T)] =
     for (case Exn.Res(blob) <- blobs; (digest, _) <- blob.content) yield (blob.name, digest)
 
   def blobs_changed(doc_blobs: Document.Blobs): Boolean =
@@ -550,7 +553,7 @@ final class Command private(
     if (span.name == Thy_Header.THEORY) {
       try {
         val header = Thy_Header.read(node_name, span.content_reader)
-        for ((s, _) <- header.imports)
+        for (s <- header.imports_no_pos)
         yield {
           try { resources.import_name(node_name, s) }
           catch { case ERROR(_) => Document.Node.Name.empty }

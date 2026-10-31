@@ -291,6 +291,7 @@ proof (rule inj_onI)
     using lin [of x y] ne by (force simp: dual_order.order_iff_strict)
 qed
 
+text \<open>type class version of the above\<close>
 lemma linorder_inj_onI':
   fixes A :: "'a :: linorder set"
   assumes "\<And>i j. i \<in> A \<Longrightarrow> j \<in> A \<Longrightarrow> i < j \<Longrightarrow> f i \<noteq> f j"
@@ -300,8 +301,16 @@ lemma linorder_inj_onI':
 lemma linorder_injI:
   assumes "\<And>x y::'a::linorder. x < y \<Longrightarrow> f x \<noteq> f y"
   shows "inj f"
-    \<comment> \<open>Courtesy of Stephan Merz\<close>
 using assms by (simp add: linorder_inj_onI')
+
+lemma linorder_inj_on_iff:
+  fixes A :: "'a :: linorder set"
+  shows "inj_on f A \<longleftrightarrow> (\<forall>i j. i \<in> A \<longrightarrow> j \<in> A \<longrightarrow> i < j \<longrightarrow> f i \<noteq> f j)"  (is "?L = ?R")
+proof
+  assume rhs: ?R
+  then show ?L
+    by (blast intro: linorder_inj_onI')
+qed (auto simp: inj_on_def)
 
 lemma inj_on_image_Pow: "inj_on f A \<Longrightarrow>inj_on (image f) (Pow A)"
   unfolding Pow_def inj_on_def by blast
@@ -1085,6 +1094,9 @@ abbreviation strict_mono :: "('a \<Rightarrow> 'b::order) \<Rightarrow> bool"
 abbreviation antimono :: "('a \<Rightarrow> 'b::order) \<Rightarrow> bool"
   where "antimono \<equiv> monotone (\<le>) (\<lambda>x y. y \<le> x)"
 
+abbreviation strict_antimono :: "('a \<Rightarrow> 'b::preorder) \<Rightarrow> bool"
+  where "strict_antimono \<equiv> monotone (<) (\<lambda>x y. y < x)"
+
 lemma mono_def[no_atp]: "mono f \<longleftrightarrow> (\<forall>x y. x \<le> y \<longrightarrow> f x \<le> f y)"
   by (simp add: monotone_on_def)
 
@@ -1253,13 +1265,13 @@ lemmas strict_mono_less = strict_mono_on_less[OF _ UNIV_I UNIV_I]
 end
 
 lemma strict_mono_inv:
-  fixes f :: "('a::linorder) \<Rightarrow> ('b::linorder)"
-  assumes "strict_mono f" and "surj f" and inv: "\<And>x. g (f x) = x"
-  shows "strict_mono g"
+  fixes f :: "('a::linorder) \<Rightarrow> ('b::preorder)"
+  assumes "strict_mono_on UNIV f" and "surj f" and inv: "\<And>x. g (f x) = x"
+  shows "strict_mono_on UNIV g"
 proof
   fix x y :: 'b assume "x < y"
   from \<open>surj f\<close> obtain x' y' where [simp]: "x = f x'" "y = f y'" by blast
-  with \<open>x < y\<close> and \<open>strict_mono f\<close> have "x' < y'" by (simp add: strict_mono_less)
+  with \<open>x < y\<close> and \<open>strict_mono_on UNIV f\<close> have "x' < y'" by (simp add: strict_mono_less)
   with inv show "g x < g y" by simp
 qed
 
@@ -1295,9 +1307,9 @@ lemma strict_mono_on_eqD:
   using assms by (cases rule: linorder_cases) (auto dest: strict_mono_onD)
 
 lemma mono_imp_strict_mono:
-  fixes f :: "'a::order \<Rightarrow> 'b::order"
+  fixes f :: "'a::preorder \<Rightarrow> 'b::order"
   shows "\<lbrakk>mono_on S f; inj_on f S\<rbrakk> \<Longrightarrow> strict_mono_on S f"
-  by (auto simp add: monotone_on_def order_less_le inj_on_eq_iff)
+  by (auto simp add: monotone_on_def less_imp_le order_less_le inj_on_eq_iff)
 
 lemma strict_mono_iff_mono:
   fixes f :: "'a::linorder \<Rightarrow> 'b::order"
@@ -1308,9 +1320,9 @@ proof
 qed (auto intro: mono_imp_strict_mono)
 
 lemma antimono_imp_strict_antimono:
-  fixes f :: "'a::order \<Rightarrow> 'b::order"
+  fixes f :: "'a::preorder \<Rightarrow> 'b::order"
   shows "\<lbrakk>antimono_on S f; inj_on f S\<rbrakk> \<Longrightarrow> strict_antimono_on S f"
-  by (auto simp add: monotone_on_def order_less_le inj_on_eq_iff)
+  by (auto simp add: monotone_on_def less_imp_le order_less_le inj_on_eq_iff)
 
 lemma strict_antimono_iff_antimono:
   fixes f :: "'a::linorder \<Rightarrow> 'b::order"
@@ -1408,7 +1420,7 @@ simproc_setup fun_upd2 ("f(v := w, x := y)") = \<open>
           | find t = NONE
       in gen_fun_upd A B x y (find f) end
 
-    val ss = simpset_of \<^context>
+    val ss = Simplifier.simpset_of \<^context>
   in
     fn _ => fn ctxt => fn ct =>
       let val t = Thm.term_of ct in

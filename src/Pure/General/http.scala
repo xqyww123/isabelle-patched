@@ -7,6 +7,7 @@ HTTP client and server support.
 
 package isabelle
 
+import scala.language.unsafeNulls
 
 import java.io.{File => JFile}
 import java.nio.file.Files
@@ -25,10 +26,10 @@ object HTTP {
     val mime_type_js: String = "text/javascript; charset=utf-8"
 
     val default_mime_type: String = mime_type_bytes
-    val default_encoding: String = UTF8.charset.name
+    val default_encoding: String = UTF8.charset_name
 
     def file_mime_type(file: JFile): String =
-      Option(Files.probeContentType(file.toPath)).getOrElse(default_mime_type)
+      proper_value(Files.probeContentType(file.java_path)).getOrElse(default_mime_type)
 
     def bytes_mime_type(bytes: Bytes, ext: String = ""): String =
       if (ext.isEmpty) default_mime_type
@@ -50,7 +51,7 @@ object HTTP {
 
     def read(file: JFile): Content = {
       val bytes = Bytes.read(file)
-      val file_name = file.getName
+      val file_name = file.file_name
       val mime_type = file_mime_type(file)
       apply(bytes, file_name = file_name, mime_type = mime_type)
     }
@@ -105,7 +106,7 @@ object HTTP {
         val stop = Time.now()
 
         val file_name = Url.file_name(Url(connection.getURL.toURI))
-        val mime_type = Option(connection.getContentType).getOrElse(Content.default_mime_type)
+        val mime_type = proper_value(connection.getContentType).getOrElse(Content.default_mime_type)
         val encoding =
           (connection.getContentEncoding, mime_type) match {
             case (enc, _) if enc != null => enc
@@ -199,7 +200,7 @@ object HTTP {
 
     def uri_path: Option[Path] =
       for {
-        s <- Option(uri.getPath).flatMap(Library.try_unprefix(root, _))
+        s <- proper_value(uri.getPath).flatMap(Library.try_unprefix(root, _))
         if Path.is_wellformed(s)
         p = Path.explode(s) if p.all_basic
       } yield p
@@ -436,7 +437,7 @@ object HTTP {
     // example: .../docs/web/viewer.html?file=system.pdf
     def doc_request(request: Request): Option[Response] =
       for {
-        p <- request.uri_path if p.is_pdf
+        p <- request.uri_path if File.is_pdf(p)
         s = p.implode if s.startsWith("web/")
         name = p.base.split_ext._1.implode
         entry <- doc_contents.entries(name = _ == name, pdf = true).headOption

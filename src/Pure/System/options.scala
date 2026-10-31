@@ -6,14 +6,18 @@ System options with external string representation.
 
 package isabelle
 
+import scala.collection.immutable.{SortedSet, SortedMap}
+
 
 object Options {
   val empty: Options = new Options()
 
+  type Update = List[Spec]
+
   object Spec {
     val syntax: Outer_Syntax = Outer_Syntax.empty + "=" + ","
 
-    def parse(content: String): List[Spec] = {
+    def parse(content: String): Update = {
       val parser = Parsers.repsep(Parsers.option_spec, Parsers.$$$(","))
       val reader = Token.reader(Token.explode(syntax.keywords, content), Token.Pos.none)
       Parsers.parse_all(parser, reader) match {
@@ -31,7 +35,7 @@ object Options {
         case _ => Spec(s)
       }
 
-    def ISABELLE_BUILD_OPTIONS: List[Spec] =
+    def ISABELLE_BUILD_OPTIONS: Update =
       Word.explode(Isabelle_System.getenv("ISABELLE_BUILD_OPTIONS")).map(make)
 
     def print_value(s: String): String =
@@ -63,9 +67,12 @@ object Options {
       }
   }
 
-  sealed case class Change(name: String, value: String, unknown: Boolean) {
-    def spec: Spec = Spec.eq(name, value)
+  object Change {
+    def print_prefs(changed: Iterable[Change]): String =
+      changed.map(_.print_prefs).mkString
+ }
 
+  sealed case class Change(name: String, value: String, unknown: Boolean) {
     def print_prefs: String =
       name + " = " + Outer_Syntax.quote_string(value) +
         if_proper(unknown, "  (* unknown *)") + "\n"
@@ -102,6 +109,7 @@ object Options {
   case object String extends Type
   case object Unknown extends Type
 
+  val TAG_ML_PROCESS = "ML_process"  // global configuration of underlying ML process
   val TAG_CONTENT = "content"    // formal theory content
   val TAG_DOCUMENT = "document"  // document preparation
   val TAG_BUILD = "build"        // relevant for "isabelle build"
@@ -156,6 +164,7 @@ object Options {
     def unknown: Boolean = typ == Unknown
 
     def for_tag(tag: String): Boolean = tags.contains(tag)
+    def for_ML_process: Boolean = for_tag(TAG_ML_PROCESS)
     def for_content: Boolean = for_tag(TAG_CONTENT)
     def for_document: Boolean = for_tag(TAG_DOCUMENT)
     def for_color_dialog: Boolean = for_tag(TAG_COLOR_DIALOG)
@@ -203,6 +212,8 @@ object Options {
     val option_spec: Parser[Spec] =
       option_name ~ opt($$$("=") ~! option_value ^^ { case _ ~ x => x }) ^^
         { case x ~ y => Options.Spec(x, value = y) }
+    val options_update: Parser[Options.Update] =
+      $$$("[") ~> rep1sep(option_spec, $$$(",")) <~ $$$("]")
   }
 
   private object Parsers extends Parsers {
@@ -219,11 +230,12 @@ object Options {
             (options: Options) => options.declare(a.isDefined, pos, b, c, d, e, f, g) }
     }
 
-    val prefs_entry: Parser[Options => Options] = {
+    val prefs_spec: Parser[Options.Spec] =
       option_name ~ ($$$("=") ~! option_value) ^^
-      { case a ~ (_ ~ b) => (options: Options) =>
-          options + Options.Spec.eq(a, b, permissive = true) }
-    }
+      { case a ~ (_ ~ b) => Options.Spec.eq(a, b, permissive = true) }
+
+    val prefs_entry: Parser[Options => Options] =
+      prefs_spec ^^ (spec => (options: Options) => options + spec)
 
     def parse_file(
       options: Options,
@@ -244,6 +256,22 @@ object Options {
 
     def parse_prefs(options: Options, content: String): Options =
       parse_file(options, PREFS.file_name, content, syntax = prefs_syntax, parser = prefs_entry)
+
+    def parse_prefs_specs(content: String, start: Token.Pos): List[Options.Spec] = {
+      val toks = Token.explode(prefs_syntax.keywords, content)
+      parse_all(rep(prefs_spec), Token.reader(toks, start)) match {
+        case Success(result, _) => result
+        case bad => error(bad.toString)
+      }
+    }
+  }
+
+  def parse_prefs(content: String,
+    unknown: String => Boolean = _ => false,
+    start: Token.Pos = Token.Pos.none
+  ): List[Options.Change] = {
+    Parsers.parse_prefs_specs(content, start).map(spec =>
+      Change(spec.name, spec.value.getOrElse(""), unknown = unknown(spec.name)))
   }
 
   def read_prefs(file: Path = PREFS): String =
@@ -251,16 +279,16 @@ object Options {
 
   def inline(content: String): Options = Parsers.parse_file(empty, "inline", content)
 
-  def init(prefs: String = read_prefs(file = PREFS), specs: List[Spec] = Nil): Options = {
+  def init(prefs: String = read_prefs(file = PREFS), update: Update = Nil): Options = {
     var options = empty
     for {
       dir <- Components.directories()
       file = dir + OPTIONS if file.is_file
     } { options = Parsers.parse_file(options, file.implode, File.read(file)) }
-    Parsers.parse_prefs(options, prefs) ++ specs
+    Parsers.parse_prefs(options, prefs) ++ update
   }
 
-  def init0(): Options = init(prefs = "")
+  lazy val defaults: Options = init(prefs = "")
 
 
   /* Isabelle tool wrapper */
@@ -272,7 +300,6 @@ object Options {
       var get_option = ""
       var list_options = false
       var list_tags = List.empty[String]
-      var export_file = ""
 
       val getopts = Getopts("""
 Usage: isabelle options [OPTIONS] [MORE_OPTIONS ...]
@@ -282,7 +309,6 @@ Usage: isabelle options [OPTIONS] [MORE_OPTIONS ...]
     -g OPTION    get value of OPTION
     -l           list options
     -t TAGS      restrict list to given tags (comma-separated)
-    -x FILE      export options to FILE in YXML format
 
   Report Isabelle system options, augmented by MORE_OPTIONS given as
   arguments NAME=VAL or NAME.
@@ -290,52 +316,67 @@ Usage: isabelle options [OPTIONS] [MORE_OPTIONS ...]
         "b" -> (_ => build_options = true),
         "g:" -> (arg => get_option = arg),
         "l" -> (_ => list_options = true),
-        "t:" -> (arg => list_tags = space_explode(',', arg)),
-        "x:" -> (arg => export_file = arg))
+        "t:" -> (arg => list_tags = space_explode(',', arg)))
 
       val more_options = getopts(args)
-      if (get_option == "" && !list_options && export_file == "") getopts.usage()
+      if (get_option.isEmpty && !list_options) getopts.usage()
 
-      val options = {
-        val options0 = Options.init()
-        val options1 =
-          if (build_options) options0 ++ Options.Spec.ISABELLE_BUILD_OPTIONS else options0
-        more_options.foldLeft(options1)(_ + _)
+      val options =
+        more_options.foldLeft(
+          Options.init(update = if (build_options) Options.Spec.ISABELLE_BUILD_OPTIONS else Nil)
+        )(_ + _)
+
+
+      val progress = new Console_Progress()
+
+      if (get_option.nonEmpty) {
+        progress.echo(options.check_name(get_option).value)
       }
-
-      if (get_option != "") {
-        Output.writeln(options.check_name(get_option).value, stdout = true)
-      }
-
-      if (export_file != "") {
-        File.write(Path.explode(export_file), YXML.string_of_body(options.encode))
-      }
-
-      if (get_option == "" && export_file == "") {
+      else {
         val filter: Options.Entry => Boolean =
           if (list_tags.isEmpty) (_ => true)
           else opt => list_tags.exists(opt.for_tag)
-        Output.writeln(options.print(filter = filter), stdout = true)
+        progress.echo(options.print(filter = filter))
       }
     })
+
+
+  /* encode */
+
+  def encode(options: Options): XML.Body = {
+    val opts =
+      List.from(
+        for (opt <- options.iterator if !opt.unknown)
+          yield (opt.pos, (opt.name, (opt.typ.print, (opt.value, opt.standard_value)))))
+
+    import XML.Encode.{string => string_, _}
+    list(pair(properties, pair(string_, pair(string_, pair(string_, option(string_))))))(opts)
+  }
 }
 
 
 final class Options private(
-  options: Map[String, Options.Entry] = Map.empty,
+  options: SortedMap[String, Options.Entry] = SortedMap.empty,
   val section: String = ""
 ) {
   def defined(name: String): Boolean = options.isDefinedAt(name)
 
   def iterator: Iterator[Options.Entry] = options.valuesIterator
 
-  override def toString: String = iterator.mkString("Options(", ",", ")")
+  override def toString: String = {
+    val prefs =
+      changed() match {
+        case Nil => quote("")
+        case ch => quote(quote(quote("\n" + Options.Change.print_prefs(ch))))
+      }
+    "Options.init(prefs = " + prefs + ")"
+  }
 
   private def print_entry(opt: Options.Entry): String =
     if_proper(opt.public, "public ") + opt.print
 
   def print(filter: Options.Entry => Boolean = _ => true): String =
-    cat_lines(iterator.filter(filter).toList.sortBy(_.name).map(print_entry))
+    cat_lines(iterator.flatMap(entry => if (filter(entry)) Some(print_entry(entry)) else None))
 
   def description(name: String): String = check_name(name).description
 
@@ -357,6 +398,12 @@ final class Options private(
     val opt = check_name(name)
     if (opt.typ == typ) opt
     else error("Ill-typed option " + quote(name) + " : " + opt.typ.print + " vs. " + typ.print)
+  }
+
+  def check_update(specs: Options.Update): Options.Update = {
+    val options1 = this ++ specs
+    for (name <- SortedSet.from(specs.iterator.map(_.name)).toList)
+      yield Options.Spec(name, value = options1.get(name).map(_.value))
   }
 
 
@@ -409,7 +456,7 @@ final class Options private(
   def threads(default: => Int = Multithreading.num_processors()): Int =
     Multithreading.max_threads(value = int("threads"), default = default)
 
-  def standard_ml(): Options = int.update("threads", threads())
+  def ml_threads(): Options = int.update("threads", threads())
 
 
   /* external updates */
@@ -435,6 +482,9 @@ final class Options private(
     tags: List[String],
     description: String
   ): Options = {
+    if (!Symbol.is_ascii_identifier(name) || Value.Boolean.unapply(name).isDefined) {
+      error("Bad option name " + quote(name) + Position.here(pos))
+    }
     get(name) match {
       case Some(other) =>
         error("Duplicate declaration of option " + quote(name) + Position.here(pos) +
@@ -465,29 +515,39 @@ final class Options private(
     }
   }
 
-  def + (spec: Options.Spec): Options = {
-    val name = spec.name
-    if (spec.permissive && !defined(name)) {
-      val value = spec.value.getOrElse("")
-      val opt =
-        Options.Entry(false, Position.none, name, Options.Unknown, value, value, None, Nil, "", "")
-      new Options(options + (name -> opt), section)
-    }
+  def spec_unknown(spec: Options.Spec): Boolean =
+    spec.permissive && !defined(spec.name)
+
+  def spec_value(spec: Options.Spec): String =
+    if (spec_unknown(spec)) spec.value.getOrElse("")
     else {
+      val name = spec.name
       val opt = check_name(name)
-      def put(value: String): Options =
-        (new Options(options + (name -> opt.copy(value = value)), section)).check_value(name)
       spec.value orElse opt.standard_value match {
-        case Some(value) => put(value)
-        case None if opt.typ == Options.Bool => put("true")
+        case Some(value) => value
+        case None if opt.typ == Options.Bool => "true"
         case None => error("Missing value for option " + quote(name) + " : " + opt.typ.print)
       }
     }
+
+  def + (spec: Options.Spec): Options = {
+    val name = spec.name
+    val value = spec_value(spec)
+    val unknown = spec_unknown(spec)
+
+    val opt =
+      if (unknown) {
+        Options.Entry(false, Position.none, name, Options.Unknown, value, value, None, Nil, "", "")
+      }
+      else check_name(name).copy(value = value)
+
+    val result = new Options(options + (name -> opt), section)
+    if (unknown) result else result.check_value(name)
   }
 
   def + (s: String): Options = this + Options.Spec.make(s)
 
-  def ++ (specs: List[Options.Spec]): Options = specs.foldLeft(this)(_ + _)
+  def ++ (update: Options.Update): Options = update.foldLeft(this)(_ + _)
 
 
   /* sections */
@@ -499,22 +559,10 @@ final class Options private(
     options.groupBy(_._2.section).toList.map({ case (a, opts) => (a, opts.toList.map(_._2)) })
 
 
-  /* encode */
-
-  def encode: XML.Body = {
-    val opts =
-      for ((_, opt) <- options.toList; if !opt.unknown)
-        yield (opt.pos, (opt.name, (opt.typ.print, opt.value)))
-
-    import XML.Encode.{string => string_, _}
-    list(pair(properties, pair(string_, pair(string_, string_))))(opts)
-  }
-
-
   /* changed options */
 
   def changed(
-    defaults: Options = Options.init0(),
+    defaults: Options = Options.defaults,
     filter: Options.Entry => Boolean = _ => true
   ): List[Options.Change] = {
     List.from(
@@ -522,18 +570,18 @@ final class Options private(
         (name, opt2) <- options.iterator
         opt1 = defaults.get(name)
         if (opt1.isEmpty || opt1.get.value != opt2.value) && filter(opt2)
-      } yield Options.Change(name, opt2.value, opt1.isEmpty)).sortBy(_.name)
+      } yield Options.Change(name, opt2.value, opt1.isEmpty))
   }
 
 
   /* preferences */
 
   def make_prefs(
-    defaults: Options = Options.init0(),
+    defaults: Options = Options.defaults,
     filter: Options.Entry => Boolean = _ => true
-  ): String = changed(defaults = defaults, filter = filter).map(_.print_prefs).mkString
+  ): String = Options.Change.print_prefs(changed(defaults = defaults, filter = filter))
 
-  def save_prefs(file: Path = Options.PREFS, defaults: Options = Options.init0()): Unit = {
+  def save_prefs(file: Path = Options.PREFS, defaults: Options = Options.defaults): Unit = {
     val prefs = make_prefs(defaults = defaults)
     Isabelle_System.make_directory(file.dir)
     File.write_backup(file, "(* generated by Isabelle " + Date.now() + " *)\n\n" + prefs)

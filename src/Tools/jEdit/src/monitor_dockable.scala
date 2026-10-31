@@ -6,6 +6,7 @@ Monitor for runtime statistics.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -51,15 +52,15 @@ class Monitor_Dockable(view: View, position: String) extends Dockable(view, posi
   private def update_chart(): Unit = {
     ML_Statistics.all_fields.find(_.title == data_name) match {
       case None =>
-      case Some(fields) => ML_Statistics(statistics.toList).update_data(data, fields.names)
+      case Some(fields) => ML_Statistics(statistics.toList).update_data(data, fields.content)
     }
   }
 
   private val input_delay =
-    Delay.first(PIDE.session.input_delay, gui = true) { update_chart() }
+    GUI.Delay.first(PIDE.session.input_delay) { update_chart() }
 
   private val update_delay =
-    Delay.first(PIDE.session.chart_delay, gui = true) { update_chart() }
+    GUI.Delay.first(PIDE.session.chart_delay) { update_chart() }
 
 
   /* controls */
@@ -107,7 +108,7 @@ class Monitor_Dockable(view: View, position: String) extends Dockable(view, posi
   /* main */
 
   private val main =
-    Session.Consumer[Session.Runtime_Statistics](getClass.getName) {
+    Session.Consumer[Session.Runtime_Statistics](this.class_name) {
       stats =>
         add_statistics(stats.props)
         update_delay.invoke()

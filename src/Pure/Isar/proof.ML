@@ -113,12 +113,12 @@ sig
   val local_terminal_proof: Method.text_range * Method.text_range option -> state -> state
   val local_default_proof: state -> state
   val local_immediate_proof: state -> state
-  val local_skip_proof: bool -> state -> state
+  val local_skip_proof: state -> state
   val local_done_proof: state -> state
   val global_terminal_proof: Method.text_range * Method.text_range option -> state -> context
   val global_default_proof: state -> context
   val global_immediate_proof: state -> context
-  val global_skip_proof: bool -> state -> context
+  val global_skip_proof: state -> context
   val global_done_proof: state -> context
   val internal_goal: (context -> (string * string) * (string * thm list) list -> unit) ->
     Proof_Context.mode -> bool -> string -> Method.text option ->
@@ -129,19 +129,19 @@ sig
   val have: bool -> Method.text option -> (context * thm list list -> state -> state) ->
     (binding * typ option * mixfix) list ->
     (Thm.binding * (term * term list) list) list ->
-    (Thm.binding * (term * term list) list) list -> bool -> state -> thm list * state
+    (Thm.binding * (term * term list) list) list -> state -> thm list * state
   val have_cmd: bool -> Method.text option -> (context * thm list list -> state -> state) ->
     (binding * string option * mixfix) list ->
     (Attrib.binding * (string * string list) list) list ->
-    (Attrib.binding * (string * string list) list) list -> bool -> state -> thm list * state
+    (Attrib.binding * (string * string list) list) list -> state -> thm list * state
   val show: bool -> Method.text option -> (context * thm list list -> state -> state) ->
     (binding * typ option * mixfix) list ->
     (Thm.binding * (term * term list) list) list ->
-    (Thm.binding * (term * term list) list) list -> bool -> state -> thm list * state
+    (Thm.binding * (term * term list) list) list -> state -> thm list * state
   val show_cmd: bool -> Method.text option -> (context * thm list list -> state -> state) ->
     (binding * string option * mixfix) list ->
     (Attrib.binding * (string * string list) list) list ->
-    (Attrib.binding * (string * string list) list) list -> bool -> state -> thm list * state
+    (Attrib.binding * (string * string list) list) list -> state -> thm list * state
   val future_proof: (state -> ('a * context) future) -> state -> 'a future * state
   val local_future_terminal_proof: Method.text_range * Method.text_range option -> state -> state
   val global_future_terminal_proof: Method.text_range * Method.text_range option -> state -> context
@@ -1184,18 +1184,21 @@ fun terminal_proof qeds initial terminal state =
   let
     val ctxt = context_of state;
     val check_closure = Method.check_text ctxt #> Method.map_source (Method.method_closure ctxt);
-    val initial' = apfst check_closure initial;
-    val terminal' = (apfst o Option.map o apfst) check_closure terminal;
+    val (initial_text, initial_range) = apfst check_closure initial;
+    val (terminal_method, terminal_immed) = (apfst o Option.map o apfst) check_closure terminal;
   in
     if Goal.skip_proofs_enabled () andalso not (is_relevant state) then
-      state
-      |> proof (SOME (Method.sorry_text true, #2 initial'))
-      |> Seq.maps_results (qeds (#2 (#2 initial), (NONE, #2 terminal)))
+      Interactive.setmp true (fn () =>
+        state
+        |> proof (SOME (Method.sorry_text, initial_range))
+        |> Seq.maps_results (qeds (#1 initial_range, (NONE, terminal_immed)))
+        |> Seq.the_result "") ()
     else
       state
-      |> proof (SOME initial')
-      |> Seq.maps_results (qeds (#2 (#2 initial), terminal'))
-  end |> Seq.the_result "";
+      |> proof (SOME (initial_text, initial_range))
+      |> Seq.maps_results (qeds (#1 initial_range, (terminal_method, terminal_immed)))
+      |> Seq.the_result ""
+  end;
 
 in
 
@@ -1216,12 +1219,12 @@ end;
 
 (* skip proofs *)
 
-fun local_skip_proof int state =
-  local_terminal_proof ((Method.sorry_text int, Position.no_range), NONE) state before
+fun local_skip_proof state =
+  local_terminal_proof ((Method.sorry_text, Position.no_range), NONE) state before
   Skip_Proof.report (context_of state);
 
-fun global_skip_proof int state =
-  global_terminal_proof ((Method.sorry_text int, Position.no_range), NONE) state before
+fun global_skip_proof state =
+  global_terminal_proof ((Method.sorry_text, Position.no_range), NONE) state before
   Skip_Proof.report (context_of state);
 
 
@@ -1233,13 +1236,15 @@ fun internal_goal print_results mode =
 
 local
 
-fun gen_have prep_statement prep_att strict_asm before_qed after_qed fixes assumes shows int =
+fun gen_have prep_statement prep_att strict_asm before_qed after_qed fixes assumes shows state =
   local_goal
-    (Proof_Display.print_results {interactive = int, pos = Position.thread_data ()})
-    prep_statement prep_att strict_asm "have" before_qed after_qed fixes assumes shows;
+    (Proof_Display.print_results {verbose = Interactive.enabled (), pos = Position.thread_data ()})
+    prep_statement prep_att strict_asm "have" before_qed after_qed fixes assumes shows state;
 
-fun gen_show prep_statement prep_att strict_asm before_qed after_qed fixes assumes shows int state =
+fun gen_show prep_statement prep_att strict_asm before_qed after_qed fixes assumes shows state =
   let
+    val verbose = Interactive.enabled ();
+
     val testing = Unsynchronized.ref false;
     val rule = Unsynchronized.ref (NONE: thm option);
     fun fail_msg ctxt =
@@ -1249,16 +1254,17 @@ fun gen_show prep_statement prep_att strict_asm before_qed after_qed fixes assum
 
     fun print_results ctxt res =
       if ! testing then ()
-      else Proof_Display.print_results {interactive = int, pos = Position.thread_data ()} ctxt res;
+      else Proof_Display.print_results {verbose = verbose, pos = Position.thread_data ()} ctxt res;
     fun print_rule ctxt th =
       if ! testing then rule := SOME th
-      else if int then
+      else if verbose then
         Proof_Display.string_of_rule ctxt "Successful" th
         |> Markup.markup Markup.text_fold
         |> Output.writeln_urgent
       else ();
     val test_proof =
-      local_skip_proof true
+      local_skip_proof
+      |> Interactive.setmp true
       |> Unsynchronized.setmp testing true
       |> Exn.result;
 
@@ -1270,7 +1276,7 @@ fun gen_show prep_statement prep_att strict_asm before_qed after_qed fixes assum
     state
     |> local_goal print_results prep_statement prep_att strict_asm
       "show" before_qed after_qed' fixes assumes shows
-    ||> int ? (fn goal_state =>
+    ||> verbose ? (fn goal_state =>
       (case test_proof (map_context (Context_Position.set_visible false) goal_state) of
         Exn.Res _ => goal_state
       | Exn.Exn exn => raise Exn.EXCEPTIONS ([exn, ERROR (fail_msg (context_of goal_state))])))

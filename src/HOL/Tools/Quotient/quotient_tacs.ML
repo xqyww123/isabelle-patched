@@ -33,7 +33,7 @@ struct
 (* Since HOL_basic_ss is too "big" for us, we *)
 (* need to set up our own minimal simpset.    *)
 fun mk_minimal_simpset ctxt =
-  empty_simpset ctxt
+  Simplifier.empty_simpset ctxt
   |> Simplifier.set_subgoaler asm_simp_tac
   |> Simplifier.set_mksimps (mksimps [])
 
@@ -54,14 +54,14 @@ fun atomize_thm ctxt thm =
 fun equiv_tac ctxt =
   REPEAT_ALL_NEW (resolve_tac ctxt (rev (Named_Theorems.get ctxt \<^named_theorems>\<open>quot_equiv\<close>)))
 
-val equiv_solver = mk_solver "Equivalence goal solver" equiv_tac
+val equiv_solver = Simplifier.mk_solver "Equivalence goal solver" equiv_tac
 
 fun quotient_tac ctxt =
   (REPEAT_ALL_NEW (FIRST'
     [resolve_tac ctxt @{thms identity_quotient3},
      resolve_tac ctxt (rev (Named_Theorems.get ctxt \<^named_theorems>\<open>quot_thm\<close>))]))
 
-val quotient_solver = mk_solver "Quotient goal solver" quotient_tac
+val quotient_solver = Simplifier.mk_solver "Quotient goal solver" quotient_tac
 
 fun solve_quotient_assm ctxt thm =
   case Seq.pull (quotient_tac ctxt 1 thm) of

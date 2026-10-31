@@ -3,52 +3,45 @@
 Non-unicode Isabelle symbols as text decorations.
 */
 
-'use strict';
+"use strict";
 
 import { DecorationRangeBehavior, ExtensionContext, Range,
-  TextDocument, TextEditor, window, workspace } from 'vscode'
-import * as symbol from './symbol'
+  TextDocument, TextEditor, window, workspace } from "vscode"
+
+import * as Symbol from "./symbol"
+
 
 const arrows = {
-  sub: symbol.control.sub.decoded,
-  sup: symbol.control.sup.decoded,
-  bold: symbol.control.bold.decoded,
-  bsub: symbol.control.bsub.decoded,
-  esub: symbol.control.esub.decoded,
-  bsup: symbol.control.bsup.decoded,
-  esup: symbol.control.esup.decoded
+  sub: Symbol.control.sub.decoded,
+  sup: Symbol.control.sup.decoded,
+  bold: Symbol.control.bold.decoded,
+  bsub: Symbol.control.bsub.decoded,
+  esub: Symbol.control.esub.decoded,
+  bsup: Symbol.control.bsup.decoded,
+  esup: Symbol.control.esup.decoded
 }
-const no_hide_list = [' ', '\n', '\r', ...Object.values(arrows)]
+const no_hide_list = [" ", "\n", "\r", ...Object.values(arrows)]
 
-function should_hide(next_char: string): boolean
-{
+function should_hide(next_char: string): boolean {
   return !no_hide_list.includes(next_char)
 }
 
-function find_closing(close: string, text: string, open_index: number): number | undefined
-{
+function find_closing(close: string, text: string, open_index: number): number | undefined {
   let close_index = open_index
   let counter = 1
   const open = text[open_index]
   while (counter > 0) {
-    let c = text[++close_index]
+    const c = text[++close_index]
 
     if (c === undefined) return
 
-    if (c === open) {
-      counter++
-    }
-    else if (c === close) {
-      counter--
-    }
+    if (c === open) { counter++ }
+    else if (c === close) { counter-- }
   }
   return close_index
 }
 
-
-
-function extract_ranges(doc: TextDocument)
-{
+function extract_ranges(doc: TextDocument) {
   const text = doc.getText()
   const hide_ranges: Range[] = []
   const sup_ranges: Range[] = []
@@ -70,7 +63,7 @@ function extract_ranges(doc: TextDocument)
         break
       case arrows.bsup:
       case arrows.bsub:
-        const close = text[i] === arrows.bsub ? arrows.esub : arrows.bsup
+        const close = text[i] === arrows.bsub ? arrows.esub : arrows.esup
         const script_ranges = text[i] === arrows.bsub ? sub_ranges : sup_ranges
         const close_index = find_closing(close, text, i)
 
@@ -79,8 +72,7 @@ function extract_ranges(doc: TextDocument)
           const pos_end = doc.positionAt(close_index)
           hide_ranges.push(
             new Range(doc.positionAt(i), pos_start),
-            new Range(pos_end, doc.positionAt(close_index + 1))
-          )
+            new Range(pos_end, doc.positionAt(close_index + 1)))
           script_ranges.push(new Range(pos_start, pos_end))
           i = close_index
         }
@@ -90,31 +82,33 @@ function extract_ranges(doc: TextDocument)
     }
   }
 
-  return { hide_ranges: hide_ranges, superscript_ranges: sup_ranges, subscript_ranges: sub_ranges, bold_ranges: bold_ranges }
+  return { hide_ranges: hide_ranges, superscript_ranges: sup_ranges,
+    subscript_ranges: sub_ranges, bold_ranges: bold_ranges }
 }
 
-export function register_script_decorations(context: ExtensionContext)
-{
+export function register_script_decorations(context: ExtensionContext) {
   const hide = window.createTextEditorDecorationType({
-    textDecoration: 'none; font-size: 0.001em',
+    textDecoration: "none; font-size: 0.001em",
     rangeBehavior: DecorationRangeBehavior.ClosedClosed
   })
 
   const superscript = window.createTextEditorDecorationType({
-    textDecoration: 'none; position: relative; top: -0.5em; font-size: 80%'
+    textDecoration: "none; position: relative; top: -0.5em; font-size: 80%"
   })
 
   const subscript = window.createTextEditorDecorationType({
-    textDecoration: 'none; position: relative; bottom: -0.5em; font-size: 80%'
+    textDecoration: "none; position: relative; bottom: -0.5em; font-size: 80%"
   })
 
   const bold = window.createTextEditorDecorationType({
-    textDecoration: 'none; font-weight: bold'
+    textDecoration: "none; font-weight: bold"
   })
 
   const set_editor_decorations = (editor: TextEditor, doc: TextDocument) =>
     {
-      const { hide_ranges: hideRanges, superscript_ranges: superscriptRanges, subscript_ranges: subscriptRanges, bold_ranges: boldRanges } = extract_ranges(doc)
+      const 
+        { hide_ranges: hideRanges, superscript_ranges: superscriptRanges,
+          subscript_ranges: subscriptRanges, bold_ranges: boldRanges } = extract_ranges(doc)
 
       editor.setDecorations(hide, hideRanges)
       editor.setDecorations(superscript, superscriptRanges)
@@ -127,9 +121,7 @@ export function register_script_decorations(context: ExtensionContext)
 
     window.onDidChangeActiveTextEditor(editor =>
       {
-        if (!editor) {
-          return
-        }
+        if (!editor) { return }
 
         const doc = editor.document
         set_editor_decorations(editor, doc)

@@ -95,7 +95,7 @@ DOTNET_CLI_HOME="$(platform_path "$ISABELLE_HOME_USER/dotnet")"
 
     /* platform directories */
 
-    for (platform <- all_platforms if platforms.exists(platform.is)) {
+    for (platform <- all_platforms if platforms.exists(platform.test)) {
       progress.expose_interrupt()
 
       Isabelle_System.with_tmp_file("install", ext = platform.ext) { install =>
@@ -119,9 +119,8 @@ DOTNET_CLI_HOME="$(platform_path "$ISABELLE_HOME_USER/dotnet")"
               " -NoPath"
           progress.bash(script, echo = progress.verbose,
             cwd = if (dry_run) Path.current else component_dir.path).check
-          for (exe <- File.find_files(platform_dir.file, pred = _.getName.endsWith(".exe"))) {
-            File.set_executable(File.path(exe))
-          }
+          File.find_files(platform_dir, pred = File.is_exe)
+            .foreach(File.set_executable(_))
         }
       }
     }

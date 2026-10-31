@@ -276,7 +276,7 @@ fun mk_infos_of_mutually_recursive_new_datatypes prefs check_names fpT_names0 lt
     val ctr_Tsss = map (map (map (Old_Datatype_Aux.typ_of_dtyp descr) o snd) o #3 o snd) descr;
     val kkssss = map (map (map body_rec_indices o snd) o #3 o snd) descr;
 
-    val callers = map (fn kk => Var ((Name.uu, kk), \<^typ>\<open>unit => unit\<close>)) (0 upto nn - 1);
+    val callers = map_range (fn kk => Var ((Name.uu, kk), \<^typ>\<open>unit => unit\<close>)) nn;
 
     fun apply_comps n kk =
       mk_partial_compN n (replicate n HOLogic.unitT ---> HOLogic.unitT) (nth callers kk);
@@ -541,11 +541,14 @@ fun add_datatype prefs old_specs thy =
 
 fun old_of_new f (ts, _, simpss) = (ts, f simpss);
 
-val primrec = apfst (old_of_new flat) ooo BNF_LFP_Rec_Sugar.primrec false [];
-val primrec_global = apfst (old_of_new flat) ooo BNF_LFP_Rec_Sugar.primrec_global false [];
-val primrec_overloaded = apfst (old_of_new flat) oooo BNF_LFP_Rec_Sugar.primrec_overloaded false [];
-val primrec_simple = apfst (apfst fst o apsnd (old_of_new (flat o snd))) ooo
-  BNF_LFP_Rec_Sugar.primrec_simple false;
+val primrec = apfst (old_of_new flat) ooo BNF_LFP_Rec_Sugar.primrec {verbose = false} [];
+val primrec_global =
+  apfst (old_of_new flat) ooo BNF_LFP_Rec_Sugar.primrec_global {verbose = false} [];
+val primrec_overloaded =
+  apfst (old_of_new flat) oooo BNF_LFP_Rec_Sugar.primrec_overloaded {verbose = false} [];
+val primrec_simple =
+  apfst (apfst fst o apsnd (old_of_new (flat o snd))) ooo
+    BNF_LFP_Rec_Sugar.primrec_simple {verbose = false};
 
 val _ =
   Outer_Syntax.local_theory \<^command_keyword>\<open>datatype_compat\<close>

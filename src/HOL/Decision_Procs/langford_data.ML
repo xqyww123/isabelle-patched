@@ -24,7 +24,7 @@ structure Data = Generic_Data
   type T = simpset * (thm * entry) list;
   val empty = (HOL_basic_ss, []);
   fun merge ((ss1, es1), (ss2, es2)) : T =
-    (merge_ss (ss1, ss2), AList.merge eq_key (K true) (es1, es2));
+    (Simplifier.merge_ss (ss1, ss2), AList.merge eq_key (K true) (es1, es2));
 );
 
 val get = Data.get o Context.Proof;
@@ -38,10 +38,10 @@ fun add entry =
     (del_data key #> apsnd (cons (key, entry))));
 
 val add_simp = Thm.declaration_attribute (fn th => fn context =>
-  (Data.map o apfst) (simpset_map (Context.proof_of context) (Simplifier.add_simp th)) context);
+  (Data.map o apfst) (Simplifier.simpset_map (Context.proof_of context) (Simplifier.add_simp th)) context);
 
 val del_simp = Thm.declaration_attribute (fn th => fn context =>
-  (Data.map o apfst) (simpset_map (Context.proof_of context) (Simplifier.del_simp th)) context);
+  (Data.map o apfst) (Simplifier.simpset_map (Context.proof_of context) (Simplifier.del_simp th)) context);
 
 fun match ctxt tm =
   let

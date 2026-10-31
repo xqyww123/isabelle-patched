@@ -649,7 +649,7 @@ proof -
   proof
     show "a = b*(k - 1)" using asm by(simp add: algebra_simps)
   qed
-  then show ?thesis using assms by(auto simp add: dvd_def)
+  then show ?thesis using assms by(simp)
 qed
 
 text\<open>
@@ -992,7 +992,7 @@ proof(induction rule: ev.induct)
 next
   case (evSS m)
   have "evn(Suc(Suc m)) = evn m" by simp
-  thus ?case using `evn m` by blast
+  thus ?case using \<open>evn m\<close> by blast
 qed
 
 text\<open>

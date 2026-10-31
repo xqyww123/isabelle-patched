@@ -80,6 +80,15 @@ structure Quantifier1 = Quantifier1
   val iff_exI = @{thm iff_exI}
   val all_comm = @{thm all_comm}
   val ex_comm = @{thm ex_comm}
+  fun atomizable ctxt t =
+    let
+      fun is_Trueprop \<^Const_>\<open>Trueprop for _\<close> = true
+        | is_Trueprop _ = false;
+      val body = Term.strip_all_body t
+    in
+      is_Trueprop (Logic.strip_imp_concl body)
+      andalso forall (atomizable ctxt) (Logic.strip_imp_prems body)
+    end
   val atomize =
     let val rules = @{thms atomize_all atomize_imp atomize_eq atomize_iff atomize_conj}
     in fn ctxt => Simplifier.rewrite_wrt ctxt true rules end
@@ -124,16 +133,16 @@ fun safe_solver ctxt =
 
 (*No simprules, but basic infastructure for simplification*)
 val FOL_basic_ss =
-  empty_simpset \<^context>
-  |> Simplifier.set_safe_solver (mk_solver "FOL safe" safe_solver)
-  |> Simplifier.set_unsafe_solver (mk_solver "FOL unsafe" unsafe_solver)
-  |> Simplifier.set_subgoaler asm_simp_tac
-  |> Simplifier.set_mksimps (mksimps mksimps_pairs)
-  |> Simplifier.set_mkcong mk_meta_cong
-  |> simpset_of;
+  Simplifier.empty_ss
+  |> Simplifier.simpset_map \<^context>
+    (Simplifier.set_safe_solver (Simplifier.mk_solver "FOL safe" safe_solver)
+    #> Simplifier.set_unsafe_solver (Simplifier.mk_solver "FOL unsafe" unsafe_solver)
+    #> Simplifier.set_subgoaler asm_simp_tac
+    #> Simplifier.set_mksimps (mksimps mksimps_pairs)
+    #> Simplifier.set_mkcong mk_meta_cong);
 
 fun unfold_tac ctxt ths =
-  ALLGOALS (full_simp_tac (clear_simpset (put_simpset FOL_basic_ss ctxt) |> Simplifier.add_simps ths));
+  ALLGOALS (full_simp_tac (ctxt |> put_simpset FOL_basic_ss |> Simplifier.clear_simpset |> Simplifier.add_simps ths));
 
 
 (*** integration of simplifier with classical reasoner ***)

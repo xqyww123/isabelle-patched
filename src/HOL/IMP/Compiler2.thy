@@ -193,16 +193,15 @@ lemma exits_simps [simp]:
 
 lemma acomp_succs [simp]:
   "succs (acomp a) n = {n + 1 .. n + size (acomp a)}"
-  by (induct a arbitrary: n) auto
- 
+by (induct a arbitrary: n) auto
+
+lemma acomp_size:
+  "1 \<le> size (acomp a)"
+by (induction a) auto
+
 lemma acomp_exits [simp]:
   "exits (acomp a) = {size (acomp a)}"
-proof -
-  have "Suc 0 \<le> length (acomp a)" 
-    by (induct a) auto
-  then show ?thesis
-    by (auto simp add: exits_def)
-qed
+using acomp_size by (auto simp add: exits_def)
 
 lemma bcomp_succs:
   "0 \<le> i \<Longrightarrow>

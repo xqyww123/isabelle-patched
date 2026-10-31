@@ -432,7 +432,8 @@ fun serialize_scala case_insensitive ctxt { module_name, reserved_syms, identifi
 
     (* print modules *)
     fun print_module _ base _ ps = Pretty.chunks2
-      (Pretty.str ("object " ^ base ^ " {")
+      (Pretty.str "import scala.language.unsafeNulls"
+        :: Pretty.str ("object " ^ base ^ " {")
         :: ps @| Pretty.str ("} /* object " ^ base ^ " */"));
 
     (* serialization *)
@@ -467,7 +468,7 @@ val _ = Theory.setup
   (Code_Target.add_language
     (target, { serializer = serializer, literals = literals,
       check = { env_var = "SCALA_HOME",
-        make_destination = fn p => p + Path.explode "ROOT.scala",
+        make_destination = fn p => p + \<^path>\<open>ROOT.scala\<close>,
         run_command = Code_Target.run_command_bash (fn _ =>
           \<^verbatim>\<open>isabelle_scala scalac $ISABELLE_SCALAC_OPTIONS ROOT.scala\<close>)},
       evaluation_args = Token.explode0 Keyword.empty_keywords "case_insensitive"})

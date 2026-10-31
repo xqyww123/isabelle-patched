@@ -272,9 +272,12 @@ lemma union_mset_add_mset_right [simp]:
   "A + add_mset a B = add_mset a (A + B)"
   by (auto simp: multiset_eq_iff)
 
-(* TODO: reverse arguments to prevent unfolding loop *)
-lemma add_mset_add_single: \<open>add_mset a A = A + {#a#}\<close>
-  by (subst union_mset_add_mset_right, subst add.comm_neutral) standard
+
+lemma add_single_right_eq_add_mset: \<open>A + {#a#} = add_mset a A\<close>
+  by simp
+
+lemma add_single_left_eq_add_mset: \<open>{#a#} + A = add_mset a A\<close>
+  by simp
 
 
 subsubsection \<open>Difference\<close>
@@ -434,7 +437,7 @@ lemma diff_single_eq_union: "x \<in># M \<Longrightarrow> M - {#x#} = N \<longle
   by auto
 
 lemma union_single_eq_diff: "add_mset x M = N \<Longrightarrow> M = N - {#x#}"
-  unfolding add_mset_add_single[of _ M] by (fact add_implies_diff)
+  unfolding add_single_right_eq_add_mset[symmetric, of _ M] by (fact add_implies_diff)
 
 lemma union_single_eq_member: "add_mset x M = N \<Longrightarrow> x \<in># N"
   by auto
@@ -450,9 +453,10 @@ lemma union_is_single:
   "M + N = {#a#} \<longleftrightarrow> M = {#a#} \<and> N = {#} \<or> M = {#} \<and> N = {#a#}"
   (is "?lhs = ?rhs")
 proof
-  show ?lhs if ?rhs using that by auto
-  show ?rhs if ?lhs
-    by (metis Multiset.diff_cancel add.commute add_diff_cancel_left' diff_add_zero diff_single_trivial insert_DiffM that)
+  show "?rhs \<Longrightarrow> ?lhs" by auto
+  show "?lhs \<Longrightarrow> ?rhs"
+    by (metis Multiset.diff_cancel add.commute[of _ M] add_diff_cancel_left' diff_add_zero
+        diff_single_trivial[of a] insert_DiffM[of a])
 qed
 
 lemma single_is_union: "{#a#} = M + N \<longleftrightarrow> {#a#} = M \<and> N = {#} \<or> M = {#} \<and> {#a#} = N"
@@ -598,7 +602,7 @@ lemma mset_subset_eq_single: "a \<in># B \<Longrightarrow> {#a#} \<subseteq># B"
   by simp
 
 lemma mset_subset_eq_add_mset_cancel: \<open>add_mset a A \<subseteq># add_mset a B \<longleftrightarrow> A \<subseteq># B\<close>
-  unfolding add_mset_add_single[of _ A] add_mset_add_single[of _ B]
+  unfolding add_single_right_eq_add_mset[symmetric, of _ A] add_single_right_eq_add_mset[symmetric, of _ B]
   by (rule mset_subset_eq_mono_add_right_cancel)
 
 lemma multiset_diff_union_assoc:
@@ -640,7 +644,7 @@ proof
   show "x \<in># B"
     using assms by (simp add: mset_subset_eqD)
   have "A \<subseteq># add_mset x A"
-    by (metis (no_types) add_mset_add_single mset_subset_eq_add_left)
+    by (metis (no_types) add_single_right_eq_add_mset[symmetric] mset_subset_eq_add_left)
   then have "A \<subset># add_mset x A"
     by (meson multi_self_add_other_not_self subset_mset.le_imp_less_or_eq)
   then show "A \<subset># B"
@@ -679,7 +683,7 @@ lemma multi_psub_self: "A \<subset># A = False"
   by simp
 
 lemma mset_subset_add_mset [simp]: "add_mset x N \<subset># add_mset x M \<longleftrightarrow> N \<subset># M"
-  unfolding add_mset_add_single[of _ N] add_mset_add_single[of _ M]
+  unfolding add_single_right_eq_add_mset[symmetric, of _ N] add_single_right_eq_add_mset[symmetric, of _ M]
   by (fact subset_mset.add_less_cancel_right)
 
 lemma mset_subset_diff_self: "c \<in># B \<Longrightarrow> B - {#c#} \<subset># B"
@@ -1380,7 +1384,7 @@ lemma wcount_union: "wcount f (M + N) a = wcount f M a + wcount f N a"
 
 lemma wcount_add_mset:
   "wcount f (add_mset x M) a = (if x = a then Suc (f a) else 0) + wcount f M a"
-  unfolding add_mset_add_single[of _ M] wcount_union by (auto simp: wcount_def)
+  unfolding add_single_right_eq_add_mset[symmetric, of _ M] wcount_union by (auto simp: wcount_def)
 
 definition size_multiset :: "('a \<Rightarrow> nat) \<Rightarrow> 'a multiset \<Rightarrow> nat" where
   "size_multiset f M = sum (wcount f M) (set_mset M)"
@@ -1423,7 +1427,7 @@ lemma size_multiset_union [simp]:
 
 lemma size_multiset_add_mset [simp]:
   "size_multiset f (add_mset a M) = Suc (f a) + size_multiset f M"
-  by (metis add.commute add_mset_add_single size_multiset_single size_multiset_union)
+  by (metis add.commute add_single_right_eq_add_mset[symmetric] size_multiset_single size_multiset_union)
 
 lemma size_add_mset [simp]: "size (add_mset a A) = Suc (size A)"
   by (simp add: size_multiset_overloaded_def wcount_add_mset)
@@ -1732,7 +1736,10 @@ qed
 
 corollary image_mset_add_mset [simp]:
   "image_mset f (add_mset a M) = add_mset (f a) (image_mset f M)"
-  unfolding image_mset_union add_mset_add_single[of a M] by (simp add: image_mset_single)
+  unfolding image_mset_union add_single_right_eq_add_mset[symmetric, of a M] by (simp add: image_mset_single)
+
+lemma image_mset_sum: "image_mset f (\<Sum>x\<in>A. g x) = (\<Sum>x\<in>A. image_mset f (g x))"
+  by (induction A rule: infinite_finite_induct) auto
 
 lemma set_image_mset [simp]: "set_mset (image_mset f M) = image f (set_mset M)"
   by (induct M) simp_all
@@ -1788,7 +1795,7 @@ next
       unfolding image_mset_add_mset ..
 
     also have "\<dots> = image_mset f (add_mset x (A - B - {#x#})) - {#f x#}"
-      unfolding add_mset_add_single[symmetric] diff_diff_add_mset ..
+      unfolding add_single_right_eq_add_mset diff_diff_add_mset ..
 
     also have "\<dots> = image_mset f (A - B) - {#f x#}"
       unfolding insert_DiffM[OF \<open>x \<in># A - B\<close>] ..
@@ -1797,7 +1804,7 @@ next
       unfolding add.IH ..
 
     also have "\<dots> = image_mset f A - image_mset f (add_mset x B)"
-      unfolding diff_diff_add_mset add_mset_add_single[symmetric] image_mset_add_mset ..
+      unfolding diff_diff_add_mset add_single_right_eq_add_mset image_mset_add_mset ..
 
     finally show ?thesis .
   next
@@ -1934,14 +1941,14 @@ next
       by (metis add_mset_remove_trivial image_mset_add_mset mset_subset_eq_single
           subset_mset.add_diff_assoc2)
     thus ?thesis
-      using add.IH add.prems by force
+      using add.IH[of "B - {#f x#}" C] add.prems by force
   next
     case False
     with add.prems have "image_mset f A = B + (C - {#f x#})"
       by (metis diff_single_eq_union diff_union_single_conv image_mset_add_mset union_iff
           union_single_eq_member)
     then show ?thesis
-      using add.IH add.prems by force
+      using add.IH[of B "C - {#f x#}"] add.prems by force
   qed
 qed
 
@@ -1957,11 +1964,16 @@ next
   show ?case
   proof (cases "x \<in># B")
     case True
-    with add.prems have "image_mset f A = image_mset f (B - {#x#}) + C"
-      by (smt (verit) add_mset_add_mset_same_iff image_mset_add_mset insert_DiffM union_mset_add_mset_left)
-    with add.IH have "\<exists>M3'. A = B - {#x#} + M3' \<and> image_mset f M3' = C"
-      by (smt (verit, del_insts) True Un_insert_left Un_insert_right add.prems(2) inj_on_insert
-          insert_DiffM set_mset_add_mset_insert)
+    have "\<exists>M3'. A = B - {#x#} + M3' \<and> C = image_mset f M3'"
+    proof (rule add.IH)
+      show "image_mset f A = image_mset f (B - {#x#}) + C"
+        using True add.prems(1)
+        by (smt (verit) add_mset_add_mset_same_iff image_mset_add_mset insert_DiffM union_mset_add_mset_left)
+    next
+      show "inj_on f (set_mset A \<union> set_mset (B - {#x#}))"
+        using \<open>inj_on f (set_mset (add_mset x A) \<union> set_mset B)\<close>
+        by (rule inj_on_subset) (use in_diffD in fastforce)
+    qed
     with True show ?thesis
       by auto
   next
@@ -2193,7 +2205,7 @@ proof -
   have "\<forall>ys \<in> Y. set ys \<subseteq> {a}"
     by (metis (mono_tags, lifting) assms image_iff mset_eq_setD)
   thus ?thesis
-    by (metis antisym assms(1,2) singleton_set_mset_subset subset_refl)
+    by (metis antisym assms singleton_set_mset_subset subset_refl)
 qed
 
 global_interpretation mset_set: folding add_mset "{#}"
@@ -2677,7 +2689,7 @@ proof -
 qed
 
 lemma add_mset [simp]: "F (add_mset x N) = x \<^bold>* F N"
-  unfolding add_mset_add_single[of x N] union by (simp add: ac_simps)
+  unfolding add_single_right_eq_add_mset[symmetric, of x N] union by (simp add: ac_simps)
 
 lemma insert [simp]:
   shows "F (image_mset g (add_mset x A)) = g x \<^bold>* F (image_mset g A)"
@@ -2758,6 +2770,9 @@ lemma sum_mset_sum_list:
   "sum_mset (mset xs) = sum_list xs"
   by (induction xs) auto
 
+lemma sum_mset_sum: "sum_mset (\<Sum>x\<in>A. f x) = (\<Sum>x\<in>A. sum_mset (f x))"
+  by (induction A rule: infinite_finite_induct) auto
+
 end
 
 context canonically_ordered_monoid_add
@@ -2785,6 +2800,22 @@ begin
 lemma sum_mset_diff:
   "sum_mset (M - N) = sum_mset M - sum_mset N" if "N \<subseteq># M" for M N :: "'a multiset"
   using that by (auto simp add: subset_mset.le_iff_add)
+
+end
+
+context ab_group_add
+begin
+
+lemma sum_mset_negf: "(\<Sum>x\<in>#M. -f x :: 'a) = -(\<Sum>x\<in>#M. f x)"
+proof -
+  have "(\<Sum>x\<in>#M. -f x) + (\<Sum>x\<in>#M. f x) = 0"
+    by (subst sum_mset.distrib [symmetric]) auto
+  thus ?thesis
+    using local.eq_neg_iff_add_eq_0 by blast
+qed
+
+lemma sum_mset_subtractf: "(\<Sum>x\<in>#M. f x - g x) = (\<Sum>x\<in>#M. f x) - (\<Sum>x\<in>#M. g x)"
+  using sum_mset.distrib[of f "\<lambda>x. -g x" M] by (simp add: sum_mset_negf)
 
 end
 
@@ -3919,7 +3950,7 @@ proof (rule total_onI)
       greatest1_in: "greatest1 \<in># M1 - ?I" and
       greatest1_greatest: "\<forall>x \<in># M1 - ?I. greatest1 \<noteq> x \<longrightarrow> (x, greatest1) \<in> r"
       using Multiset.bex_greatest_element[to_set, of "M1 - ?I" r]
-      by (metis assms(2) subset_UNIV trans_on_subset)
+      by (metis \<open>trans r\<close> transD trans_onI)
 
     from assms(1) have "total_on (set_mset (M2 - ?I)) r"
       by (meson \<open>M2 \<in> B\<close> assms(3) diff_subset_eq_self set_mset_mono total_on_subset)
@@ -3927,7 +3958,7 @@ proof (rule total_onI)
       greatest2_in: "greatest2 \<in># M2 - ?I" and
       greatest2_greatest: "\<forall>x \<in># M2 - ?I. greatest2 \<noteq> x \<longrightarrow> (x, greatest2) \<in> r"
       using Multiset.bex_greatest_element[to_set, of "M2 - ?I" r]
-      by (metis assms(2) subset_UNIV trans_on_subset)
+      by (metis \<open>trans r\<close> top_greatest trans_on_subset)
 
     have "greatest1 \<noteq> greatest2"
       using greatest1_in \<open>greatest2 \<in># M2 - ?I\<close>
@@ -3947,7 +3978,7 @@ proof (rule total_onI)
       next
         show "\<forall>k\<in>#M1 - ?I. \<exists>j\<in>#M2 - ?I. (k, j) \<in> r"
           using \<open>(greatest1, greatest2) \<in> r\<close> greatest2_in greatest1_greatest
-          by (metis assms(2) transD)
+          by (metis \<open>trans r\<close> transD)
       qed
       hence "(M1, M2) \<in> mult r"
         by (metis subset_mset.add_diff_inverse subset_mset.inf.cobounded1
@@ -4447,7 +4478,8 @@ instantiation multiset :: (equal) equal
 begin
 
 definition
-  [code del]: "HOL.equal A (B :: 'a multiset) \<longleftrightarrow> A = B"
+  "HOL.equal A (B :: 'a multiset) \<longleftrightarrow> A = B"
+
 lemma [code]: "HOL.equal (mset xs) (mset ys) \<longleftrightarrow> subset_eq_mset_impl xs ys = Some False"
   unfolding equal_multiset_def
   using subset_eq_mset_impl[of xs ys] by (cases "subset_eq_mset_impl xs ys", auto)
@@ -4651,12 +4683,15 @@ proof -
       (auto simp: finite_iff_ordLess_natLeq[symmetric])
   show "rel_mset R OO rel_mset S \<le> rel_mset (R OO S)" for R S
     unfolding rel_mset_def[abs_def] OO_def
-    by (smt (verit, ccfv_SIG) list_all2_reorder_left_invariance list_all2_trans predicate2I)
+    by (rule predicate2I)
+      (smt (verit, ccfv_SIG) list_all2_reorder_left_invariance list_all2_trans)
   show "rel_mset R =
     (\<lambda>x y. \<exists>z. set_mset z \<subseteq> {(x, y). R x y} \<and>
     image_mset fst z = x \<and> image_mset snd z = y)" for R
     unfolding rel_mset_def[abs_def]
-    by (metis (no_types, lifting) ex_mset list.in_rel mem_Collect_eq mset_map set_mset_mset)
+    by (intro ext)
+      (metis (lifting) ex_mset list.in_rel[of R] mem_Collect_eq set_mset_mset
+        mset_map[of snd] mset_map[of fst])
   show "pred_mset P = (\<lambda>x. Ball (set_mset x) P)" for P
     by (simp add: fun_eq_iff pred_mset_iff)
 qed auto

@@ -12,6 +12,7 @@ import java.io.{File => JFile}
 import java.nio.file.FileSystems
 
 import scala.collection.immutable.SortedMap
+import scala.math.Ordering
 
 
 
@@ -79,6 +80,17 @@ object Rendering {
     Markup.ERROR -> error_pri,
     Markup.ERROR_MESSAGE -> error_pri
   ).withDefaultValue(0)
+
+  val message_ordering: Ordering[Text.Info[Command.Results.Entry]] =
+    (a: Text.Info[Command.Results.Entry], b: Text.Info[Command.Results.Entry]) =>
+      message_pri(a.info._2.name) compare message_pri(b.info._2.name) match {
+        case 0 =>
+          a.range.start compare b.range.start match {
+            case 0 => a.info._1 compare b.info._1
+            case ord => ord
+          }
+        case ord => -ord
+      }
 
   val message_underline_color = Map(
     writeln_pri -> Color.writeln,
@@ -186,10 +198,6 @@ object Rendering {
 
   /* tooltips */
 
-  def gui_name(name: String, kind: String = "", prefix: String = ""): String =
-    GUI.Name(name, kind = Word.informal(kind), prefix = prefix,
-      style = GUI.Style_Symbol_Decoded).toString
-
   def get_tooltip_description(name: String): Option[String] = tooltip_description.get(name)
 
   private val tooltip_description =
@@ -282,6 +290,9 @@ object Rendering {
   val warning_elements: Markup.Elements = Markup.Elements(Markup.WARNING, Markup.LEGACY)
   val error_elements: Markup.Elements = Markup.Elements(Markup.ERROR)
 
+  val main_message_elements: Markup.Elements =
+    Markup.Elements(Markup.WRITELN, Markup.INFORMATION, Markup.WARNING, Markup.LEGACY, Markup.ERROR)
+
   val comment_elements: Markup.Elements =
     Markup.Elements(Markup.ML_COMMENT, Markup.COMMENT, Markup.COMMENT1, Markup.COMMENT2,
       Markup.COMMENT3)
@@ -302,7 +313,7 @@ object Rendering {
       Markup.Markdown_Bullet.name)
 }
 
-class Rendering(
+abstract class Rendering(
   val snapshot: Document.Snapshot,
   val options: Options,
   val session: Session
@@ -312,6 +323,13 @@ class Rendering(
   override def toString: String = "Rendering(" + snapshot.toString + ")"
 
   def get_text(range: Text.Range): Option[String] = None
+
+
+  /* GUI style */
+
+  def gui_style: GUI.Style
+  def gui_name(name: String, kind: String = "", prefix: String = ""): String =
+    GUI.Name(name, kind = Word.informal(kind), prefix = prefix, style = gui_style).toString
 
 
   /* caret */
@@ -341,7 +359,7 @@ class Rendering(
 
   def semantic_completion_result(
     history: Completion.History,
-    unicode: Boolean,
+    unicode_symbols: Boolean,
     completed_range: Option[Text.Range],
     caret_range: Text.Range
   ): (Boolean, Option[Completion.Result]) = {
@@ -349,7 +367,7 @@ class Rendering(
       case Some(Text.Info(_, Completion.No_Completion)) => (true, None)
       case Some(Text.Info(range, names: Completion.Names)) =>
         get_text(range) match {
-          case Some(original) => (false, names.complete(range, history, unicode, original))
+          case Some(original) => (false, names.complete(range, history, unicode_symbols, original))
           case None => (false, None)
         }
       case None => (false, None)
@@ -388,28 +406,25 @@ class Rendering(
           else (path.dir, path.file_name)
 
         val directory = new JFile(session.resources.append_path(snapshot.node_name.master_dir, dir))
-        val files = directory.listFiles
-        if (files == null) Nil
-        else {
-          val ignore =
-            space_explode(':', options.string("completion_path_ignore")).
-              map(s => FileSystems.getDefault.getPathMatcher("glob:" + s))
-          (for {
-            file <- files.iterator
 
-            name = file.getName
-            if name.startsWith(base_name)
-            path_name = new JFile(name).toPath
-            if !ignore.exists(matcher => matcher.matches(path_name))
+        val ignore =
+          space_explode(':', options.string("completion_path_ignore")).
+            map(s => FileSystems.getDefault.nn.getPathMatcher("glob:" + s).nn)
 
-            text1 = (dir + Path.basic(name)).implode_short
-            if text != text1
+        (for {
+          name <- File.read_dir(directory)
 
-            is_dir = new JFile(directory, name).isDirectory
-            replacement = text1 + (if (is_dir) "/" else "")
-            descr = List(text1, if (is_dir) "(directory)" else "(file)")
-          } yield (replacement, descr)).take(options.int("completion_limit")).toList
-        }
+          if name.startsWith(base_name)
+          path_name = new JFile(name).java_path
+          if !ignore.exists(matcher => matcher.matches(path_name))
+
+          text1 = (dir + Path.basic(name)).implode_short
+          if text != text1
+
+          is_dir = new JFile(directory, name).isDirectory
+          replacement = text1 + (if (is_dir) "/" else "")
+          descr = List(text1, if (is_dir) "(directory)" else "(file)")
+        } yield (replacement, descr)).take(options.int("completion_limit")).toList
       }
       catch { case ERROR(_) => Nil }
     }
@@ -423,7 +438,7 @@ class Rendering(
       s1 <- get_text(r1)
       (r2, s2) <-
         if (is_wrapped(s1)) {
-          Some((Text.Range(r1.start + 1, r1.stop - 1), s1.substring(1, s1.length - 1)))
+          Some((Text.Range(r1.start + 1, r1.stop - 1), s1.slice(1, s1.length - 1)))
         }
         else if (delimited) Some((r1, s1))
         else None
@@ -617,13 +632,26 @@ class Rendering(
   }
 
 
-  /* tooltips */
+  /* hyperlinks */
 
-  def timing_threshold: Time = options.seconds("editor_timing_threshold")
+  def make_hyperlinks[A](range: Text.Range, elements: Markup.Elements = Rendering.entity_elements)(
+    make_info: Markup => Option[A]
+  ): List[Text.Info[A]] = {
+    snapshot.cumulate[List[Text.Info[A]]](
+      range, Nil, elements, _ =>
+        {
+          case (infos, Text.Info(info_range, XML.Elem(markup, _))) =>
+            for (info <- make_info(markup))
+              yield Text.Info(snapshot.convert(info_range), info) :: infos
+        }).reverse.flatMap(_.info)
+  }
+
+
+  /* tooltips */
 
   private sealed case class Tooltip_Info(
     range: Text.Range,
-    messages: List[(Long, XML.Elem)] = Nil,
+    messages: List[Command.Results.Entry] = Nil,
     rev_infos: List[(Boolean, Int, XML.Elem)] = Nil
   ) {
     def add_message(r0: Text.Range, serial: Long, msg: XML.Elem): Tooltip_Info = {
@@ -652,6 +680,7 @@ class Rendering(
     else name
 
   def tooltips(elements: Markup.Elements, range: Text.Range): Option[Text.Info[List[XML.Elem]]] = {
+    val timing_threshold = session.editor_timing_threshold
     val results =
       snapshot.cumulate[Tooltip_Info](range, Tooltip_Info(range), elements, command_states =>
         {
@@ -663,14 +692,15 @@ class Rendering(
             for ((i, msg) <- Command.State.get_result_proper(command_states, props))
             yield info.add_message(r0, i, msg)
 
-          case (info, Text.Info(r0, XML.Elem(markup@Markup.Entity(kind, name), _)))
-          if kind != "" && kind != Markup.ML_DEF =>
-            val txt = Rendering.gui_name(name, kind = kind)
-            val info1 = info.add_info_text(r0, txt, ord = 2)
+          case (info, Text.Info(r0, XML.Elem(Markup.Entity(entry), _)))
+          if entry.kind.nonEmpty && entry.kind != Markup.ML_DEF &&
+            !entry.properties.contains(Markup.Entity.No_Tooltip) =>
+            val entry1 = entry + Markup.Entity.No_Tooltip
+            val info1 = info.add_info(r0, entry1.print_xml(style = gui_style), ord = 2)
             val info2 =
-              if (kind == Markup.COMMAND) {
+              if (entry.kind == Markup.COMMAND) {
                 val timings = Document_Status.Command_Timings.merge(command_states.map(_.timings))
-                val t = timings.get_finished(Markup.Command_Offset.get(markup.properties))
+                val t = timings.get_finished(Markup.Command_Offset.get(entry.properties))
                 if (t.is_notable(timing_threshold)) {
                   info1.add_info(r0, Pretty.string(t.message))
                 }
@@ -683,17 +713,17 @@ class Rendering(
             val file = perhaps_append_file(snapshot.node_name, name)
             val info1 =
               if (name == file) info
-              else info.add_info_text(r0, Rendering.gui_name(name, kind = "path"))
-            Some(info1.add_info_text(r0, Rendering.gui_name(file, kind = "file")))
+              else info.add_info_text(r0, gui_name(name, kind = "path"))
+            Some(info1.add_info_text(r0, gui_name(file, kind = "file")))
 
           case (info, Text.Info(r0, XML.Elem(Markup.Doc(name), _))) =>
-            Some(info.add_info_text(r0, Rendering.gui_name(name, kind = "doc")))
+            Some(info.add_info_text(r0, gui_name(name, kind = "doc")))
 
           case (info, Text.Info(r0, XML.Elem(Markup.Url(name), _))) =>
-            Some(info.add_info_text(r0, Rendering.gui_name(name, kind = "URL")))
+            Some(info.add_info_text(r0, gui_name(name, kind = "URL")))
 
           case (info, Text.Info(r0, XML.Elem(Markup.Command_Span(span), _))) =>
-            Some(info.add_info_text(r0, Rendering.gui_name(span.name, kind = Markup.COMMAND_SPAN)))
+            Some(info.add_info_text(r0, gui_name(span.name, kind = Markup.COMMAND_SPAN)))
 
           case (info, Text.Info(r0, XML.Elem(Markup(name, _), body)))
           if name == Markup.SORTING || name == Markup.TYPING =>
@@ -716,11 +746,11 @@ class Rendering(
             Some(info.add_info_text(r0, "language: " + lang.description))
 
           case (info, Text.Info(r0, XML.Elem(Markup.Notation(kind, name), _))) =>
-            val description = Rendering.gui_name(name, kind = kind, prefix = Markup.NOTATION)
+            val description = gui_name(name, kind = kind, prefix = Markup.NOTATION)
             Some(info.add_info_text(r0, description, ord = 1))
 
           case (info, Text.Info(r0, XML.Elem(Markup.Expression(kind, name), _))) =>
-            val description = Rendering.gui_name(name, kind = kind, prefix = Markup.EXPRESSION)
+            val description = gui_name(name, kind = kind, prefix = Markup.EXPRESSION)
             Some(info.add_info_text(r0, description, ord = 1))
 
           case (info, Text.Info(r0, XML.Elem(Markup(Markup.MARKDOWN_PARAGRAPH, _), _))) =>
@@ -754,6 +784,22 @@ class Rendering(
 
   def errors(range: Text.Range): List[Text.Markup] =
     snapshot.select(range, Rendering.error_elements, _ => Some(_)).map(_.info)
+
+  def main_messages(range: Text.Range): List[Text.Markup] = {
+    val results =
+      snapshot.cumulate[List[Text.Info[Command.Results.Entry]]](
+        range, Nil, Rendering.main_message_elements, command_states =>
+          {
+            case (res, Text.Info(r, XML.Elem(markup, _))) =>
+              for (entry <- Command.State.get_result_proper(command_states, markup.properties))
+                yield Text.Info(r, entry) :: res
+          })
+    results.flatten(_.info)
+      .map(info => info.info._1 -> info)
+      .toMap.valuesIterator.toList
+      .sorted(Rendering.message_ordering)
+      .map(info => info.map(_._2))
+  }
 
 
   /* comments */

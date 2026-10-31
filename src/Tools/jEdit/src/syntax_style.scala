@@ -6,6 +6,7 @@ Support for extended syntax styles: subscript, superscript, bold, user fonts.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -40,7 +41,7 @@ object Syntax_Style {
 
   private def script_style(style: SyntaxStyle, i: Int): SyntaxStyle = {
     font_style(style, { font0 =>
-      val font1 = font0.deriveFont(JMap.of(TextAttribute.SUPERSCRIPT, java.lang.Integer.valueOf(i)))
+      val font1 = font0.deriveFont(JMap.of(TextAttribute.SUPERSCRIPT, Value.Int.obj(i)))
 
       def shift(y: Float): Font =
         GUI.transform_font(font1, AffineTransform.getTranslateInstance(0.0, y.toDouble))
@@ -131,7 +132,7 @@ object Syntax_Style {
       val end_offset = offset + sym.length
 
       if (control_style(sym).isDefined) control_sym = sym
-      else if (control_sym != "") {
+      else if (control_sym.nonEmpty) {
         if (Symbol.is_controllable(sym) && !Symbol.symbols.fonts.isDefinedAt(sym)) {
           mark(offset - control_sym.length, offset, _ => hidden)
           mark(offset, end_offset, control_style(control_sym).get)
@@ -166,12 +167,12 @@ object Syntax_Style {
 
     val buffer = text_area.getBuffer
 
-    val control_decoded = Isabelle_Encoding.perhaps_decode(buffer, control_sym)
+    val control_output = Isabelle_Encoding.gui_style(buffer = buffer).output(control_sym)
 
     def update_style(text: String): String =
       Library.string_builder() { result =>
         for (sym <- Symbol.iterator(text) if !HTML.is_control(sym)) {
-          if (Symbol.is_controllable(sym)) result ++= control_decoded
+          if (Symbol.is_controllable(sym)) result ++= control_output
           result ++= sym
         }
       }
@@ -187,7 +188,7 @@ object Syntax_Style {
 
     text_area.getSelection.toList match {
       case Nil =>
-        text_area.setSelectedText(control_decoded)
+        text_area.setSelectedText(control_output)
       case sels =>
         JEdit_Lib.buffer_edit(buffer) {
           sels.foreach(sel =>

@@ -57,7 +57,7 @@ text \<open>
     \<^enum> The file \<^path>\<open>$ISABELLE_HOME_USER/etc/settings\<close> (if it
     exists) is run in the same way as the site default settings. Note that the
     variable @{setting ISABELLE_HOME_USER} has already been set before ---
-    usually to something like \<^verbatim>\<open>$USER_HOME/.isabelle/Isabelle2025-2\<close>.
+    usually to something like \<^verbatim>\<open>$USER_HOME/.isabelle/Isabelle2026\<close>.
 
     Thus individual users may override the site-wide defaults. Typically, a
     user settings file contains only a few lines, with some assignments that
@@ -138,7 +138,7 @@ text \<open>
   of the @{executable isabelle} executable.
 
   \<^descr>[@{setting_def ISABELLE_IDENTIFIER}\<open>\<^sup>*\<close>] refers to the name of this
-  Isabelle distribution, e.g.\ ``\<^verbatim>\<open>Isabelle2025-2\<close>''.
+  Isabelle distribution, e.g.\ ``\<^verbatim>\<open>Isabelle2026\<close>''.
 
   \<^descr>[@{setting ML_OPTIONS}, @{setting ML_OPTIONS32}, @{setting ML_OPTIONS64}]
   provide command-line options to the underlying ML system of Isabelle.
@@ -373,7 +373,7 @@ subsubsection \<open>Examples\<close>
 text \<open>
   The subsequent example retrieves the \<^verbatim>\<open>Main\<close> theory value from the theory
   loader within ML:
-  @{verbatim [display] \<open>isabelle ML_process -e 'Thy_Info.get_theory "Main"'\<close>}
+  @{verbatim [display] \<open>isabelle ML_process -e 'Build.get_theory "Main"'\<close>}
 
   Observe the delicate quoting rules for the GNU bash shell vs.\ ML. The
   Isabelle/ML and Scala libraries provide functions for that, but here we need

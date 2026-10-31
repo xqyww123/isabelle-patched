@@ -1,4 +1,4 @@
-(* Title:      HOL/Tools/try0_hol.ML
+(* Title:      HOL/Tools/try0_util.ML
    Author:     Jasmin Blanchette, LMU Muenchen
    Author:     Martin Desharnais, LMU Muenchen
    Author:     Fabian Huch, TU Muenchen
@@ -11,7 +11,7 @@ sig
   val string_of_xref : Try0.xref -> string
 
   type facts_config =
-    {usings_as_params : bool,
+    {allows_directs : bool,
      simps_prefix : string option,
      intros_prefix : string option,
      elims_prefix : string option,
@@ -36,38 +36,38 @@ fun string_of_xref ((xref, args) : Try0.xref) =
         (map (enclose "[" "]" o Pretty.unformatted_string_of o Token.pretty_src \<^context>) args)
 
 type facts_config =
-  {usings_as_params : bool,
+  {allows_directs : bool,
    simps_prefix : string option,
    intros_prefix : string option,
    elims_prefix : string option,
    dests_prefix : string option}
 
 val no_attrs : facts_config =
-  {usings_as_params = false,
+  {allows_directs = false,
    simps_prefix = NONE,
    intros_prefix = NONE,
    elims_prefix = NONE,
    dests_prefix = NONE}
 val full_attrs : facts_config =
-  {usings_as_params = false,
+  {allows_directs = true,
    simps_prefix = SOME "simp: ",
    intros_prefix = SOME "intro: ",
    elims_prefix = SOME "elim: ",
    dests_prefix = SOME "dest: "}
 val clas_attrs : facts_config =
-  {usings_as_params = false,
+  {allows_directs = false,
    simps_prefix = NONE,
    intros_prefix = SOME "intro: ",
    elims_prefix = SOME "elim: ",
    dests_prefix = SOME "dest: "}
 val simp_attrs : facts_config =
-  {usings_as_params = false,
+  {allows_directs = false,
    simps_prefix = SOME "add: ",
    intros_prefix = NONE,
    elims_prefix = NONE,
    dests_prefix = NONE}
 val metis_attrs : facts_config =
-  {usings_as_params = true,
+  {allows_directs = true,
    simps_prefix = SOME "",
    intros_prefix = SOME "",
    elims_prefix = SOME "",
@@ -85,7 +85,13 @@ fun parse_method ctxt s =
 fun run_tac timeout_opt tac st =
   let val with_timeout =
     (case timeout_opt of SOME timeout => Timeout.apply_physical timeout | NONE => I)
-  in with_timeout (Seq.pull o tac) st |> Option.map fst end
+  in
+    (case Exn.capture (with_timeout (Seq.pull o tac)) st of
+      Exn.Res res => Option.map fst res
+    | Exn.Exn exn =>
+        (* the thread ran out of stack, e.g. because of a looping simp rule *)
+        if Exn.is_interrupt_breakdown exn then NONE else Exn.reraise exn)
+  end
 
 val num_goals = Thm.nprems_of o #goal o Proof.goal
 
@@ -107,12 +113,20 @@ fun apply_raw_named_method (name : string) all_goals (facts_config: facts_config
     val st = Proof.map_contexts silence_methods st
     val ctxt = Proof.context_of st
 
+    val (unusued_directs, direct_attrs) =
+      if null (#directs facts) then
+        ([], "")
+      else
+        (case #allows_directs facts_config of
+          false => (#directs facts, "")
+        | true => ([], " " ^ implode_space (map string_of_xref (#directs facts))))
+
     val (unused_simps, simps_attrs) =
-       if null (#simps facts) then
+      if null (#simps facts) then
         ([], "")
       else
         (case #simps_prefix facts_config of
-          NONE =>  (#simps facts, "")
+          NONE => (#simps facts, "")
         | SOME prefix => ([], " " ^ prefix ^ implode_space (map string_of_xref (#simps facts))))
 
     val (unused_intros, intros_attrs) =
@@ -120,7 +134,7 @@ fun apply_raw_named_method (name : string) all_goals (facts_config: facts_config
         ([], "")
       else
         (case #intros_prefix facts_config of
-          NONE =>  (#intros facts, "")
+          NONE => (#intros facts, "")
         | SOME prefix => ([], " " ^ prefix ^ implode_space (map string_of_xref (#intros facts))))
 
     val (unused_elims, elims_attrs) =
@@ -128,7 +142,7 @@ fun apply_raw_named_method (name : string) all_goals (facts_config: facts_config
         ([], "")
       else
         (case #elims_prefix facts_config of
-          NONE =>  (#elims facts, "")
+          NONE => (#elims facts, "")
         | SOME prefix => ([], " " ^ prefix ^ implode_space (map string_of_xref (#elims facts))))
 
     val (unused_dests, dests_attrs) =
@@ -136,20 +150,19 @@ fun apply_raw_named_method (name : string) all_goals (facts_config: facts_config
         ([], "")
       else
         (case #dests_prefix facts_config of
-          NONE =>  (#dests facts, "")
+          NONE => (#dests facts, "")
         | SOME prefix => ([], " " ^ prefix ^ implode_space (map string_of_xref (#dests facts))))
 
     val (unused_usings, using_attrs) =
       if null (#usings facts) then
         ([], "")
-      else if #usings_as_params facts_config then
-        ([], " " ^ implode_space (map string_of_xref (#usings facts)))
       else
         (#usings facts, "")
 
-    val unused = unused_simps @ unused_intros @ unused_elims @ unused_dests @ unused_usings
+    val unused = unusued_directs @ unused_simps @ unused_intros @ unused_elims
+      @ unused_dests @ unused_usings
 
-    val attrs = simps_attrs ^ intros_attrs ^ elims_attrs ^ dests_attrs ^ using_attrs
+    val attrs = direct_attrs ^ simps_attrs ^ intros_attrs ^ elims_attrs ^ dests_attrs ^ using_attrs
     val text =
       name ^ attrs
       |> parse_method ctxt
@@ -158,23 +171,31 @@ fun apply_raw_named_method (name : string) all_goals (facts_config: facts_config
       |> (fn m => Method.Combinator (Method.no_combinator_info, Method.Select_Goals 1, [m]))
 
     val apply =
-        Proof.using [Attrib.eval_thms ctxt unused |> map (rpair [] o single)]
-        #> Proof.refine text #> Seq.filter_results
+      Proof.using [Attrib.eval_thms ctxt unused |> map (rpair [] o single)]
+      #> Proof.refine text #> Seq.filter_results
     val num_before = num_goals st
     val multiple_goals = all_goals andalso num_before > 1
     val (time, st') = apply_recursive multiple_goals Time.zeroTime timeout_opt apply st
     val num_after = num_goals st'
-    val select = "[" ^ string_of_int (num_before - num_after)  ^ "]"
-    val unused = implode_space (unused |> map string_of_xref)
     val command =
-      (if unused <> "" then "using " ^ unused ^ " " else "") ^
-      (if num_after = 0 then "by " else "apply ") ^
-      (name ^ attrs |> attrs <> "" ? enclose "(" ")") ^
-      (if multiple_goals andalso num_after > 0 then select else "")
+      let
+        val unused = map (Pretty.str o string_of_xref) unused
+        val using_clause = if null unused then [] else Pretty.str "using" :: unused
+        val select = "[" ^ string_of_int (num_before - num_after)  ^ "]"
+        val command_clause =
+          [Pretty.str ((if num_after = 0 then "by " else "apply ") ^
+              (name ^ attrs |> attrs <> "" ? enclose "(" ")"))] @
+          (if multiple_goals andalso num_after > 0 then [Pretty.str select] else [])
+      in
+        using_clause @ command_clause
+        |> Pretty.block o Pretty.breaks
+        |> Pretty.symbolic_string_of (* markup string *)
+      end
   in
     if num_before > num_after then
       SOME {name = name, command = command, time = time, state = st'}
-    else NONE
+    else
+      NONE
   end
 
 end

@@ -33,7 +33,7 @@ object Server {
 
     def split(msg: String): (String, String) = {
       val name = msg.takeWhile(is_name_char)
-      val argument = msg.substring(name.length).dropWhile(Symbol.is_ascii_blank)
+      val argument = msg.drop(name.length).dropWhile(Symbol.is_ascii_blank)
       (name, argument)
     }
 
@@ -131,7 +131,7 @@ object Server {
       Isabelle_Thread.fork(name = "server_handler") {
         var finished = false
         while (!finished) {
-          Exn.capture(socket.accept) match {
+          Exn.capture(socket.accept.nn) match {
             case Exn.Res(client) =>
               Isabelle_Thread.fork(name = "client") {
                 using(Connection(client))(connection =>
@@ -255,7 +255,7 @@ object Server {
   }
 
   class Connection_Progress private[Server](context: Context, more: JSON.Object.Entry*)
-  extends Progress {
+  extends Progress with Progress.Local_Interrupts {
     override def verbose: Boolean = true
 
     override def output(msgs: Progress.Output): Unit =
@@ -264,9 +264,9 @@ object Server {
           case message: Progress.Message =>
             val more1 = ("verbose" -> message.verbose.toString) :: more.toList
             message.kind match {
-              case Progress.Kind.writeln => context.writeln(message.text, more1: _*)
-              case Progress.Kind.warning => context.warning(message.text, more1: _*)
-              case Progress.Kind.error_message => context.error_message(message.text, more1: _*)
+              case Output.Kind.writeln => context.writeln(message.text, more1: _*)
+              case Output.Kind.warning => context.warning(message.text, more1: _*)
+              case Output.Kind.error_message => context.error_message(message.text, more1: _*)
             }
           case theory: Progress.Theory =>
             val entries: List[JSON.Object.Entry] =
@@ -316,7 +316,7 @@ object Server {
   /* server info */
 
   val localhost_name: String = "127.0.0.1"
-  def localhost: InetAddress = InetAddress.getByName(localhost_name)
+  def localhost: InetAddress = InetAddress.getByName(localhost_name).nn
 
   def print_address(port: Int): String = localhost_name + ":" + port
 
@@ -398,10 +398,10 @@ object Server {
   }
 
   def init(
+    log: Logger,
     name: String = default_name,
     port: Int = 0,
-    existing_server: Boolean = false,
-    log: Logger = new Logger
+    existing_server: Boolean = false
   ): (Info, Option[Server]) = {
     using(SQLite.open_database(private_data.database, restrict = true)) { db =>
       private_data.transaction_lock(db, create = true) {
@@ -416,7 +416,7 @@ object Server {
           case None =>
             if (existing_server) error("Isabelle server " + quote(name) + " not running")
 
-            val server = new Server(port, log)
+            val server = new Server(log, port)
             val server_info = Info(name, server.port, server.password)
 
             db.execute_statement(
@@ -456,7 +456,7 @@ object Server {
     Isabelle_Tool("server", "manage resident Isabelle servers", Scala_Project.here,
       { args =>
         var console = false
-        var log_file: Option[Path] = None
+        var log_path: Option[Path] = None
         var operation_list = false
         var operation_exit = false
         var name = default_name
@@ -467,7 +467,7 @@ object Server {
 Usage: isabelle server [OPTIONS]
 
   Options are:
-    -L FILE      logging on FILE
+    -L FILE      logging on FILE (default: console stderr)
     -c           console interaction with specified server
     -l           list servers (alternative operation)
     -n NAME      explicit server name (default: """ + default_name + """)
@@ -477,7 +477,7 @@ Usage: isabelle server [OPTIONS]
 
   Manage resident Isabelle servers.
 """,
-          "L:" -> (arg => log_file = Some(Path.explode(File.standard_path(arg)))),
+          "L:" -> (arg => log_path = Some(Path.explode(File.standard_path(arg)))),
           "c" -> (_ => console = true),
           "l" -> (_ => operation_list = true),
           "n:" -> (arg => name = arg),
@@ -499,9 +499,9 @@ Usage: isabelle server [OPTIONS]
           sys.exit(if (ok) Process_Result.RC.ok else Process_Result.RC.failure)
         }
         else {
-          val log = Logger.make_file(log_file)
+          val log = Logger.make_file(log_path, default = Logger.console)
           val (server_info, server) =
-            init(name, port = port, existing_server = existing_server, log = log)
+            init(log, name = name, port = port, existing_server = existing_server)
           Output.writeln(server_info.toString, stdout = true)
           if (console) {
             using(server_info.connection())(connection => connection.tty_loop().join())
@@ -511,7 +511,7 @@ Usage: isabelle server [OPTIONS]
       })
 }
 
-class Server private(port0: Int, val log: Logger) extends Server.Handler(port0) {
+class Server private(val log: Logger, port0: Int) extends Server.Handler(port0) {
   server =>
 
   private val _sessions = Synchronized(Map.empty[UUID.T, Headless.Session])
@@ -533,9 +533,9 @@ class Server private(port0: Int, val log: Logger) extends Server.Handler(port0) 
     for ((_, session) <- sessions) {
       try {
         val result = session.stop()
-        if (!result.ok) log("Session shutdown failed: " + result.print_rc)
+        if (!result.ok) log.error_message("Session shutdown failed: " + result.print_rc)
       }
-      catch { case ERROR(msg) => log("Session shutdown failed: " + msg) }
+      catch { case ERROR(msg) => log.error_message("Session shutdown failed: " + msg) }
     }
   }
 

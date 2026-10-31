@@ -6,6 +6,7 @@ GUI panel for status of theories.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -18,7 +19,7 @@ import javax.swing.{JList, BorderFactory, UIManager}
 import org.gjt.sp.jedit.View
 
 
-class Theories_Status(view: View, document: Boolean = false) {
+class Theories_Status(editor_context: JEdit_Editor.Context, document: Boolean = false) {
   /* component state -- owned by GUI thread */
 
   private var nodes_status = Document_Status.Nodes_Status.empty
@@ -34,11 +35,11 @@ class Theories_Status(view: View, document: Boolean = false) {
 
   private def init_state(): Unit = GUI_Thread.require {
     if (document) {
-      nodes_required = PIDE.editor.document_required().toSet
+      nodes_required = JEdit_Editor.document_required().toSet
     }
     else {
       nodes_required = Document_Model.nodes_required()
-      document_required = PIDE.editor.document_required().toSet
+      document_required = JEdit_Editor.document_required().toSet
     }
   }
 
@@ -86,8 +87,8 @@ class Theories_Status(view: View, document: Boolean = false) {
 
       val label_geometry = new Geometry
       val label: Label = new Label {
-        background = view.getTextArea.getPainter.getBackground
-        foreground = view.getTextArea.getPainter.getForeground
+        background = editor_context.text_area_painter.getBackground
+        foreground = editor_context.text_area_painter.getForeground
         opaque = false
         xAlignment = Alignment.Leading
 
@@ -102,10 +103,10 @@ class Theories_Status(view: View, document: Boolean = false) {
             case Some(node_status) =>
               val segments =
                 List(
-                  (node_status.unprocessed, PIDE.options.color_value("unprocessed1_color")),
-                  (node_status.running, PIDE.options.color_value("running_color")),
-                  (node_status.warned, PIDE.options.color_value("warning_color")),
-                  (node_status.failed, PIDE.options.color_value("error_color"))
+                  (node_status.unprocessed, Color_Value.option(PIDE.options, "unprocessed1_color")),
+                  (node_status.running, Color_Value.option(PIDE.options, "running_color")),
+                  (node_status.warned, Color_Value.option(PIDE.options, "warning_color")),
+                  (node_status.failed, Color_Value.option(PIDE.options, "error_color"))
                 ).filter(_._1 > 0)
 
               segments.foldLeft(size.width - 2) {
@@ -117,7 +118,7 @@ class Theories_Status(view: View, document: Boolean = false) {
 
             case None =>
               if (!is_loaded_theory(node_name)) {
-                paint_segment(0, size.width, PIDE.options.color_value("unprocessed1_color"))
+                paint_segment(0, size.width, Color_Value.option(PIDE.options, "unprocessed1_color"))
               }
           }
           super.paintComponent(gfx)
@@ -131,9 +132,9 @@ class Theories_Status(view: View, document: Boolean = false) {
         val color =
           st match {
             case Document_Status.Overall_Status.ok =>
-              PIDE.options.color_value("ok_color")
+              Color_Value.option(PIDE.options, "ok_color")
             case Document_Status.Overall_Status.failed =>
-              PIDE.options.color_value("failed_color")
+              Color_Value.option(PIDE.options, "failed_color")
             case _ => label.foreground
           }
         val thickness1 = if (st == Document_Status.Overall_Status.pending) 1 else 3
@@ -194,11 +195,15 @@ class Theories_Status(view: View, document: Boolean = false) {
           if (node_renderer.in_required(index_location, mouse.point)) {
             if (mouse.clicks == 1) {
               val name = listData(index)
-              if (document) PIDE.editor.document_select(Set(name.theory), toggle = true)
+              if (document) JEdit_Editor.document_select(Set(name.theory), toggle = true)
               else Document_Model.node_required(name, toggle = true)
             }
           }
-          else if (mouse.clicks == 2) PIDE.editor.goto_file(view, listData(index).node, focus = true)
+          else if (mouse.clicks == 2) {
+            JEdit_Editor.navigator_recording(editor_context) {
+              JEdit_Editor.goto_file(editor_context, listData(index).node, focus = true)
+            }
+          }
         }
       case mouse: MouseMoved =>
         val index = peer.locationToIndex(mouse.point)
@@ -243,7 +248,7 @@ class Theories_Status(view: View, document: Boolean = false) {
 
     if (force || nodes_status1 != nodes_status) {
       gui.listData =
-        if (document) PIDE.editor.document_theories()
+        if (document) JEdit_Editor.document_theories()
         else {
           (for {
             name <- snapshot.version.nodes.topological_order.iterator

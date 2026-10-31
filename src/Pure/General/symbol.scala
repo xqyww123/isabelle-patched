@@ -35,7 +35,7 @@ object Symbol {
   def spaces(n: Int): String = {
     require(n >= 0, "negative spaces")
     if (n == 0) ""
-    else if (n < static_spaces.length) static_spaces.substring(0, n)
+    else if (n < static_spaces.length) static_spaces.slice(0, n)
     else space * n
   }
 
@@ -123,7 +123,7 @@ object Symbol {
       match_length(i) match {
         case 0 => ""
         case 1 => char_symbol(text.charAt(i))
-        case n => text.subSequence(i, i + n).toString
+        case n => Library.make_string(text, i, i + n)
       }
   }
 
@@ -156,12 +156,12 @@ object Symbol {
     cat_lines(split_lines(text).dropWhile(all_blank).reverse.dropWhile(all_blank).reverse)
 
 
-  /* decoding offsets */
+  /* recoding offsets */
 
   object Index {
     private sealed case class Entry(chr: Int, sym: Int)
 
-    val empty: Index = new Index(Nil)
+    val empty: Index = new Index(0, Array())
 
     def apply(text: CharSequence): Index = {
       val matcher = new Matcher(text)
@@ -174,14 +174,15 @@ object Symbol {
         sym += 1
         if (n > 1) buf += Entry(chr, sym)
       }
-      if (buf.isEmpty) empty else new Index(buf.toList)
+      if (buf.isEmpty) empty
+      else {
+        val entries = buf.toList
+        new Index(entries.hashCode, entries.toArray)
+      }
     }
   }
 
-  final class Index private(entries: List[Index.Entry]) {
-    private val hash: Int = entries.hashCode
-    private val index: Array[Index.Entry] = entries.toArray
-
+  final class Index private(hash: Int, private val index: Array[Index.Entry]) {
     def decode(symbol_offset: Offset): Text.Offset = {
       val sym = symbol_offset - 1
       val end = index.length
@@ -200,12 +201,32 @@ object Symbol {
     }
     def decode(symbol_range: Range): Text.Range = symbol_range.map(decode)
 
+    def encode(offset: Text.Offset): Symbol.Offset = {
+      val chr = offset
+      val end = index.length
+      @tailrec def bisect(a: Int, b: Int): Int = {
+        if (a < b) {
+          val c = (a + b) / 2
+          if (chr < index(c).chr) bisect(a, c)
+          else if (c + 1 == end || chr < index(c + 1).chr) c
+          else bisect(c + 1, b)
+        }
+        else -1
+      }
+      val i = bisect(0, end)
+      if (i < 0) chr + 1
+      else index(i).sym + chr + 1 - index(i).chr
+    }
+    def encode(range: Text.Range): Range = range.map(encode)
+
     override def hashCode: Int = hash
     override def equals(that: Any): Boolean =
       that match {
         case other: Index => index.sameElements(other.index)
         case _ => false
       }
+
+    override def toString: String = index.mkString("Symbol.Index(", ", ", ")")
   }
 
 
@@ -340,7 +361,7 @@ object Symbol {
         props match {
           case Code(s) =>
             try {
-              val code = Integer.decode(s).intValue
+              val code = Integer.decode(s).nn.intValue
               if (code >= 128) Some(code) else err("Illegal ASCII code")
             }
             catch { case _: NumberFormatException => err("Bad code") }
@@ -371,8 +392,7 @@ object Symbol {
       code.map(c => new String(Character.toChars(c)))
   }
 
-  lazy val symbols: Symbols =
-    Symbols.make(cat_lines(Symbols.files().map(File.read)))
+  lazy val symbols: Symbols = platform.symbol_provider.symbols
 
   object Symbols {
     def files(): List[Path] =
@@ -389,7 +409,7 @@ object Symbol {
           props match {
             case Nil => Nil
             case _ :: Nil => err()
-            case Key(x) :: y :: rest => (x -> y.replace('\u2423', ' ')) :: read_props(rest)
+            case Key(x) :: y :: rest => (x -> y.replacing("\u2423" -> " ")) :: read_props(rest)
             case _ => err()
           }
         }
@@ -575,6 +595,9 @@ object Symbol {
   def output(unicode_symbols: Boolean, text: String): String =
     if (unicode_symbols) Symbol.decode(text) else Symbol.encode(text)
 
+  def output_cartouche(unicode_symbols: Boolean, text: String): String =
+    if (unicode_symbols) Symbol.cartouche_decoded(text) else Symbol.cartouche(text)
+
 
   /* classification */
 
@@ -651,7 +674,7 @@ object Symbol {
 
   def control_name(sym: Symbol): Option[String] =
     if (is_control_encoded(sym))
-      Some(sym.substring(control_prefix.length, sym.length - control_suffix.length))
+      Some(sym.slice(control_prefix.length, sym.length - control_suffix.length))
     else None
 
   def is_control_encoded(sym: Symbol): Boolean =

@@ -30,9 +30,9 @@ object Document_Editor {
         } yield {
           Meta_Info(name,
             SortedSet.from(selection),
-            SHA1.fake_digest(sources),
-            SHA1.fake_digest(log),
-            SHA1.fake_digest(pdf))
+            Shasum.fake(sources),
+            Message_Digest.parse(log),
+            Message_Digest.parse(pdf))
         }
       }
       else None
@@ -47,8 +47,8 @@ object Document_Editor {
         JSON.Object(
           "selection" -> selection.toList,
           "sources" -> doc.sources.toString,
-          "log" -> SHA1.digest(doc.log).toString,
-          "pdf" -> SHA1.digest(doc.pdf).toString)
+          "log" -> SHA1.digest(doc.log).rep,
+          "pdf" -> SHA1.digest(doc.pdf).rep)
       File.write(document_output(name).json, JSON.Format.pretty_print(json))
     }
   }
@@ -56,9 +56,9 @@ object Document_Editor {
   sealed case class Meta_Info(
     name: String,
     selection: SortedSet[String],
-    sources: SHA1.Digest,
-    log: SHA1.Digest,
-    pdf: SHA1.Digest
+    sources: Shasum,
+    log: Message_Digest.T,
+    pdf: Message_Digest.T
   ) {
     def check_files(): Boolean = {
       val path = document_output(name)

@@ -8,20 +8,14 @@ signature ISABELLE_PROCESS =
 sig
   val reset_tracing: Document_ID.exec -> unit
   val crashes: exn list Synchronized.var
-  val init_options: unit -> unit
-  val init_options_interactive: unit -> unit
   val init: unit -> unit
   val init_build: unit -> unit
+  val init_options: unit -> unit
+  val update_options: Options.update -> unit
 end;
 
 structure Isabelle_Process: ISABELLE_PROCESS =
 struct
-
-(* print modes *)
-
-val protocol_modes1 = [Syntax_Trans.no_bracketsN, Syntax_Trans.no_type_bracketsN];
-val protocol_modes2 = [Print_Mode.PIDE];
-
 
 (* restricted tracing messages *)
 
@@ -40,7 +34,7 @@ fun update_tracing () =
           Synchronized.change_result tracing_messages (fn tab =>
             let
               val n = the_default 0 (Inttab.lookup tab exec_id) + 1;
-              val limit = Options.default_int "editor_tracing_messages";
+              val limit = Options.default_int \<^system_option>\<open>editor_tracing_messages\<close>;
               val ok = limit <= 0 orelse n <= limit;
             in (ok, Inttab.update (exec_id, n) tab) end);
       in
@@ -73,20 +67,21 @@ fun recover crash =
 
 fun ml_statistics () =
   Output.protocol_message
-    (Markup.ML_statistics {pid = ML_Pid.get (), stats_dir = getenv "POLYSTATSDIR"}) [];
+    (Markup.ML_statistics {pid = PolyML.ml_pid (), stats_dir = getenv "POLYSTATSDIR"}) [];
 
 in
 
-fun init_protocol modes = Thread_Attributes.uninterruptible (fn _ => fn (address, password) =>
+val init_protocol = Thread_Attributes.uninterruptible (fn _ => fn modes =>
   let
-    val _ = SHA1.test_samples ()
-      handle exn as Fail msg => (Output.physical_stderr (msg ^ "\n"); Exn.reraise exn);
-
     val _ = Output.physical_stderr Symbol.STX;
 
 
     (* streams *)
 
+    val (address, password) =
+      (case TextIO.inputLine TextIO.stdIn |> Option.map (trim_line #> space_explode " ") of
+        SOME [address, password] => (address, password)
+      | _ => raise Fail "Cannot read system channel address/password");
     val (in_stream, out_stream) = Socket_IO.open_streams address;
     val _ = Byte_Message.write_line out_stream (Bytes.string password);
 
@@ -141,7 +136,7 @@ fun init_protocol modes = Thread_Attributes.uninterruptible (fn _ => fn (address
       Unsynchronized.setmp Private_Output.protocol_message_fn
         (fn props => fn chunks => message Markup.protocolN props chunks) #>
       Unsynchronized.setmp print_mode
-        ((! print_mode @ #1 modes) |> fold (update op =) (#2 modes));
+        ((! print_mode @ modes) |> update (op =) Print_Mode.PIDE);
 
 
     (* protocol *)
@@ -180,53 +175,37 @@ fun init_protocol modes = Thread_Attributes.uninterruptible (fn _ => fn (address
     val _ = BinIO.closeIn in_stream;
     val _ = BinIO.closeOut out_stream;
 
-    val _ = Options.reset_default ();
+    val _ = Options.set_process_default NONE;
   in
     (case result of
-      Exn.Exn (Protocol_Command.STOP rc) => if rc = 0 then () else exit rc
+      Exn.Exn (Protocol_Command.STOP rc) => if rc = 0 then () else PolyML.exit rc
     | _ => Exn.release result)
   end);
 
 end;
 
+fun init () = init_protocol [Syntax_Trans.no_bracketsN, Syntax_Trans.no_type_bracketsN];
+fun init_build () = init_protocol [];
+
 
 (* init options *)
 
 fun init_options () =
- (ML_Print_Depth.set_print_depth (Options.default_int "ML_print_depth");
-  Multithreading.trace := Options.default_int "threads_trace";
-  Multithreading.max_threads_update (Options.default_int "threads");
-  Multithreading.parallel_proofs := Options.default_int "parallel_proofs";
-  Isabelle_Thread.threads_stack_limit := Options.default_real "threads_stack_limit";
-  if Options.default_bool "export_standard_proofs" then Proofterm.proofs := 2 else ();
-  let val proofs = Options.default_int "record_proofs"
-  in if proofs < 0 then () else Proofterm.proofs := proofs end;
-  Printer.show_markup_default := false;
-  Context.theory_tracing := Options.default_bool "context_theory_tracing";
-  Context.proof_tracing := Options.default_bool "context_proof_tracing";
-  Context.data_timing := Options.default_bool "context_data_timing";
-  Syntax.cache_persistent := false);
-
-fun init_options_interactive () =
- (init_options ();
-  Multithreading.parallel_proofs := (if Options.default_int "parallel_proofs" > 0 then 3 else 0);
-  Printer.show_markup_default := true;
-  Syntax.cache_persistent := true);
-
-
-(* generic init *)
-
-fun init_modes modes =
   let
-    val address = Options.default_string \<^system_option>\<open>system_channel_address\<close>;
-    val password = Options.default_string \<^system_option>\<open>system_channel_password\<close>;
+    val record_proofs = Options.default_int \<^system_option>\<open>record_proofs\<close>;
   in
-    if address <> "" andalso password <> ""
-    then init_protocol modes (address, password)
-    else init_options ()
+    ML_Print_Depth.set_print_depth (Options.default_int \<^system_option>\<open>ML_print_depth\<close>);
+    Multithreading.trace := Options.default_int \<^system_option>\<open>threads_trace\<close>;
+    Multithreading.max_threads_update (Options.default_int \<^system_option>\<open>threads\<close>);
+    Isabelle_Thread.threads_stack_limit := Options.default_real \<^system_option>\<open>threads_stack_limit\<close>;
+    if Options.default_bool \<^system_option>\<open>export_standard_proofs\<close> then Proofterm.proofs := 2 else ();
+    if record_proofs < 0 then () else Proofterm.proofs := record_proofs;
+    Context.theory_tracing := Options.default_bool \<^system_option>\<open>context_theory_tracing\<close>;
+    Context.proof_tracing := Options.default_bool \<^system_option>\<open>context_proof_tracing\<close>;
+    Context.data_timing := Options.default_bool \<^system_option>\<open>context_data_timing\<close>
   end;
 
-fun init () = init_modes (protocol_modes1, protocol_modes2);
-fun init_build () = init_modes ([], protocol_modes2);
+fun update_options upd =
+  (Options.update_process_default upd; init_options ());
 
 end;

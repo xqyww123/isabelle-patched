@@ -8,14 +8,11 @@ Persistent store for file-system content, backed by SQL database
 package isabelle
 
 
-import java.io.{File => JFile}
-
-
 object File_Store {
   /* main operations */
 
   def make_database(database: Path, dir: Path,
-    pred: JFile => Boolean = _ => true,
+    pred: Path => Boolean = _ => true,
     name_prefix: String = "",
     compress_options: Compress.Options = Compress.Options(),
     compress_cache: Compress.Cache = Compress.Cache.none
@@ -23,14 +20,10 @@ object File_Store {
     database.file.delete()
     using(SQLite.open_database(database)) { db =>
       private_data.transaction_lock(db, create = true) {
-        val root = dir.canonical_file
-        val root_path = File.path(root)
-        for {
-          file <- File.find_files(root, pred = pred)
-          rel_path <- File.relative_path(root_path, File.path(file))
-        } {
+        val root_path = dir.canonical
+        for (relative_path <- File.find_files(root_path, pred = pred, relative = true)) {
           val entry =
-            Entry.read_file(rel_path, name_prefix = name_prefix, dir = root_path,
+            Entry.read_file(relative_path, name_prefix = name_prefix, dir = root_path,
               compress_options = compress_options, compress_cache = compress_cache)
           private_data.write_entry(db, entry)
         }
@@ -79,7 +72,7 @@ object File_Store {
       val name = Url.append_path(name_prefix, path.expand.implode)
       val bs = Bytes.read(dir + path)
       val size = bs.size
-      val digest = SHA1.digest(bs).toString
+      val digest = SHA1.digest(bs)
       val executable = File.is_executable(dir + path)
       val (compressed, body) = bs.maybe_compress(options = compress_options, cache = compress_cache)
       Entry(name, size, digest, executable, compressed, body)
@@ -89,7 +82,7 @@ object File_Store {
   sealed case class Entry(
     name: String,
     size: Long,
-    digest: String,
+    digest: Message_Digest.T,
     executable: Boolean,
     compressed: Boolean,
     body: Bytes
@@ -135,7 +128,11 @@ object File_Store {
         Base.table.select(Base.table.columns, sql = Base.name.where_equal(name)),
         { res =>
           val size = res.long(Base.size)
-          val digest = proper_string(res.string(Base.digest)).getOrElse(SHA1.digest_empty.toString)
+          val digest =
+            proper_string(res.string(Base.digest)) match {
+              case None => SHA1.digest_empty
+              case Some(rep) => Message_Digest.parse(rep)
+            }
           val executable = res.bool(Base.executable)
           val compressed = res.bool(Base.compressed)
           val body = res.bytes(Base.body)
@@ -146,7 +143,7 @@ object File_Store {
       db.execute_statement(Base.table.insert(), body = { stmt =>
         stmt.string(1) = entry.name
         stmt.long(2) = entry.size
-        stmt.string(3) = if (entry.digest == SHA1.digest_empty.toString) None else Some(entry.digest)
+        stmt.string(3) = if (entry.digest == SHA1.digest_empty) None else Some(entry.digest.rep)
         stmt.bool(4) = entry.executable
         stmt.bool(5) = entry.compressed
         stmt.bytes(6) = entry.body

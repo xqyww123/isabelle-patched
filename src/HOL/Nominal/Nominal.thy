@@ -392,7 +392,7 @@ ML \<open>
   val mksimps_pairs = (\<^const_name>\<open>Nominal.fresh\<close>, @{thms fresh_prodD}) :: mksimps_pairs;
 \<close>
 declaration \<open>fn _ =>
-  Simplifier.map_ss (Simplifier.set_mksimps (mksimps mksimps_pairs))
+  Simplifier.map_simpset (Simplifier.set_mksimps (mksimps mksimps_pairs))
 \<close>
 
 section \<open>Abstract Properties for Permutations and  Atoms\<close>
@@ -3410,7 +3410,7 @@ lemma allE_Nil: assumes "\<forall>x. P x" obtains "P []"
   using assms ..
 
 ML_file \<open>nominal_datatype.ML\<close>
-
+                  
 (******************************************************)
 (* primitive recursive functions on nominal datatypes *)
 ML_file \<open>nominal_primrec.ML\<close>

@@ -14,6 +14,25 @@ theory Equivalence_Lebesgue_Henstock_Integration
     Cartesian_Euclidean_Space
 begin
 
+lemma nn_integral_uminus:
+  fixes f :: "real \<Rightarrow> ennreal"
+  assumes f_borel: "f \<in> borel_measurable lborel"
+  shows "(\<integral>\<^sup>+ x. f (-x) \<partial>lborel) = (\<integral>\<^sup>+ x. f x \<partial>lborel)"
+proof -
+  have "(\<integral>\<^sup>+ x. f (-x) \<partial>lborel) = (\<integral>\<^sup>+ a. f a \<partial>distr lborel lborel uminus)"
+    using assms by (subst nn_integral_distr [where T="uminus"]) auto
+  also have "... = (\<integral>\<^sup>+ x. f x \<partial>lborel)"
+    by (simp add: distr_cong lborel_distr_uminus)
+  finally show ?thesis .
+qed
+
+lemma set_nn_integral_reflection:
+  fixes f :: "real \<Rightarrow> ennreal"
+  assumes f_borel: "f \<in> borel_measurable borel"
+  shows "(\<integral>\<^sup>+x\<in>{-b..}. (f (- x)) \<partial>lborel) = (\<integral>\<^sup>+x\<in>{..b}. (f x)\<partial>lborel)"
+  using assms nn_integral_uminus [of "(\<lambda>x. f x * _ x)", symmetric]
+  by (simp add: indicator_def minus_le_iff)
+
 lemma LIMSEQ_if_less: "(\<lambda>k. if i < k then a else b) \<longlonglongrightarrow> a"
   by (rule_tac k="Suc i" in LIMSEQ_offset) auto
 
@@ -1627,7 +1646,6 @@ proof -
     using * by (simp add: negligible_UNIV has_integral_iff)
 qed
 
-
 lemma negligible_linear_singular_image:
   fixes f :: "'n::euclidean_space \<Rightarrow> 'n"
   assumes "linear f" "\<not> inj f"
@@ -2031,6 +2049,40 @@ proof -
     by (metis (no_types) image_comp negligible_differentiable_image_negligible order_refl)
 qed
 
+lemma negligible_linear_image:
+  fixes f :: \<open>'a::euclidean_space \<Rightarrow> 'a::euclidean_space\<close>
+  assumes \<open>linear f\<close> \<open>negligible S\<close>
+  shows \<open>negligible (f ` S)\<close>
+proof (cases \<open>inj f\<close>)
+  case True
+  have \<open>bounded_linear f\<close>
+    using \<open>linear f\<close> linear_conv_bounded_linear by blast
+  then have \<open>f differentiable_on S\<close>
+    using bounded_linear_imp_differentiable differentiable_on_def by blast
+    then show ?thesis
+    using negligible_differentiable_image_negligible assms(2) by blast
+next
+  case False
+  then show ?thesis
+  using \<open>linear f\<close> negligible_linear_singular_image by blast
+qed
+
+lemma negligible_linear_image_eq:
+  fixes f :: \<open>'a::euclidean_space \<Rightarrow> 'a::euclidean_space\<close>
+  assumes \<open>linear f\<close> \<open>inj f\<close>
+  shows \<open>negligible (f ` S) \<longleftrightarrow> negligible S\<close>
+proof
+  assume \<open>negligible S\<close>
+  then show \<open>negligible (f ` S)\<close>
+    using assms(1) negligible_linear_image by blast
+next
+  assume neg_fS: \<open>negligible (f ` S)\<close>
+  then have \<open>negligible (inv f ` f ` S)\<close>
+    using assms inj_linear_imp_inv_linear negligible_linear_image by blast
+  then show \<open>negligible S\<close>
+    using assms by force
+qed
+
 subsection\<open>Measurability of countable unions and intersections of various kinds.\<close>
 
 lemma
@@ -2101,6 +2153,13 @@ proof (cases "\<F> = {}")
   then show ?thesis
     by (metis from_nat_into range_from_nat_into assms negligible_Union_nat)
 qed simp
+
+lemma countable_imp_negligible:
+  fixes S :: \<open>real set\<close>
+  assumes \<open>countable S\<close>
+  shows \<open>negligible S\<close>
+  using negligible_countable_Union[OF countable_image[OF assms]]
+  by (metis (mono_tags, lifting) UN_singleton image_iff negligible_sing)
 
 lemma
   assumes S: "\<And>n. (S n) \<in> lmeasurable"
@@ -3319,6 +3378,17 @@ lemma absolutely_integrable_component:
   "f absolutely_integrable_on A \<Longrightarrow> (\<lambda>x. f x \<bullet> (b :: 'b :: euclidean_space)) absolutely_integrable_on A"
   by (drule absolutely_integrable_linear[OF _ bounded_linear_inner_left[of b]]) (simp add: o_def)
 
+lemma Re_absolutely_integrable_on:
+  assumes "g absolutely_integrable_on S"
+  shows "(\<lambda>t. Re (g t)) absolutely_integrable_on S"
+  using absolutely_integrable_component [OF assms]
+  by (metis (lifting) ext complex_inner_1_right)
+
+lemma Im_absolutely_integrable_on:
+  assumes "g absolutely_integrable_on S"
+  shows "(\<lambda>t. Im (g t)) absolutely_integrable_on S"
+  using absolutely_integrable_component [OF assms]
+  by (metis (lifting) ext complex_inner_i_right)
 
 lemma integrable_on_iff_component:
   fixes f :: "'a::euclidean_space \<Rightarrow> real^'n"
@@ -4050,6 +4120,26 @@ proof -
   finally show ?thesis .
 qed
 
+lemma nn_integral_FTC_atMost:
+  fixes f :: "real \<Rightarrow> real"
+  assumes f_borel: "f \<in> borel_measurable borel"
+  assumes f: "\<And>x. x \<le> b \<Longrightarrow> DERIV F x :> f x"
+  assumes nonneg: "\<And>x. x \<le> b \<Longrightarrow> 0 \<le> f x"
+  assumes lim: "(F \<longlongrightarrow> U) at_bot"
+  shows "(\<integral>\<^sup>+x\<in>{..b}. ennreal (f x)\<partial>lborel) = F b - U"
+proof -
+  have 1: "((uminus \<circ> F \<circ> uminus) \<longlongrightarrow> -U) at_top"
+    by (metis at_bot_mirror filterlim_def lim tendsto_compose_filtermap tendsto_mono
+        tendsto_uminus_nhds)
+  have 2: "DERIV (uminus \<circ> F \<circ> uminus) x :> (f \<circ> uminus) x" if "x \<ge> -b" for x
+    unfolding o_def using DERIV_mirror f[of "-x"] that
+    by (metis Deriv.field_differentiable_minus add.inverse_inverse minus_le_iff)
+  show ?thesis
+    using nn_integral_FTC_atLeast [OF _ 2 _ 1, of "-b"] assms set_nn_integral_reflection [of "ennreal o f"]    
+    by auto
+qed
+
+
 lemma integral_power:
   "a \<le> b \<Longrightarrow> (\<integral>x. x^k * indicator {a..b} x \<partial>lborel) = (b^Suc k - a^Suc k) / Suc k"
 proof (subst integral_FTC_Icc_real)
@@ -4350,9 +4440,9 @@ proof
     fix e::real
     assume "e > 0"
     obtain N1 where N1: "\<bar>f x\<bar> < 2 ^ N1"
-      using real_arch_pow by fastforce
+      using arch_pow[of 2 "\<bar>f x\<bar>"] by fastforce
     obtain N2 where N2: "(1/2) ^ N2 < e"
-      using real_arch_pow_inv \<open>e > 0\<close> by force
+      using arch_pow_inv \<open>e > 0\<close> by force
     have "norm (?g n x - f x) < e" if n: "n \<ge> max N1 N2" for n
     proof -
       define m where "m \<equiv> floor(2^n * (f x))"
@@ -4513,7 +4603,7 @@ proof -
       fix e :: "real"
       assume "e > 0"
       then obtain n where n: "(1/2)^n < e"
-        using real_arch_pow_inv [of e "1/2"] by auto
+        using arch_pow_inv [of e "1/2"] by auto
       show "\<exists>T. S - (\<Union>n. C n) \<subseteq> T \<and> T \<in> lmeasurable \<and> measure lebesgue T \<le> e"
       proof (intro exI conjI)
         show "S - (\<Union>n. C n) \<subseteq> S - C n"

@@ -6,14 +6,16 @@ Support for exceptions (arbitrary throwables).
 
 package isabelle
 
+import sun.misc.{Signal, SignalHandler}
+
 
 object Exn {
   /* user errors */
 
-  class User_Error(message: String) extends RuntimeException(message) {
+  class User_Error(protected val message: String) extends RuntimeException(message) {
     override def equals(that: Any): Boolean =
       that match {
-        case other: User_Error => message == other.getMessage
+        case other: User_Error => message == other.message
         case _ => false
       }
     override def hashCode: Int = message.hashCode
@@ -79,7 +81,7 @@ object Exn {
   /* interrupts */
 
   def cause(exn: Throwable): Throwable =
-    isabelle.setup.Exn.cause(exn)
+    isabelle.setup.Exn.cause(exn).nn
 
   def is_interrupt(exn: Throwable): Boolean =
     isabelle.setup.Exn.is_interrupt(exn)
@@ -108,7 +110,14 @@ object Exn {
 
     def dispose(): Unit = Thread.interrupted()
     def expose(): Unit = if (Thread.interrupted()) throw apply()
-    def impose(): Unit = Thread.currentThread.interrupt()
+    def impose(): Unit = Isabelle_Thread.current.interrupt()
+
+    def signal_handler[A](h: => Unit)(e: => A): A = {
+      val SIGINT = new Signal("INT")
+      val new_handler = new SignalHandler { def handle(s: Signal): Unit = h }
+      val old_handler = Signal.handle(SIGINT, new_handler)
+      try { e } finally { Signal.handle(SIGINT, old_handler) }
+    }
   }
 
 
@@ -118,12 +127,14 @@ object Exn {
     if (exn.isInstanceOf[User_Error] || exn.getClass == classOf[RuntimeException]) {
       Some(proper_string(exn.getMessage) getOrElse "Error")
     }
-    else if (exn.isInstanceOf[java.sql.SQLException]) {
+    else if (Library.has_super_class_name(exn, "java.sql.SQLException")) {
       Some(proper_string(exn.getMessage) getOrElse "SQL error")
     }
     else if (exn.isInstanceOf[java.io.IOException]) {
-      val msg = exn.getMessage
-      Some(if (msg == null || msg == "") "I/O error" else "I/O error: " + msg)
+      proper_string(exn.getMessage) match {
+        case None => Some("I/O error")
+        case Some(msg) => Some("I/O error: " + msg)
+      }
     }
     else if (exn.isInstanceOf[RuntimeException]) Some(exn.toString)
     else None
@@ -136,8 +147,30 @@ object Exn {
 
   def debug(): Boolean = isabelle.setup.Exn.debug()
 
-  def trace(exn: Throwable): String = isabelle.setup.Exn.trace(exn)
+  def trace(exn: Throwable): String = isabelle.setup.Exn.trace(exn).nn
 
   def print(exn: Throwable): String =
     if (debug()) message(exn) + "\n" + trace(exn) else message(exn)
+
+  def print_failure(
+    exn: Throwable,
+    prefix: => String = Isabelle_Thread.failure_prefix
+  ): Option[String] =
+    if (is_interrupt(exn)) None
+    else {
+      val a = prefix
+      val b = print(exn)
+      Some(if_proper(a, a + ":\n") + b)
+    }
+
+  def capture_trace[A](
+    trace: String => Unit,
+    prefix: => String = Isabelle_Thread.failure_prefix
+  )(e: => A): Result[A] =
+    try { Res(e) }
+    catch {
+      case exn: Throwable =>
+        for (msg <- print_failure(exn, prefix = prefix)) trace(msg)
+        Exn[A](exn)
+    }
 }

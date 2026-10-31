@@ -283,14 +283,14 @@ object TOML {
 
     def offset_date_time: Parser[Offset_Date_Time] =
       token("offset date-time", _.is_value,
-        s => Offset_Date_Time(OffsetDateTime.parse(s.replace(" ", "T"))))
+        s => Offset_Date_Time(OffsetDateTime.parse(s.replacing(" " -> "T")).nn))
     def local_date_time: Parser[Local_Date_Time] =
       token("local date-time", _.is_value,
-        s => Local_Date_Time(LocalDateTime.parse(s.replace(" ", "T"))))
+        s => Local_Date_Time(LocalDateTime.parse(s.replacing(" " -> "T")).nn))
     def local_date: Parser[Local_Date] =
-      token("local date", _.is_value, s => Local_Date(LocalDate.parse(s)))
+      token("local date", _.is_value, s => Local_Date(LocalDate.parse(s).nn))
     def local_time: Parser[Local_Time] =
-      token("local time", _.is_value, s => Local_Time(LocalTime.parse(s)))
+      token("local time", _.is_value, s => Local_Time(LocalTime.parse(s).nn))
 
     def array: Parser[Array] =
       positioned(
@@ -338,27 +338,27 @@ object TOML {
     private def sep_surrounded(s: Str): Bool =
       !s.startsWith("_") && !s.endsWith("_") && s.split('_').forall(_.nonEmpty)
     private def no_leading_zero(s: Str): Bool = {
-      val t = s.replaceAll("_", "").takeWhile(_.isDigit)
+      val t = s.replacing("_" -> "").takeWhile(_.isDigit)
       t == "0" || !t.startsWith("0")
     }
 
     private def is_int(s: Str): Bool =
-      no_leading_zero(s.replaceAll("[-+]", "")) && sep_surrounded(s.replaceAll("[-+]", ""))
+      no_leading_zero(s.replacing("[-+]".r -> "")) && sep_surrounded(s.replacing("[-+]".r -> ""))
     private def decimal_int: Parser[Long] =
-      token("integer", e => e.is_value && is_int(e.text), _.replace("_", "").toLong)
+      token("integer", e => e.is_value && is_int(e.text), _.replacing("_" -> "").toLong)
     private def binary_int: Parser[Long] =
-      prefixed("0b", "integer", sep_surrounded, s => parseLong(s.replace("_", ""), 2))
+      prefixed("0b", "integer", sep_surrounded, s => parseLong(s.replacing("_" -> ""), 2))
     private def octal_int: Parser[Long] =
-      prefixed("0o", "integer", sep_surrounded, s => parseLong(s.replace("_", ""), 8))
+      prefixed("0o", "integer", sep_surrounded, s => parseLong(s.replacing("_" -> ""), 8))
     private def hexadecimal_int: Parser[Long] =
-      prefixed("0x", "integer", sep_surrounded, s => parseLong(s.replace("_", ""), 16))
+      prefixed("0x", "integer", sep_surrounded, s => parseLong(s.replacing("_" -> ""), 16))
 
     private def is_float(s: Str): Bool =
       s.exists(".eE".contains) && s.count("eE".contains) <= 1 &&
-        no_leading_zero(s.replaceAll("[-+]", "")) &&
-        sep_surrounded(s.replaceAll("[-+]", "").replaceAll("[.eE][+\\-]?", "_"))
+        no_leading_zero(s.replacing("[-+]".r -> "")) &&
+        sep_surrounded(s.replacing("[-+]".r -> "", "[.eE][+\\-]?".r -> "_"))
     private def number_float: Parser[Double] =
-      token("float", e => e.is_value && is_float(e.text), _.replace("_", "").toDouble)
+      token("float", e => e.is_value && is_float(e.text), _.replacing("_" -> "").toDouble)
     private def symbol_float: Parser[Double] =
       token("float", _.is_value, {
         case "inf" | "+inf" => Double.PositiveInfinity
@@ -594,15 +594,15 @@ object TOML {
       "\"" + s.iterator.map {
         case '\b' => "\\b" case '\t' => "\\t" case '\n' => "\\n" case '\f' => "\\f"
         case '\r' => "\\r" case '"' => "\\\"" case '\\' => "\\\\" case c =>
-        if (c <= '\u001f' || c == '\u007f') "\\u%04x".format(c.toInt) else c
+        if (c <= '\u001f' || c == '\u007f') Library.format("\\u%04x", Value.Int.obj(c)) else c
       }.mkString + "\""
 
     private def multiline_basic_string(s: Str): Str =
       "\"\"\"\n" + s.iterator.map {
         case '\b' => "\\b" case '\t' => "\t" case '\n' => "\n" case '\f' => "\\f"
         case '\r' => "\r" case '"' => "\\\"" case '\\' => "\\\\" case c =>
-          if (c <= '\u001f' || c == '\u007f') "\\u%04x".format(c.toInt) else c
-      }.mkString.replace("\"\"\"", "\"\"\\\"") + "\"\"\""
+          if (c <= '\u001f' || c == '\u007f') Library.format("\\u%04x", Value.Int.obj(c)) else c
+      }.mkString.replacing("\"\"\"" -> "\"\"\\\"") + "\"\"\""
 
     private def key(k: Key): Str = {
       val Bare_Key = """[A-Za-z0-9_-]+""".r

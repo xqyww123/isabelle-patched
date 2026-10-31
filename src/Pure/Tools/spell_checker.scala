@@ -46,7 +46,7 @@ object Spell_Checker {
       scan(c => Character.isLetterOrDigit(c) || apostrophe(c))
       val stop = offset
       if (stop - start >= 2) {
-        val info = Text.Info(Text.Range(base + start, base + stop), text.substring(start, stop))
+        val info = Text.Info(Text.Range(base + start, base + stop), text.slice(start, stop))
         if (mark(info)) result += info
       }
     }
@@ -75,10 +75,10 @@ object Spell_Checker {
       if (include) name else "-" + name
 
     def unapply(decl: String): Option[(String, Boolean)] = {
-      val decl1 = decl.trim
+      val decl1 = Library.trim_string(decl)
       if (decl1 == "" || decl1.startsWith("#")) None
       else
-        Library.try_unprefix("-", decl1.trim) match {
+        Library.try_unprefix("-", decl1) match {
           case None => Some((decl1, true))
           case Some(decl2) => Some((decl2, false))
         }
@@ -137,7 +137,7 @@ class Spell_Checker private(dictionary: Spell_Checker.Dictionary) {
       updates -- (for ((name, upd) <- updates.iterator; if upd.permanent) yield name) ++
         permanent_updates
 
-    val factory_class = Class.forName("com.inet.jortho.DictionaryFactory")
+    val factory_class = Classpath.the_class("com.inet.jortho.DictionaryFactory")
     val factory = Untyped.constructor(factory_class).newInstance()
 
     val add = Untyped.method(factory_class, "add", classOf[String])
@@ -147,7 +147,7 @@ class Spell_Checker private(dictionary: Spell_Checker.Dictionary) {
       if !excluded(word)
     } add.invoke(factory, word)
 
-    dict = Untyped.method(factory_class, "create").invoke(factory)
+    dict = Untyped.method(factory_class, "create").invoke(factory).nn
   }
   load()
 
@@ -196,7 +196,7 @@ class Spell_Checker private(dictionary: Spell_Checker.Dictionary) {
   /* check known words */
 
   def contains(word: String): Boolean =
-    Untyped.method(dict.getClass.getSuperclass, "exist", classOf[String]).
+    Untyped.method(dict.getClass.getSuperclass.nn, "exist", classOf[String]).
       invoke(dict, word).asInstanceOf[java.lang.Boolean].booleanValue
 
   def check(word: String): Boolean =
@@ -215,8 +215,8 @@ class Spell_Checker private(dictionary: Spell_Checker.Dictionary) {
 
   private def suggestions(word: String): Option[List[String]] = {
     val res =
-      Untyped.method(dict.getClass.getSuperclass, "searchSuggestions", classOf[String]).
-        invoke(dict, word).asInstanceOf[JList[AnyRef]].toArray.toList.map(_.toString)
+      Untyped.method(dict.getClass.getSuperclass.nn, "searchSuggestions", classOf[String]).
+        invoke(dict, word).asInstanceOf[JList[AnyRef]].toArray.nn.toList.map(x => x.nn.toString)
     if (res.isEmpty) None else Some(res)
   }
 

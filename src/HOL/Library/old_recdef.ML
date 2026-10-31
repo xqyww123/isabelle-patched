@@ -1448,7 +1448,7 @@ fun restricted t = is_some (USyntax.find_term
 
 fun CONTEXT_REWRITE_RULE main_ctxt (func, G, cut_lemma, congs) th =
  let val globals = func::G
-     val ctxt0 = empty_simpset main_ctxt
+     val ctxt0 = Simplifier.empty_simpset main_ctxt
      val pbeta_reduce = simpl_conv ctxt0 [@{thm split_conv} RS eq_reflection];
      val tc_list = Unsynchronized.ref []: term list Unsynchronized.ref
      val cut_lemma' = cut_lemma RS eq_reflection
@@ -1714,7 +1714,7 @@ fun gvvariant names =
  * partitioning up pattern rows by the leading constructor.
  *---------------------------------------------------------------------------*)
 fun ipartition gv (constructors,rows) =
-  let fun pfail s = raise TFL_ERR "partition.part" s
+  let fun pfail s = raise TFL_ERR \<^unchecked_name>\<open>partition.part\<close> s
       fun part {constrs = [],   rows = [],   A} = rev A
         | part {constrs = [],   rows = _::_, A} = pfail"extra cases in defn"
         | part {constrs = _::_, rows = [],   A} = pfail"cases missing in defn"
@@ -2034,7 +2034,7 @@ let fun insert (p,TCs) =
       let fun insrt ((x as (h,[]))::rst) =
                  if (p aconv h) then (p,TCs)::rst else x::insrt rst
             | insrt (x::rst) = x::insrt rst
-            | insrt[] = raise TFL_ERR "merge.insert" "pattern not found"
+            | insrt[] = raise TFL_ERR \<^unchecked_name>\<open>merge.insert\<close> "pattern not found"
       in insrt end
     fun pass ([],ptcl_final) = ptcl_final
       | pass (ptcs::tcl, ptcl) = pass(tcl, insert ptcs ptcl)

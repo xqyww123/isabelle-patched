@@ -6,6 +6,7 @@ Handling of folds within the text structure.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -44,7 +45,7 @@ object Fold_Handling {
             takeWhile(_.improper).map(_ => structure.depth max 0).toList
         else Nil
 
-      if (result.isEmpty) null else result.map(Integer.valueOf).asJava
+      if (result.isEmpty) null else result.map(Value.Int.obj).asJava
     }
   }
 

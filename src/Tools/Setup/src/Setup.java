@@ -12,10 +12,12 @@ class Setup
     private static void echo(String msg)
     {
         System.out.print(msg + "\n");
+        System.out.flush();
     }
     private static void echo_err(String msg)
     {
         System.err.print(msg + "\n");
+        System.err.flush();
     }
     private static void fail(String msg)
     {
@@ -47,6 +49,10 @@ class Setup
                 case "classpath":
                     check_args(n == 1);
                     echo(Environment.join_standard_paths(Build.classpath()));
+                    break;
+                case "cygwin_init":
+                    check_args(n == 3);
+                    Environment.cygwin_init(args[1], args[2]);
                     break;
                 case "gui_setup":
                     check_args(n == 1);

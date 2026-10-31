@@ -25,7 +25,12 @@ theory Analysis
   Cartesian_Euclidean_Space
   Kronecker_Approximation_Theorem
   Weierstrass_Theorems
+  Ck_Implicit_Function
+  Analytic_Inverse_Function
   (* Measure and Integration Theory *)
+  Absolute_Continuity
+  Rectifiable_Path
+  Lebesgue_Differentiation
   Ball_Volume
   Integral_Test
   Improper_Integral
@@ -41,7 +46,7 @@ theory Analysis
   Abstract_Topology
   Product_Topology
   Lindelof_Spaces
-  Infinite_Products
+  Infinite_Product
   Infinite_Sum
   Infinite_Set_Sum
   Polytope

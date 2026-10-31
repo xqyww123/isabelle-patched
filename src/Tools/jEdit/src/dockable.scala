@@ -6,6 +6,7 @@ Generic dockable window.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -18,6 +19,8 @@ import org.gjt.sp.jedit.gui.{DefaultFocusComponent, DockableWindowManager}
 
 class Dockable(view: View, position: String)
 extends JPanel(new BorderLayout) with DefaultFocusComponent {
+  val editor_context: JEdit_Editor.Dynamic_Context = JEdit_Editor.Context(view)
+
   if (position == DockableWindowManager.FLOATING)
     setPreferredSize(new Dimension(500, 250))
 

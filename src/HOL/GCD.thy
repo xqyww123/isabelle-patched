@@ -1187,17 +1187,25 @@ lemma Gcd_fin_eq_Gcd [simp]:
   "Gcd\<^sub>f\<^sub>i\<^sub>n A = Gcd A" if "finite A" for A :: "'a set"
   using that by induct simp_all
 
-lemma Gcd_set_eq_fold [code_unfold]:
+lemma Gcd_set_eq_fold:
   "Gcd (set xs) = fold gcd xs 0"
-  by (simp add: Gcd_fin.set_eq_fold [symmetric])
+  by (simp flip: Gcd_fin.set_eq_fold)
+
+lemma [code]:
+  "Gcd (set xs) = Gcd\<^sub>f\<^sub>i\<^sub>n (set xs)"
+  by simp
 
 lemma Lcm_fin_eq_Lcm [simp]:
   "Lcm\<^sub>f\<^sub>i\<^sub>n A = Lcm A" if "finite A" for A :: "'a set"
   using that by induct simp_all
 
-lemma Lcm_set_eq_fold [code_unfold]:
+lemma Lcm_set_eq_fold:
   "Lcm (set xs) = fold lcm xs 1"
-  by (simp add: Lcm_fin.set_eq_fold [symmetric])
+  by (simp flip: Lcm_fin.set_eq_fold)
+
+lemma [code]:
+  "Lcm (set xs) = Lcm\<^sub>f\<^sub>i\<^sub>n (set xs)"
+  by simp
 
 end
 
@@ -2419,10 +2427,6 @@ lemma lcm_pos_nat: "m > 0 \<Longrightarrow> n > 0 \<Longrightarrow> lcm m n > 0"
 lemma lcm_pos_int: "m \<noteq> 0 \<Longrightarrow> n \<noteq> 0 \<Longrightarrow> lcm m n > 0"
   for m n :: int
   by (simp add: less_le lcm_eq_0_iff)
-
-lemma dvd_pos_nat: "n > 0 \<Longrightarrow> m dvd n \<Longrightarrow> m > 0"  (* FIXME move *)
-  for m n :: nat
-  by auto
 
 lemma lcm_unique_nat:
   "a dvd d \<and> b dvd d \<and> (\<forall>e. a dvd e \<and> b dvd e \<longrightarrow> d dvd e) \<longleftrightarrow> d = lcm a b"

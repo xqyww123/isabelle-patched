@@ -70,7 +70,7 @@ object Component_Minisat {
 
       if (Platform.is_macos) {
         File.change(source_dir + Path.explode("Makefile")) {
-          _.replaceAll("--static", "").replaceAll("-Wl,-soname\\S+", "")
+          _.replacing("--static" -> "", "-Wl,-soname\\S+".r -> "")
         }
       }
       progress.bash("make r", cwd = source_dir, echo = progress.verbose).check

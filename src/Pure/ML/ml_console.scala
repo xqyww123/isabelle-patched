@@ -58,9 +58,7 @@ Usage: isabelle console [OPTIONS]
       if (!no_build && !raw_ml_system) {
         val progress = new Console_Progress()
         val results =
-          progress.interrupt_handler {
-            Build.build_logic(options, logic, build_heap = true, progress = progress, dirs = dirs)
-          }
+          Build.build_logic(options, logic, build_heap = true, progress = progress, dirs = dirs)
         if (!results.ok) sys.exit(results.rc)
       }
 
@@ -82,13 +80,14 @@ Usage: isabelle console [OPTIONS]
       // process loop
       val process =
         ML_Process(options, session_background, session_heaps, args = List("-i"), redirect = true,
-          modes = if (raw_ml_system) Nil else modes ::: List("ASCII"))
+          modes = if (raw_ml_system) Nil else modes ::: List("ASCII"))._2
 
-      POSIX_Interrupt.handler { process.interrupt() } {
-        new TTY_Loop(process.stdin, process.stdout).join()
-        val rc = process.join()
-        if (rc != Process_Result.RC.ok) sys.exit(rc)
-      }
+      val rc =
+        Exn.Interrupt.signal_handler { process.interrupt() } {
+          new TTY_Loop(process.stdin, process.stdout).join()
+          process.join()
+        }
+      if (rc != Process_Result.RC.ok) sys.exit(rc)
     }
   }
 }

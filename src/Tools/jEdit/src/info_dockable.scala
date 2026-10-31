@@ -6,6 +6,7 @@ Dockable window with info text.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -54,7 +55,7 @@ class Info_Dockable(view: View, position: String) extends Dockable(view, positio
   /* output text area */
 
   private val output: Output_Area =
-    new Output_Area(view) {
+    new Output_Area(editor_context) {
       override def handle_shown(): Unit = split_pane_layout()
     }
 
@@ -73,7 +74,7 @@ class Info_Dockable(view: View, position: String) extends Dockable(view, positio
   /* main */
 
   private val main =
-    Session.Consumer[Session.Global_Options](getClass.getName) {
+    Session.Consumer[Session.Global_Options](this.class_name) {
       case _: Session.Global_Options =>
         GUI_Thread.later {
           output.handle_resize()

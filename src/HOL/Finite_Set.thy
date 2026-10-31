@@ -345,17 +345,19 @@ lemma finite_subset_image:
   assumes "finite B"
   shows "B \<subseteq> f ` A \<Longrightarrow> \<exists>C\<subseteq>A. finite C \<and> B = f ` C"
   using assms
-proof induct
+proof (induct B rule: finite_induct)
   case empty
   then show ?case by simp
 next
-  case insert
+  case (insert b B)
+  then have "\<exists>C\<subseteq>A. finite C \<and> B = f ` C"
+    by auto
   then show ?case
-    by (clarsimp simp del: image_insert simp add: image_insert [symmetric]) blast
+    using insert.prems by auto
 qed
 
 lemma all_subset_image: "(\<forall>B. B \<subseteq> f ` A \<longrightarrow> P B) \<longleftrightarrow> (\<forall>B. B \<subseteq> A \<longrightarrow> P(f ` B))"
-  by (safe elim!: subset_imageE) (use image_mono in \<open>blast+\<close>) (* slow *)
+  by (auto simp: subset_image_iff dest: image_mono)
 
 lemma all_finite_subset_image:
   "(\<forall>B. finite B \<and> B \<subseteq> f ` A \<longrightarrow> P B) \<longleftrightarrow> (\<forall>B. finite B \<and> B \<subseteq> A \<longrightarrow> P (f ` B))"
@@ -1728,6 +1730,12 @@ lemma card_insert_disjoint: "finite A \<Longrightarrow> x \<notin> A \<Longright
 lemma card_insert_if: "finite A \<Longrightarrow> card (insert x A) = (if x \<in> A then card A else Suc (card A))"
   by auto (simp add: card.insert_remove card.remove)
 
+lemma card_Domain_le: "finite A \<Longrightarrow> card (Domain A) \<le> card A"
+  by (induction rule: finite_induct) (simp_all flip: fst_eq_Domain add: card_insert_if)
+
+lemma card_Range_le: "finite A \<Longrightarrow> card (Range A) \<le> card A"
+  by (induction rule: finite_induct) (simp_all flip: snd_eq_Range add: card_insert_if)
+
 lemma card_ge_0_finite: "card A > 0 \<Longrightarrow> finite A"
   by (rule ccontr) simp
 
@@ -1857,6 +1865,11 @@ lemma card_Un_disjoint: "finite A \<Longrightarrow> finite B \<Longrightarrow> A
 lemma card_Un_disjnt: "\<lbrakk>finite A; finite B; disjnt A B\<rbrakk> \<Longrightarrow> card (A \<union> B) = card A + card B"
   by (simp add: card_Un_disjoint disjnt_def)
 
+lemma card_sym_diff_finite:
+  assumes "finite A" "finite B"
+  shows "card (sym_diff A B) = card (A-B) + card (B-A)"
+  by (simp add: assms card_Un_disjnt disjnt_Diff2)
+
 lemma card_Un_le: "card (A \<union> B) \<le> card A + card B"
 proof (cases "finite A \<and> finite B")
   case True
@@ -1957,6 +1970,23 @@ qed auto
 
 lemma card_psubset: "finite B \<Longrightarrow> A \<subseteq> B \<Longrightarrow> card A < card B \<Longrightarrow> A < B"
   by (erule psubsetI) blast
+
+lemma card_add_diff_finite:
+  assumes "finite A" "finite B"
+  shows "card A + card (B-A) = card B + card (A-B)"
+proof -
+  from assms have fi: "finite (A \<inter> B)"
+    by simp
+  have "card (B-A) = card B - card (A \<inter> B)"
+    using fi card_Diff_subset_Int[of B A]  by (simp add: Int_commute)
+  also have "card (A-B) = card A - card (A \<inter> B)"
+    using fi card_Diff_subset_Int by blast
+  moreover have "card A + (card B - card (A \<inter> B)) = card B + (card A - card (A \<inter> B))"
+    using assms card_mono [of concl: "A \<inter> B" B] card_mono [of concl: "A \<inter> B" A]
+    by (simp flip: Nat.diff_add_assoc)
+  ultimately show ?thesis 
+    by simp
+qed
 
 lemma card_le_inj:
   assumes fA: "finite A"
@@ -2304,7 +2334,7 @@ next
   proof (cases "A = {}")
     case True
     from obtain_subset_with_card_n[OF Suc(3)]
-    obtain B where "B \<subseteq> C" "card B = Suc n" by blast
+    obtain B where "B \<subseteq> C" "card B = Suc n" .
     thus ?thesis unfolding True by blast
   next
     case False
@@ -2372,6 +2402,38 @@ using card_inj_on_le[of _ A B] card_le_inj[of A B] by blast
 
 lemma surj_card_le: "finite A \<Longrightarrow> B \<subseteq> f ` A \<Longrightarrow> card B \<le> card A"
   by (blast intro: card_image_le card_mono le_trans)
+
+lemma card_le_card_if_mem_imp_ex_mem:
+  fixes f :: "'a \<Rightarrow> 'b \<Rightarrow> 'c" and \<X> :: "'a set" and \<Y> :: "'c set"
+  defines "XY \<equiv> {(x, y). x \<in> \<X> \<and> f x y \<in> \<Y>}"
+  assumes "finite \<X>" and "finite \<Y>" and
+    f_inj: "inj_on (\<lambda>(x, y). f x y) XY" and
+    ex_in_\<Y>: "\<And>x. x \<in> \<X> \<Longrightarrow> \<exists>y. f x y \<in> \<Y>"
+  shows "card \<X> \<le> card \<Y>"
+proof -
+  have f_XY_subset: "(\<lambda>(x, y). f x y) ` XY \<subseteq> \<Y>"
+    using XY_def by auto
+
+  then have "finite ((\<lambda>(x, y). f x y) ` XY)"
+    using \<open>finite \<Y>\<close> by (rule finite_subset)
+
+  then have "finite XY"
+    by (rule finite_image_iff[THEN iffD1, OF f_inj])
+
+  moreover have "Domain XY = \<X>"
+    unfolding XY_def
+    using ex_in_\<Y>
+    by (simp add: equalityI subsetI)
+
+  ultimately have "card \<X> \<le> card XY"
+    using card_Domain_le by blast
+
+  also have "\<dots> \<le> card \<Y>"
+    using inj_on_iff_card_le[OF \<open>finite XY\<close> \<open>finite \<Y>\<close>]
+    using f_XY_subset f_inj by blast
+
+  finally show "card \<X> \<le> card \<Y>" .
+qed
 
 lemma card_bij_eq:
   "inj_on f A \<Longrightarrow> f ` A \<subseteq> B \<Longrightarrow> inj_on g B \<Longrightarrow> g ` B \<subseteq> A \<Longrightarrow> finite A \<Longrightarrow> finite B
@@ -3047,22 +3109,22 @@ proposition finite_image_absD: "finite (abs ` S) \<Longrightarrow> finite S"
 subsection \<open>The finite powerset operator\<close>
 
 definition Fpow :: "'a set \<Rightarrow> 'a set set"
-where "Fpow A \<equiv> {X. X \<subseteq> A \<and> finite X}"
+  where "Fpow A \<equiv> {X. X \<subseteq> A \<and> finite X}"
 
 lemma Fpow_mono: "A \<subseteq> B \<Longrightarrow> Fpow A \<subseteq> Fpow B"
-unfolding Fpow_def by auto
+  unfolding Fpow_def by auto
 
 lemma empty_in_Fpow: "{} \<in> Fpow A"
-unfolding Fpow_def by auto
+  unfolding Fpow_def by auto
 
 lemma Fpow_not_empty: "Fpow A \<noteq> {}"
-using empty_in_Fpow by blast
+  using empty_in_Fpow by blast
 
 lemma Fpow_subset_Pow: "Fpow A \<subseteq> Pow A"
-unfolding Fpow_def by auto
+  unfolding Fpow_def by auto
 
 lemma Fpow_Pow_finite: "Fpow A = Pow A Int {A. finite A}"
-unfolding Fpow_def Pow_def by blast
+  unfolding Fpow_def Pow_def by blast
 
 lemma inj_on_image_Fpow:
   assumes "inj_on f A"
@@ -3073,6 +3135,6 @@ lemma inj_on_image_Fpow:
 lemma image_Fpow_mono:
   assumes "f ` A \<subseteq> B"
   shows "(image f) ` (Fpow A) \<subseteq> Fpow B"
-  using assms by(unfold Fpow_def, auto)
+  using assms by (auto simp: Fpow_def)
 
 end

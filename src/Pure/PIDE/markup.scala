@@ -109,15 +109,19 @@ object Markup {
   object Entity {
     val Def = new Markup_Long(ENTITY, "def")
     val Ref = new Markup_Long(ENTITY, "ref")
+    val No_Tooltip: Properties.Entry = ("tooltip", "false")
 
     object Occ {
       def unapply(markup: Markup): Option[Long] =
         Def.unapply(markup) orElse Ref.unapply(markup)
     }
 
-    def unapply(markup: Markup): Option[(String, String)] =
+    def apply(entry: Name_Space.Entry): Markup =
+      Markup(ENTITY, entry.properties)
+
+    def unapply(markup: Markup): Option[Name_Space.Entry] =
       markup match {
-        case Markup(ENTITY, props) => Some((Kind.get(props), Name.get(props)))
+        case Markup(ENTITY, props) => Some(Name_Space.Entry(props))
         case _ => None
       }
   }
@@ -447,9 +451,7 @@ object Markup {
 
     sealed case class Args(name: String, kind: String, is_begin: Boolean) {
       def properties: Properties.T =
-        (if (name.isEmpty) Nil else Name(name)) :::
-        (if (kind.isEmpty) Nil else Kind(kind)) :::
-        (if (!is_begin) Nil else Is_Begin(is_begin))
+        Name.make(name) ::: Kind.make(kind) ::: Is_Begin.make(is_begin)
     }
 
     def apply(args: Args): Markup = Markup(COMMAND_SPAN, args.properties)
@@ -498,13 +500,15 @@ object Markup {
 
   /* timing */
 
-  val Elapsed = new Properties.Double("elapsed")
-  val CPU = new Properties.Double("cpu")
-  val GC = new Properties.Double("gc")
+  class Timing_Props(prefix: String = "") {
+    val Elapsed = new Properties.Double(prefix + "elapsed")
+    val CPU = new Properties.Double(prefix + "cpu")
+    val GC = new Properties.Double(prefix + "gc")
 
-  object Timing_Properties {
-    def apply(timing: isabelle.Timing): Properties.T =
-      Elapsed(timing.elapsed.seconds) ::: CPU(timing.cpu.seconds) ::: GC(timing.gc.seconds)
+    def make(timing: isabelle.Timing): Properties.T =
+      Elapsed.make(timing.elapsed.seconds) :::
+        CPU.make(timing.cpu.seconds) :::
+        GC.make(timing.gc.seconds)
 
     def get(props: Properties.T): isabelle.Timing = {
       val elapsed = Time.seconds(Elapsed.get(props))
@@ -514,22 +518,20 @@ object Markup {
     }
   }
 
+  object Timing_Properties extends Timing_Props()
+  object Process_Timing_Properties extends Timing_Props(prefix = "process_")
+
 
   /* process result */
 
-  val Return_Code = new Properties.Int("return_code")
-
   object Process_Result {
-    def apply(result: Process_Result): Properties.T =
-      Return_Code(result.rc) :::
-        (if (result.timing.is_zero) Nil else Timing_Properties(result.timing))
+    val Return_Code = new Properties.Int("return_code")
 
-    def unapply(props: Properties.T): Option[Process_Result] =
-      props match {
-        case Return_Code(rc) =>
-          Some(isabelle.Process_Result(rc, timing = Timing_Properties.get(props)))
-        case _ => None
-      }
+    def make(result: Process_Result): Properties.T =
+      Return_Code.make(result.rc) ::: Timing_Properties.make(result.timing)
+
+    def get(props: Properties.T): Process_Result =
+      isabelle.Process_Result(Return_Code.get(props), timing = Timing_Properties.get(props))
   }
 
 
@@ -705,7 +707,8 @@ object Markup {
   }
 
   val Command_Offset = new Properties.Int("command_offset")
-  private val command_timing_exports: Set[String] = Set(FILE, OFFSET, NAME, Elapsed.name)
+  private val command_timing_exports: Set[String] =
+    Set(FILE, OFFSET, NAME, Timing_Properties.Elapsed.name)
   def command_timing_export(entry: Properties.Entry): Boolean = command_timing_exports(entry._1)
 
   object Command_Timing extends Properties_Function("command_timing")

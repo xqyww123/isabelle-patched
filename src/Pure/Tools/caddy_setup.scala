@@ -13,7 +13,7 @@ object Caddy_Setup {
   sealed case class Platform_Info(platform: String, xcaddy_template: String)
   extends Platform.Info {
     def xcaddy_download(url: String, version: String): String =
-      Url.append_path(url, xcaddy_template.replace("{V}", version))
+      Url.append_path(url, xcaddy_template.replacing("{V}" -> version))
   }
 
   val all_platforms: List[Platform_Info] =
@@ -120,8 +120,8 @@ fi
       }
     }
 
-    File.find_files(component_dir.path.file, pred = file => File.is_exe(file.getName)).
-      foreach(file => File.set_executable(File.path(file)))
+    File.find_files(component_dir.path, pred = File.is_exe).
+      foreach(File.set_executable(_))
 
 
     /* README */

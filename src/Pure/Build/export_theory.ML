@@ -7,7 +7,7 @@ Export foundational theory content and locale/class structure.
 signature EXPORT_THEORY =
 sig
   val other_name_space: (theory -> Name_Space.T) -> theory -> theory
-  val export_enabled: Thy_Info.presentation_context -> bool
+  val export_enabled: Thy_Presentation.context -> bool
   val export_body: theory -> string -> XML.body -> unit
 end;
 
@@ -120,20 +120,20 @@ fun get_dependencies prev_thys thy =
 
 (* presentation *)
 
-fun export_enabled (context: Thy_Info.presentation_context) =
+fun export_enabled (context: Thy_Presentation.context) =
   Options.bool (#options context) "export_theory";
 
 fun export_body thy name body =
   if XML.is_empty_body body then ()
   else Export.export thy (Path.binding0 (Path.make ("theory" :: space_explode "/" name))) body;
 
-val _ = (Theory.setup o Thy_Info.add_presentation) (fn context => fn thy =>
+val _ = (Theory.setup o Thy_Presentation.add_hook) (fn context => fn thy =>
   let
     val rep_tsig = Type.rep_tsig (Sign.tsig_of thy);
     val consts = Sign.consts_of thy;
     val thy_ctxt = Proof_Context.init_global thy;
 
-    val pos_properties = Thy_Info.adjust_pos_properties context;
+    val pos_properties = Thy_Presentation.adjust_pos_properties context;
 
     val enabled = export_enabled context;
 
@@ -190,8 +190,8 @@ val _ = (Theory.setup o Thy_Info.add_presentation) (fn context => fn thy =>
     fun entity_markup space name =
       let
         val xname = Name_Space.extern_shortest thy_ctxt space name;
-        val {serial, pos, ...} = Name_Space.the_entry space name;
-      in make_entity_markup name xname pos serial end;
+        val entry as {serial, ...} = Name_Space.the_entry space name;
+      in make_entity_markup name xname (Name_Space.entry_pos entry) serial end;
 
     fun export_entities export_name get_space decls export =
       let
@@ -296,7 +296,7 @@ val _ = (Theory.setup o Thy_Info.add_presentation) (fn context => fn thy =>
       let
         val space = Global_Theory.fact_space thy;
         val xname = Name_Space.extern_shortest thy_ctxt space name;
-        val {pos, ...} = Name_Space.the_entry space name;
+        val pos = Name_Space.entry_pos (Name_Space.the_entry space name);
       in make_entity_markup (Thm_Name.print (name, i)) (Thm_Name.print (xname, i)) pos serial end;
 
     fun encode_thm thm_id raw_thm =

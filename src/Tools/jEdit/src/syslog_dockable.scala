@@ -6,6 +6,7 @@ Dockable window for syslog.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -20,7 +21,7 @@ class Syslog_Dockable(view: View, position: String) extends Dockable(view, posit
   private val syslog = new TextArea()
 
   private def syslog_delay =
-    Delay.first(PIDE.session.update_delay, gui = true) {
+    GUI.Delay.first(PIDE.session.update_delay) {
       val text = PIDE.session.syslog.content()
       if (text != syslog.text) syslog.text = text
     }
@@ -31,7 +32,7 @@ class Syslog_Dockable(view: View, position: String) extends Dockable(view, posit
   /* main */
 
   private val main =
-    Session.Consumer[Prover.Output](getClass.getName) { case _ => syslog_delay.invoke() }
+    Session.Consumer[Prover.Output](this.class_name) { case _ => syslog_delay.invoke() }
 
   override def init(): Unit = {
     PIDE.session.syslog_messages += main

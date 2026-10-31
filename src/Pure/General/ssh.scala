@@ -101,7 +101,7 @@ object SSH {
 
     val multiplex = options.bool("ssh_multiplexing") && !Platform.is_windows
     val (control_master, control_path) =
-      if (multiplex) (true, Isabelle_System.tmp_file("ssh", initialized = false).getPath)
+      if (multiplex) (true, Isabelle_System.tmp_file("ssh", initialized = false).getPath.nn)
       else (false, "")
     new Session(options, host, port, user, user_home, control_master, control_path)
   }
@@ -132,20 +132,19 @@ object SSH {
 
     /* local ssh commands */
 
-    def make_command(
-      command: String = "ssh",
+    def command_line(
+      command: String = "",
       master: Boolean = false,
       opts: String = "",
-      args_host: Boolean = false,
       args: String = ""
     ): String = {
-      val config =
+      val command_name = proper_string(command).getOrElse("ssh")
+      val command_config =
         Config.make(options, port = port, user = user,
           control_master = master, control_path = control_path)
-      val args1 = if_proper(args_host, Bash.string(host) + if_proper(args, " ")) + args
-      Config.command(command, config) +
-        if_proper(opts, " " + opts) +
-        if_proper(args1, " -- " + args1)
+      Config.command(command_name, command_config) +
+        if_proper(opts, " " + opts) + " -- " +
+        Bash.string(host) + if_proper(args, " ") + args
     }
 
     def run_sftp(
@@ -157,15 +156,14 @@ object SSH {
         init(dir)
         File.write(dir + Path.explode("script"), script)
         val result =
-          Isabelle_System.bash(
-            make_command("sftp", opts = "-b script", args_host = true), cwd = dir).check
+          Isabelle_System.bash(command_line(command = "sftp", opts = "-b script"), cwd = dir).check
         exit(dir)
         result
       }
     }
 
     def run_ssh(master: Boolean = false, opts: String = "", args: String = ""): Process_Result =
-      Isabelle_System.bash(make_command(master = master, opts = opts, args_host = true, args = args))
+      Isabelle_System.bash(command_line(master = master, opts = opts, args = args))
 
 
     /* init and exit */
@@ -206,10 +204,8 @@ object SSH {
     /* remote commands */
 
     override def kill_process(group_pid: String, signal: String): Boolean = {
-      val script =
-        make_command(args_host = true,
-          args = "kill -" + Bash.string(signal) + " -" + Bash.string(group_pid))
-      Isabelle_System.bash(script).ok
+      val cmd = command_line(args = "kill -" + Bash.string(signal) + " -" + Bash.string(group_pid))
+      Isabelle_System.bash(cmd).ok
     }
 
     override def bash_process(remote_script: String,
@@ -231,11 +227,8 @@ object SSH {
       settings: Boolean = true,  // ignored for remote ssh
       strict: Boolean = true
     ): Process_Result = {
-      val script =
-        make_command(
-          args_host = true,
-          args = Bash.string(Bash.context(remote_script, user_home = user_home)))
-      Isabelle_System.bash(script,
+      Isabelle_System.bash(
+        command_line(args = Bash.string(Bash.context(remote_script, user_home = user_home))),
         progress_stdout = progress_stdout,
         progress_stderr = progress_stderr,
         redirect = redirect,
@@ -272,11 +265,27 @@ object SSH {
     override def bash_path(path: Path): String = Bash.string(remote_path(path))
     def sftp_path(path: Path): String = sftp_string(remote_path(path))
 
-    override def is_dir(path: Path): Boolean = run_ssh(args = "test -d " + bash_path(path)).ok
-    override def is_file(path: Path): Boolean = run_ssh(args = "test -f " + bash_path(path)).ok
+    private def convert_path(str: String, opt: String): String =
+      if (isabelle_platform.is_windows) {
+        val res = execute("/usr/bin/cygpath " + Bash.strings(List(opt, str)))
+        if (res.ok) Library.trim_line(res.out)
+        else error("Error: " + quote(Library.trim_line(res.err)))
+      }
+      else str
+
+    override def standard_path(platform_path: String): String = convert_path(platform_path, "-u")
+    override def platform_path(standard_path: String): String = convert_path(standard_path, "-w")
+
+    override def is_dir(path: Path): Boolean =
+      run_ssh(args = "test -d " + Bash.string(bash_path(path))).ok
+
+    override def is_file(path: Path): Boolean =
+      run_ssh(args = "test -f " + Bash.string(bash_path(path))).ok
 
     override def eq_file(path1: Path, path2: Path): Boolean =
-      path1 == path2 || execute("test " + bash_path(path1) + " -ef " + bash_path(path2)).ok
+      path1 == path2 ||
+       run_ssh(args =
+       "test " + Bash.string(bash_path(path1)) + " -ef " + Bash.string(bash_path(path2))).ok
 
     override def delete(paths: Path*): Unit =
       if (paths.nonEmpty) {
@@ -402,7 +411,7 @@ object SSH {
                 " " + Config.option("PermitLocalCommand", true) +
                 " " + Config.option("LocalCommand", "pwd")
             try {
-              Isabelle_System.bash(make_command(opts = opts, args_host = true),
+              Isabelle_System.bash(command_line(opts = opts),
                 progress_stdout = _ => result.change(_ => Exn.Res(true))).check
             }
             catch { case exn: Throwable => result.change(_ => Exn.Exn(exn)) }
@@ -491,6 +500,8 @@ object SSH {
   }
 
   trait System extends AutoCloseable {
+    ssh =>
+
     def ssh_session: Option[Session]
     def is_local: Boolean = ssh_session.isEmpty
 
@@ -519,6 +530,10 @@ object SSH {
 
     def expand_path(path: Path): Path = path.expand
     def absolute_path(path: Path): Path = path.absolute
+    def standard_path(path: Path): String = expand_path(path).implode
+    def standard_path(platform_path: String): String = File.standard_path(platform_path)
+    def platform_path(standard_path: String): String = File.platform_path(standard_path)
+    def platform_path(path: Path): String = platform_path(standard_path(path))
     def bash_path(path: Path): String = File.bash_path(path)
     def is_dir(path: Path): Boolean = path.is_dir
     def is_file(path: Path): Boolean = path.is_file
@@ -589,17 +604,136 @@ object SSH {
         redirect = redirect, settings = settings, strict = strict)
     }
 
+    def require_command(cmd: String, test: String = "--version"): Unit =
+      if (!bash(Bash.string(cmd) + " " + test).ok) {
+        error("Missing system command: " + quote(cmd) +
+          if_proper(!is_local, " (ssh " + toString + ")"))
+      }
+
     def new_directory(path: Path): Path =
       if (is_dir(path)) error("Directory already exists: " + absolute_path(path))
       else make_directory(path)
+
+    def sync_directory(
+      source: Path,
+      target: Path,
+      remote_source: Boolean = false,
+      remote_target: Boolean = false,
+      direct: Boolean = false,
+      chmod: String = "",
+      chown: String = "",
+      archive: Boolean = true,
+      thorough: Boolean = false,
+      dry_run: Boolean = false,
+      filter: List[String] = Nil,
+      progress: Progress = new Progress
+    ): Unit = {
+      val remote_remote = remote_source && remote_target
+
+      def make_sys(remote: Boolean): SSH.System = if (remote) ssh else SSH.Local
+      def make_arg(dir: Path, sys: SSH.System): String =
+        (if (remote_remote) "" else sys.rsync_prefix) +
+          Url.dir_path(sys.standard_path(sys.absolute_path(dir)), direct = true)
+
+      val source_sys = make_sys(remote_source)
+      val target_sys = make_sys(remote_target)
+
+      val target1 =
+        if (direct || !target_sys.is_dir(target)) target
+        else target + source_sys.expand_path(source).base
+
+      val a = make_arg(source, source_sys)
+      val b = make_arg(target1, target_sys)
+      val args = List("--", a, b)
+
+      val target_dir = target_sys.absolute_path(target1)
+      target_sys.make_directory(target_dir)
+
+      val rsync_context = Rsync.Context(progress = progress, ssh = ssh)
+      val res =
+        if (remote_remote) {
+          val script =
+            Rsync.command_line(
+              local_rsync = ssh.standard_path(rsync_context.remote_program),
+              verbose = progress.verbose,
+              chmod = chmod,
+              chown = chown,
+              archive = archive,
+              thorough = thorough,
+              dry_run = dry_run,
+              filter = filter,
+              args = args)
+          progress.bash(script, ssh = ssh, echo = true)
+        }
+        else {
+          rsync_context.exec(
+            chmod = chmod, chown = chown, archive = archive, thorough = thorough, dry_run = dry_run,
+            filter = filter, args = args)
+        }
+      if (!res.ok) cat_error("Failed to sync " + quote(a) + " to " + quote(b), res.err)
+    }
+
+    def copy_directory(path1: Path, path2: Path, direct: Boolean = false,
+      thorough: Boolean = false,
+      filter: List[String] = Nil,
+      progress: Progress = new Progress
+    ): Unit = {
+      sync_directory(path1, path2, remote_source = true, remote_target = true, direct = direct,
+        thorough = thorough, filter = filter, progress = progress)
+    }
+
+    def read_directory(remote_path: Path, local_path: Path, direct: Boolean = false,
+      thorough: Boolean = false,
+      filter: List[String] = Nil,
+      progress: Progress = new Progress
+    ): Unit = {
+      sync_directory(remote_path, local_path, remote_source = true, direct = direct,
+        thorough = thorough, filter = filter, progress = progress)
+    }
+
+    def write_directory(remote_path: Path, local_path: Path, direct: Boolean = false,
+      thorough: Boolean = false,
+      filter: List[String] = Nil,
+      progress: Progress = new Progress
+    ): Unit = {
+      sync_directory(local_path, remote_path, remote_target = true, direct = direct,
+        thorough = thorough, filter = filter, progress = progress)
+    }
+
+    def require_patch(): Unit = require_command("patch")
+
+    def make_patch(base_dir: Path, src: Path, dst: Path, diff_options: String = ""): String = {
+      val lines =
+        bash(
+          "diff -Nru" + if_proper(diff_options, " " + diff_options) + " -- " +
+            bash_path(src) + " " + bash_path(dst),
+          cwd = base_dir).check_rc(Process_Result.RC.regular).out_lines
+      Library.terminate_lines(lines)
+    }
+
+    def apply_patch(base_dir: Path, patch: String,
+      strip: Int = 1,
+      progress: Progress = new Progress
+    ): Unit = {
+      require_patch()
+      with_tmp_file("patch", ext = "rej") { rej =>
+        val result =
+          bash("patch -f -p" + strip + " -r " + bash_path(rej),
+            cwd = base_dir, input = patch, progress_stdout = progress.echo_if(progress.verbose, _))
+        if (!result.ok) {
+          val lines = if (is_file(rej)) Library.trim_split_lines(read(rej)) else Nil
+          error("Failed to apply patch" + if_proper(lines, ":\n") + cat_lines(lines))
+        }
+      }
+    }
 
     def download_file(url_name: String, file: Path, progress: Progress = new Progress): Unit =
       Isabelle_System.download_file(url_name, file, progress = progress)
 
     def isabelle_platform: Isabelle_Platform = Isabelle_Platform.local
 
-    def isabelle_platform_family: Platform.Family =
-      Platform.Family.parse(isabelle_platform.ISABELLE_PLATFORM_FAMILY)
+    def isabelle_platform_family: Platform_Family =
+      Platform_Family.parse(isabelle_platform.ISABELLE_PLATFORM_FAMILY)
   }
 
   object Local extends System {

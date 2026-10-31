@@ -429,8 +429,8 @@ local
   fun is_strange_number ctxt t = is_irregular_number t andalso SMT_Builtin.is_builtin_num ctxt t
 
   val proper_num_ss =
-    simpset_of (put_simpset HOL_ss \<^context>
-      |> Simplifier.add_simps @{thms Num.numeral_One minus_zero})
+    HOL_ss |> Simplifier.simpset_map \<^context>
+      (Simplifier.add_simps @{thms Num.numeral_One minus_zero})
 
   fun norm_num_conv ctxt =
     SMT_Util.if_conv (is_strange_number ctxt) (Simplifier.rewrite (put_simpset proper_num_ss ctxt))
@@ -480,7 +480,7 @@ fun add_extra_norm (cs, norm) = Extra_Norms.map (SMT_Util.dict_update (cs, norm)
 fun apply_extra_norms ctxt ithms =
   let
     val cs = SMT_Config.solver_class_of ctxt
-    val es = SMT_Util.dict_lookup (Extra_Norms.get (Context.Proof ctxt)) cs
+    val es = maps (SMT_Util.dict_lookup (Extra_Norms.get (Context.Proof ctxt))) cs
   in burrow_ids (fold (fn e => e ctxt) es o rpair []) ithms end
 
 local

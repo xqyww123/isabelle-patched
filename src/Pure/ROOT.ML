@@ -1,6 +1,6 @@
 (*  Title:      Pure/ROOT.ML
     Author:     Makarius
-    UUID:       a865e04a-256a-44b2-bb4b-364e8244b99a
+    UUID:       ae15f000-4193-4caa-991d-8c83284cbcbf
 
 Main entry point for the Isabelle/Pure bootstrap process.
 
@@ -24,6 +24,7 @@ ML_file "General/string.ML";
 ML_file "General/vector.ML";
 ML_file "General/array.ML";
 ML_file "General/symbol_explode.ML";
+ML_file "General/time.ML";
 
 ML_file "Concurrent/multithreading.ML";
 ML_file "Concurrent/unsynchronized.ML";
@@ -54,7 +55,6 @@ ML_file "General/random.ML";
 ML_file "General/value.ML";
 ML_file "General/properties.ML";
 ML_file "General/output.ML";
-ML_file "General/time.ML";
 ML_file "PIDE/markup.ML";
 ML_file "General/utf8.ML";
 ML_file "General/scan.ML";
@@ -96,7 +96,6 @@ ML_file "General/long_name.ML";
 ML_file "General/binding.ML";
 ML_file "General/seq.ML";
 ML_file "General/timing.ML";
-ML_file "General/sha1.ML";
 
 ML_file "ML/ml_process.ML";
 ML_file "ML/ml_profiling.ML";
@@ -107,6 +106,7 @@ ML_file "PIDE/document_id.ML";
 ML_file "General/graph.ML";
 
 ML_file "System/options.ML";
+ML_file "PIDE/interactive.ML";
 
 
 subsection "Fundamental structures";
@@ -323,20 +323,19 @@ ML_file "Thy/document_antiquotations.ML";
 ML_file "General/graph_display.ML";
 ML_file "pure_syn.ML";
 ML_file "Build/resources.ML";
+ML_file "General/message_digest.ML";
 ML_file "PIDE/command.ML";
 ML_file "PIDE/query_operation.ML";
-ML_file "Thy/thy_info.ML";
+ML_file "Thy/thy_presentation.ML";
 ML_file "thm_deps.ML";
 ML_file "Build/export_theory.ML";
 ML_file "Build/sessions.ML";
 ML_file "PIDE/session.ML";
-ML_file "PIDE/document.ML";
 
 (*ML add-ons*)
 ML_file "ML/ml_pp.ML";
 ML_file "ML/ml_instantiate.ML";
 ML_file "ML/ml_file.ML";
-ML_file "ML/ml_pid.ML";
 
 (*theory and proof operations*)
 ML_file "Isar/isar_cmd.ML";
@@ -350,6 +349,7 @@ ML_file "System/isabelle_process.ML";
 ML_file "System/scala_compiler.ML";
 ML_file "System/isabelle_tool.ML";
 ML_file "Build/build.ML";
+ML_file "PIDE/document.ML";
 ML_file "PIDE/protocol.ML";
 ML_file "General/output_primitives_virtual.ML";
 

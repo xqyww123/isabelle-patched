@@ -111,7 +111,7 @@ final class Other_Isabelle private(
 
   def resolve_components(
     echo: Boolean = false,
-    clean_platforms: Option[List[Platform.Family]] = None,
+    clean_platforms: Option[List[Platform_Family]] = None,
     clean_archives: Boolean = false,
     component_repository: String = Components.static_component_repository
   ): Unit = {
@@ -171,7 +171,7 @@ final class Other_Isabelle private(
   }
 
   def debug_settings(): List[String] = {
-    val debug = System.getProperty("isabelle.debug", "") == "true"
+    val debug = Isabelle_System.get_property_bool("isabelle.debug")
     if (debug) {
       List("ISABELLE_JAVA_SYSTEM_OPTIONS=\"$ISABELLE_JAVA_SYSTEM_OPTIONS -Disabelle.debug=true\"")
     }
@@ -185,7 +185,7 @@ final class Other_Isabelle private(
     other_settings: List[String] = init_components(),
     fresh: Boolean = false,
     echo: Boolean = false,
-    clean_platforms: Option[List[Platform.Family]] = None,
+    clean_platforms: Option[List[Platform_Family]] = None,
     clean_archives: Boolean = false,
     component_repository: String = Components.static_component_repository
   ): Unit = {
@@ -214,19 +214,27 @@ final class Other_Isabelle private(
 
       override def ml_system: String = getenv_strict("ML_SYSTEM")
 
-      override def ml_platform: String =
-        if (ssh.is_file(isabelle_home + Path.explode("lib/Tools/console"))) {
-          val Pattern = """.*val ML_PLATFORM = "(.*)".*""".r
+      override def ml_platform: String = {
+        val isabelle_console = isabelle_home + Path.explode("lib/Tools/console")
+        if (ssh.is_file(isabelle_console) &&
+            ssh.read(isabelle_console).containsSlice("isabelle.ML_Console")) {
+          val Pattern = """(?s).*val ML_PLATFORM = "(.*)".*""".r
           val input = """val ML_PLATFORM = Option.getOpt (OS.Process.getEnv "ML_PLATFORM", "")"""
           val result = bash("bin/isabelle console -r", input = input)
-          result.out match {
-            case Pattern(a) if result.ok && a.nonEmpty => a
-            case _ =>
-              error("Cannot get ML_PLATFORM from other Isabelle: " + isabelle_home +
-                if_proper(result.err, "\n" + result.err) + error_context)
+          if (result.ok) {
+            result.out match {
+              case Pattern(a) if a.nonEmpty => a
+              case _ =>
+                error("Cannot get ML_PLATFORM from other Isabelle: " + isabelle_home +
+                  if_proper(result.out, "\n" + Library.prefix_lines("stdout: ", result.out)) +
+                  if_proper(result.err, "\n" + Library.prefix_lines("stderr: ", result.err)) +
+                  error_context)
+            }
           }
+          else getenv_strict("ML_PLATFORM")
         }
         else getenv_strict("ML_PLATFORM")
+      }
 
       override def ml_options: String =
         proper_string(getenv("ML_OPTIONS")) getOrElse

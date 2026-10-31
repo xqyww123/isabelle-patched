@@ -1,18 +1,22 @@
 # Java runtime options
 -server
 -Dfile.encoding=UTF-8
+-Dstdin.encoding=UTF-8
+-Dstdout.encoding=UTF-8
+-Dstderr.encoding=UTF-8
 -Disabelle.threads=0
 -XX:+UseZGC
--XX:+ZGenerational
 -XX:+UseStringDeduplication
+--enable-native-access=ALL-UNNAMED
+--sun-misc-unsafe-memory-access=allow
 -Dsun.java2d.metal=false
 -Duser.language=en
 -Dawt.useSystemAAFontSettings=on
 -Dswing.aatext=true
 -Dapple.laf.useScreenMenuBar=true
--Dapple.awt.application.name=Isabelle2025-2
+-Dapple.awt.application.name=Isabelle2026
 -Dapple.awt.application.appearance=system
 -Xms512m
 -Xmx4g
 -Xss16m
--Disabelle.jedit_server=Isabelle2025-2
+-Disabelle.jedit_server=Isabelle2026

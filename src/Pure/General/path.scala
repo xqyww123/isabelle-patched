@@ -101,11 +101,11 @@ object Path {
         if (s == "..") Parent
         else if (s == "~") Variable("USER_HOME")
         else if (s == "~~") Variable("ISABELLE_HOME")
-        else if (s.startsWith("$")) variable_elem(s.substring(1))
+        else if (s.startsWith("$")) variable_elem(s.drop(1))
         else basic_elem(s)
       }
       catch { case ERROR(msg) => cat_error(msg, "The error(s) above occurred in " + quote(str)) }
-  
+
     val ss = space_explode('/', str)
     val r = ss.takeWhile(_.isEmpty).length
     val es = ss.dropWhile(_.isEmpty)
@@ -228,20 +228,6 @@ final class Path private(
   def dir: Path = split_path._1
   def base: Path = new Path(List(Path.Basic(split_path._2)))
 
-  def ends_with(a: String): Boolean =
-    elems match {
-      case Path.Basic(b) :: _ => b.endsWith(a)
-      case _ => false
-    }
-  def is_java: Boolean = ends_with(".java")
-  def is_scala: Boolean = ends_with(".scala")
-  def is_pdf: Boolean = ends_with(".pdf")
-  def is_latex: Boolean =
-    ends_with(".tex") ||
-    ends_with(".sty") ||
-    ends_with(".cls") ||
-    ends_with(".clo")
-
   def ext(e: String): Path =
     if (e == "") this
     else {
@@ -260,6 +246,7 @@ final class Path private(
   def orig: Path = ext("orig")
   def patch: Path = ext("patch")
   def pdf: Path = ext("pdf")
+  def png: Path = ext("png")
   def shasum: Path = ext("shasum")
   def tar: Path = ext("tar")
   def tex: Path = ext("tex")
@@ -282,6 +269,10 @@ final class Path private(
   def exe: Path = ext("exe")
   def exe_if(b: Boolean): Path = if (b) exe else this
   def platform_exe: Path = exe_if(Platform.is_windows)
+
+  def app: Path = ext("app")
+  def app_if(b: Boolean): Path = if (b) app else this
+  def platform_app: Path = app_if(Platform.is_macos)
 
   private val Ext = new Regex("(.*)\\.([^.]*)")
 
@@ -317,8 +308,6 @@ final class Path private(
 
   def expand: Path = expand_env(Isabelle_System.Settings())
 
-  def file_name: String = expand.base.implode
-
 
   /* platform files */
 
@@ -330,11 +319,23 @@ final class Path private(
   def check_file: Path = if (is_file) this else error("No such file: " + this.expand)
   def check_dir: Path = if (is_dir) this else error("No such directory: " + this.expand)
 
-  def java_path: JPath = file.toPath
+  def java_path: JPath = file.java_path
 
   def absolute_file: JFile = File.absolute(file)
   def canonical_file: JFile = File.canonical(file)
 
   def absolute: Path = File.path(absolute_file)
   def canonical: Path = File.path(canonical_file)
+
+  def file_name: String =
+    elems match {
+      case Path.Basic(b) :: _ => b
+      case _ =>
+        def err(bad: Path): Nothing = error("Cannot determine file-name from " + bad)
+        (try { Some(absolute.elems) } catch { case ERROR(_) => None }) match {
+          case Some(Path.Basic(b) :: _) => b
+          case Some(elems) => err(new Path(elems))
+          case None => err(this)
+        }
+    }
 }

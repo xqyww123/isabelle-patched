@@ -8,6 +8,7 @@ NB: This requires a separate Java process with classpath "$SOLR_JARS".
 
 package isabelle.find_facts
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -49,7 +50,7 @@ object Solr {
   def enclose(s: Source): Source = "(" + s + ")"
 
   def escape(s: String, seqs: Set[String]): Source =
-    seqs.foldLeft(s.replace("\\", "\\\\"))((s, seq) => s.replace(seq, "\\" + seq))
+    seqs.foldLeft(s.replacing("\\" -> "\\\\"))((s, seq) => s.replacing(seq -> ("\\" + seq)))
 
   def term(b: Boolean): Source = b.toString
   def term(i: Int): Source = i.toString
@@ -378,10 +379,7 @@ object Solr {
     def open_database(database: String): Database =
       if (!database_dir(database).is_dir) error("Missing Solr database: " + quote(database))
       else {
-        val jprops = File.read_props(database_dir(database) + Path.basic("core.properties"))
-        val props =
-          (for (key <- jprops.stringPropertyNames().iterator().asScala)
-          yield key -> jprops.getProperty(key)).toList
+        val props = File.read_properties(database_dir(database) + Path.basic("core.properties"))
 
         val server = new EmbeddedSolrServer(solr_data.java_path, database)
   

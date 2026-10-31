@@ -30,17 +30,19 @@ object Compress {
 
   /* cache */
 
-  class Cache private(val for_xz: xz.ArrayCache, val for_zstd: zstd.BufferPool)
+  class Cache private(for_xz: Option[xz.ArrayCache], for_zstd: Option[zstd.BufferPool]) {
+    def xz: org.tukaani.xz.ArrayCache =
+      for_xz.getOrElse(org.tukaani.xz.ArrayCache.getDummyCache().nn)
+    def zstd: com.github.luben.zstd.BufferPool =
+      for_zstd.getOrElse(com.github.luben.zstd.NoPool.INSTANCE.nn)
+  }
 
   object Cache {
-    def none: Cache = {
-      Zstd.init()
-      new Cache(xz.ArrayCache.getDummyCache(), zstd.NoPool.INSTANCE)
-  }
+    def none: Cache = new Cache(None, None)
     def make(): Cache = {
       Zstd.init()
-      val pool = Untyped.constructor(classOf[zstd.RecyclingBufferPool]).newInstance()
-      new Cache(new xz.BasicArrayCache, pool)
+      val pool = Untyped.constructor(classOf[zstd.RecyclingBufferPool]).newInstance().nn
+      new Cache(Some(new xz.BasicArrayCache), Some(pool))
     }
   }
 

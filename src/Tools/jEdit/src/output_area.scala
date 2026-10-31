@@ -6,6 +6,7 @@ GUI component for structured output.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -21,7 +22,10 @@ import scala.swing.{Component, ScrollPane, SplitPane, Orientation}
 import org.gjt.sp.jedit.View
 
 
-class Output_Area(view: View, root_name: String = Pretty_Text_Area.search_title()) {
+class Output_Area(
+  editor_context: JEdit_Editor.Context,
+  root_name: String = Pretty_Text_Area.search_title()
+) {
   output_area =>
 
   GUI_Thread.require {}
@@ -60,7 +64,7 @@ class Output_Area(view: View, root_name: String = Pretty_Text_Area.search_title(
   /* text area */
 
   val pretty_text_area: Pretty_Text_Area =
-    new Pretty_Text_Area(view) {
+    new Pretty_Text_Area(editor_context.view) {
       override def handle_search(search: Pretty_Text_Area.Search_Results): Unit =
         output_area.handle_search(search)
     }
@@ -69,7 +73,7 @@ class Output_Area(view: View, root_name: String = Pretty_Text_Area.search_title(
   def handle_update(): Unit = ()
 
   lazy val delay_resize: Delay =
-    Delay.first(PIDE.session.update_delay, gui = true) { handle_resize() }
+    GUI.Delay.first(PIDE.session.update_delay) { handle_resize() }
 
 
   /* handle events */
@@ -78,7 +82,7 @@ class Output_Area(view: View, root_name: String = Pretty_Text_Area.search_title(
   def handle_shown(): Unit = ()
 
   lazy val delay_shown: Delay =
-    Delay.first(PIDE.session.input_delay, gui = true) { handle_shown() }
+    GUI.Delay.first(PIDE.session.input_delay) { handle_shown() }
 
   private lazy val hierarchy_listener =
     new HierarchyListener {

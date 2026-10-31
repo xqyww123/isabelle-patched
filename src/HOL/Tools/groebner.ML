@@ -400,10 +400,10 @@ fun weak_dnf_conv ctxt =
   Simplifier.rewrite (put_simpset HOL_basic_ss ctxt |> Simplifier.add_simps @{thms weak_dnf_simps});
 
 val initial_ss =
-  simpset_of (put_simpset HOL_basic_ss \<^context>
-    |> Simplifier.add_simps nnf_simps
-    |> Simplifier.add_simps [not_all, not_ex]
-    |> Simplifier.add_simps (map (fn th => th RS sym) (@{thms ex_simps} @ @{thms all_simps})));
+  HOL_basic_ss |> Simplifier.simpset_map \<^context>
+    (Simplifier.add_simps nnf_simps
+    #> Simplifier.add_simps [not_all, not_ex]
+    #> Simplifier.add_simps (map (fn th => th RS sym) @{thms ex_simps all_simps}));
 fun initial_conv ctxt =
   Simplifier.rewrite (put_simpset initial_ss ctxt);
 
@@ -777,16 +777,16 @@ val poly_eq_simproc =
   in
     Simplifier.cert_simproc (Thm.theory_of_thm idl_sub)
      {name = "poly_eq_simproc",
-      kind = Simproc,
+      kind = Simplifier.Simproc,
       lhss = [Thm.term_of (Thm.lhs_of idl_sub)],
       proc = Morphism.entity (fn _ => fn _ => proc),
       identifier = []}
   end;
 
 val poly_eq_ss =
-  simpset_of (put_simpset HOL_basic_ss \<^context>
-    |> Simplifier.add_simps @{thms simp_thms}
-    |> Simplifier.add_proc poly_eq_simproc)
+  HOL_basic_ss |> Simplifier.simpset_map \<^context>
+    (Simplifier.add_simps @{thms simp_thms}
+    #> Simplifier.add_proc poly_eq_simproc)
 
  local
   fun is_defined v t =

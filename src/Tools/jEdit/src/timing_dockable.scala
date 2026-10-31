@@ -6,6 +6,7 @@ Dockable window for timing information.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -74,7 +75,9 @@ class Timing_Dockable(view: View, position: String) extends Dockable(view, posit
       new Theory_Entry(name, timing) { override val gui_style: String = Entry.make_gui_style() }
     def gui_name: GUI.Name = GUI.Name(name.theory, kind = "theory")
     def follow(snapshot: Document.Snapshot): Unit =
-      PIDE.editor.goto_file(view, name.node, focus = true)
+      JEdit_Editor.navigator_recording(editor_context) {
+        JEdit_Editor.goto_file(editor_context, name.node, focus = true)
+      }
   }
 
   private case class Command_Entry(command: Command, timing: Double) extends Entry {
@@ -82,7 +85,11 @@ class Timing_Dockable(view: View, position: String) extends Dockable(view, posit
     override val gui_style: String = Entry.make_gui_style(command = true)
     def gui_name: GUI.Name = GUI.Name(command.span.name, kind = "command")
     def follow(snapshot: Document.Snapshot): Unit =
-      PIDE.editor.hyperlink_command(snapshot, command.id, focus = true).foreach(_.follow(view))
+      for (link <- JEdit_Editor.hyperlink_command(snapshot, command.id, focus = true)) {
+        JEdit_Editor.navigator_recording(editor_context) {
+          link.follow(editor_context)
+        }
+      }
   }
 
 
@@ -106,7 +113,7 @@ class Timing_Dockable(view: View, position: String) extends Dockable(view, posit
 
   /* timing threshold */
 
-  private var timing_threshold = PIDE.options.real("editor_timing_threshold")
+  private var timing_threshold: Double = PIDE.session.editor_timing_threshold.seconds
 
   private val threshold_tooltip = "Threshold for timing display (seconds)"
   private val threshold_value = new TextField(Time.print_seconds(timing_threshold)) {
@@ -133,24 +140,31 @@ class Timing_Dockable(view: View, position: String) extends Dockable(view, posit
 
   private var nodes_status = Document_Status.Nodes_Status.empty
 
-  private def make_entries(): List[Entry] = {
+  private def make_entries(snapshot: Document.Snapshot): List[Entry] = {
     GUI_Thread.require {}
 
     val name =
-      Document_View.get(view.getTextArea) match {
+      Document_View.get(editor_context.text_area) match {
         case None => Document.Node.Name.empty
         case Some(doc_view) => doc_view.model.node_name
       }
 
     val now = Date.now()
+    val limit = Time.seconds(timing_threshold)
 
     val theories =
       List.from(
-        for ((a, st) <- nodes_status.iterator if st.command_timings.nonEmpty)
-          yield Theory_Entry(a, st.cumulated_time.seconds)).sorted(Entry.Ordering)
+        for {
+          (a, st) <- nodes_status.iterator
+          if st.command_timings.valuesIterator.exists(timings => timings.sum(now).is_notable(limit))
+        } yield Theory_Entry(a, st.cumulated_time.seconds)).sorted(Entry.Ordering)
     val commands =
-      (for ((command, timings) <- nodes_status(name).command_timings.toList)
-        yield Command_Entry(command, timings.sum(now).seconds)).sorted(Entry.Ordering)
+      List.from(
+        for {
+          (command_id, timings) <- nodes_status(name).command_timings.iterator
+          command <- snapshot.get_command(command_id)
+          t = timings.sum(now) if t.is_notable(limit)
+        } yield Command_Entry(command, t.seconds)).sorted(Entry.Ordering)
 
     theories.flatMap(entry =>
       if (entry.name == name) entry.make_current :: commands
@@ -169,10 +183,10 @@ class Timing_Dockable(view: View, position: String) extends Dockable(view, posit
 
     nodes_status =
       nodes_status.update_nodes(Date.now(), PIDE.resources, snapshot.state, snapshot.version,
-        threshold = Time.seconds(timing_threshold),
+        threshold = Time.zero,
         domain = Some(domain))
 
-    val entries = make_entries()
+    val entries = make_entries(snapshot)
     if (timing_view.listData.toList != entries) timing_view.listData = entries
   }
 
@@ -180,7 +194,7 @@ class Timing_Dockable(view: View, position: String) extends Dockable(view, posit
   /* main */
 
   private val main =
-    Session.Consumer[Session.Commands_Changed](getClass.getName) {
+    Session.Consumer[Session.Commands_Changed](this.class_name) {
       case changed =>
         GUI_Thread.later { handle_update(Some(changed.nodes)) }
     }

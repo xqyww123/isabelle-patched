@@ -8,7 +8,6 @@ package isabelle
 
 
 import java.awt.Color
-import java.util.Locale
 
 import org.jsoup.nodes.{Entities => Jsoup_Entities, Document => Jsoup_Document}
 import org.jsoup.Jsoup
@@ -24,7 +23,7 @@ object HTML {
   def spaces(n: Int): String = {
     require(n >= 0, "negative spaces")
     if (n == 0) ""
-    else if (n < static_spaces.length) static_spaces.substring(0, n)
+    else if (n < static_spaces.length) static_spaces.slice(0, n)
     else space * n
   }
 
@@ -115,14 +114,12 @@ object HTML {
   def script_file(path: Path): XML.Elem = script_file(Url.print_file(path.file))
 
   def color(c: Color): String = {
-    val r = Integer.valueOf(c.getRed)
-    val g = Integer.valueOf(c.getGreen)
-    val b = Integer.valueOf(c.getBlue)
+    val r = Value.Int.obj(c.getRed)
+    val g = Value.Int.obj(c.getGreen)
+    val b = Value.Int.obj(c.getBlue)
     c.getAlpha match {
-      case 255 => String.format(Locale.ROOT, "rgb(%d,%d,%d)", r, g, b)
-      case a =>
-        String.format(Locale.ROOT, "rgba(%d,%d,%d,%.2f)", r, g, b,
-          java.lang.Double.valueOf(a.toDouble / 255))
+      case 255 => Library.format("rgb(%d,%d,%d)", r, g, b)
+      case a => Library.format("rgba(%d,%d,%d,%.2f)", r, g, b, Value.Double.obj(a.toDouble / 255))
     }
   }
 
@@ -139,19 +136,13 @@ object HTML {
           val path = location.expand
           if (path.is_absolute) Exn.error("Relative href location expected: " + path) else path
         case Some(base_dir) =>
-          val path1 = base_dir.absolute_file.toPath
-          val path2 = location.absolute_file.toPath
-          try { File.path(path1.relativize(path2).toFile) }
-          catch {
-            case _: IllegalArgumentException =>
-              Exn.error("Failed to relativize href location " + path2 + " with wrt. base " + path1)
-          }
+          File.the_relative_path(base_dir, location, permissive = true)
       }
     if (path.is_current) "" else path.implode
   }
 
 
-  /* output text with control symbols */
+  /* traversal with control symbols */
 
   private val control: Map[Symbol.Symbol, Operator] =
     Map(
@@ -195,41 +186,39 @@ object HTML {
     ok && open.isEmpty
   }
 
-  def output(
-    s: StringBuilder,
+  def traverse(
+    xml_output: XML.Traversal,
     text: String,
     control_blocks: Boolean,
     hidden: Boolean,
-    permissive: Boolean
   ): Unit = {
-    val xml_output = new XML.Output(s)
-
-    def output_string(str: String): Unit =
-      xml_output.string(str, permissive = permissive)
-
     def output_hidden(body: => Unit): Unit =
-      if (hidden) { s ++= "<span class=\"hidden\">"; body; s ++= "</span>" }
+      if (hidden) {
+        xml_output.elem(Markup("span", List("class" -> "hidden")))
+        body
+        xml_output.end_elem("span")
+      }
 
     def output_symbol(sym: Symbol.Symbol): Unit =
-      if (sym != "") {
+      if (sym.nonEmpty) {
         control_block_begin.get(sym) match {
           case Some(op) if control_blocks =>
-            output_hidden(output_string(sym))
+            output_hidden(xml_output.text(sym))
             xml_output.elem(Markup(op.name, Nil))
           case _ =>
             control_block_end.get(sym) match {
               case Some(op) if control_blocks =>
                 xml_output.end_elem(op.name)
-                output_hidden(output_string(sym))
+                output_hidden(xml_output.text(sym))
               case _ =>
                 if (hidden && Symbol.is_control_encoded(sym)) {
-                  output_hidden(output_string(Symbol.control_prefix))
-                  s ++= "<span class=\"control\">"
-                  output_string(Symbol.control_name(sym).get)
-                  s ++= "</span>"
-                  output_hidden(output_string(Symbol.control_suffix))
+                  output_hidden(xml_output.text(Symbol.control_prefix))
+                  xml_output.elem(Markup("span", List("class" -> "control")))
+                  xml_output.text(Symbol.control_name(sym).get)
+                  xml_output.end_elem("span")
+                  output_hidden(xml_output.text(Symbol.control_suffix))
                 }
-                else output_string(sym)
+                else xml_output.text(sym)
             }
         }
       }
@@ -254,6 +243,21 @@ object HTML {
     output_symbol(ctrl)
   }
 
+
+  /* output text with control symbols */
+
+  def output(
+    s: StringBuilder,
+    text: String,
+    control_blocks: Boolean,
+    hidden: Boolean,
+    permissive: Boolean
+  ): Unit = {
+    val xml_output =
+      new XML.Output(s) { override def text(str: String): Unit = string(str, permissive) }
+    traverse(xml_output, text, control_blocks, hidden)
+   }
+
   def output(text: String): String = {
     val control_blocks = check_control_blocks(List(XML.Text(text)))
     Library.string_builder() { builder =>
@@ -268,6 +272,10 @@ object HTML {
     Set("head", "body", "meta", "div", "pre", "p", "title", "h1", "h2", "h3", "h4", "h5", "h6",
       "ul", "ol", "dl", "li", "dt", "dd")
 
+  private val void_elements =
+    Set("area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
+      "source", "track", "wbr")
+
   def output(s: StringBuilder, xml: XML.Body, hidden: Boolean, structural: Boolean): Unit = {
     val xml_output = new XML.Output(s)
 
@@ -275,7 +283,11 @@ object HTML {
       val control_blocks = check_control_blocks(body)
       body foreach {
         case XML.Elem(markup, Nil) =>
-          xml_output.elem(markup, end = true)
+          if (void_elements(markup.name)) xml_output.elem(markup, end = true)
+          else {
+            xml_output.elem(markup)
+            xml_output.end_elem(markup.name)
+          }
         case XML.Elem(Markup(Markup.RAW_HTML, _), body) =>
           XML.traverse_text(body, (), (_, raw) => s.append(raw))
         case XML.Elem(markup, ts) =>
@@ -300,14 +312,36 @@ object HTML {
     output(List(tree), hidden, structural)
 
 
+  /* XML with markup for control symbols */
+
+  def control_markup(body: XML.Body, hidden: Boolean): XML.Body = {
+    val builder = new XML.Builder
+
+    def traverse_body(body: XML.Body): Unit = {
+      val control_blocks = check_control_blocks(body)
+
+      body.foreach {
+        case XML.Text(txt) => traverse(builder, txt, control_blocks, hidden)
+        case XML.Elem(markup, body) =>
+          builder.elem(markup)
+          traverse_body(body)
+          builder.end_elem(markup.name)
+      }
+    }
+
+    traverse_body(body)
+    builder.result
+  }
+
+
   /* input */
 
   def input_raw(text: String): XML.Elem = raw(HTML.text(input(text)))
-  def input(text: String): String = Jsoup_Entities.unescape(text)
+  def input(text: String): String = Jsoup_Entities.unescape(text).nn
   def raw(body: XML.Body): XML.Elem = XML.elem(Markup.RAW_HTML, body)
 
-  def parse_document(html: String): Jsoup_Document = Jsoup.parse(html)
-  def get_document(url: String): Jsoup_Document = Jsoup.connect(url).get()
+  def parse_document(html: String): Jsoup_Document = Jsoup.parse(html).nn
+  def get_document(url: String): Jsoup_Document = Jsoup.connect(url).nn.get().nn
 
 
   /* messages */
@@ -335,6 +369,18 @@ object HTML {
   /* GUI elements */
 
   object GUI {
+    def onclick(script: String): Attribute = new Attribute("onclick", script)
+    def onchange(script: String): Attribute = new Attribute("onchange", script)
+    def oninput(script: String): Attribute = new Attribute("oninput", script)
+    def onfocus(script: String): Attribute = new Attribute("onfocus", script)
+    def onblur(script: String): Attribute = new Attribute("onblur", script)
+    def onfocusin(script: String): Attribute = new Attribute("onfocusin", script)
+    def onfocusout(script: String): Attribute = new Attribute("onfocusout", script)
+    def onkeydown(script: String): Attribute = new Attribute("onkeydown", script)
+    def onkeyup(script: String): Attribute = new Attribute("onkeyup", script)
+    def onmousedown(script: String): Attribute = new Attribute("onmousedown", script)
+    def onmouseup(script: String): Attribute = new Attribute("onmouseup", script)
+
     private def optional_value(text: String): XML.Attributes =
       proper_string(text).map(a => "value" -> a).toList
 
@@ -354,10 +400,13 @@ object HTML {
       proper_string(action).map(a => "action" -> a).toList
 
     private def optional_onclick(script: String): XML.Attributes =
-      proper_string(script).map(a => "onclick" -> a).toList
+      proper_string(script).map(onclick(_).xml).toList
 
     private def optional_onchange(script: String): XML.Attributes =
-      proper_string(script).map(a => "onchange" -> a).toList
+      proper_string(script).map(onchange(_).xml).toList
+
+    private def optional_oninput(script: String): XML.Attributes =
+      proper_string(script).map(oninput(_).xml).toList
 
     def button(body: XML.Body, name: String = "", tooltip: String = "", submit: Boolean = false,
         script: String = ""): XML.Elem =
@@ -381,11 +430,14 @@ object HTML {
         List("type" -> "text") :::
           (if (columns > 0) List("size" -> columns.toString) else Nil) :::
           optional_value(text) ::: optional_name(name) ::: optional_title(tooltip) :::
-          optional_submit(submit) ::: optional_onchange(script)))
+          optional_submit(submit) ::: optional_oninput(script)))
 
     def parameter(text: String = "", name: String = ""): XML.Elem =
       XML.elem(
         Markup("input", List("type" -> "hidden") ::: optional_value(text) ::: optional_name(name)))
+
+    def label(text: String, label_for: String): XML.Elem =
+      XML.Elem(Markup("label", List("for" -> label_for)), HTML.text(text))
 
     def form(body: XML.Body, name: String = "", action: String = "", http_post: Boolean = false)
         : XML.Elem =

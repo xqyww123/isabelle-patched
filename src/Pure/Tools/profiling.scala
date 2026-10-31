@@ -7,9 +7,6 @@ Build sessions for profiling of ML heap content.
 package isabelle
 
 
-import java.util.Locale
-
-
 object Profiling {
   /* percentage: precision in permille */
 
@@ -77,7 +74,7 @@ object Profiling {
     ): Statistics = {
       val session_name = session_base.session_name
 
-      val session =
+      val session_stats =
         Isabelle_System.with_tmp_dir("profiling") { dir =>
           File.write(dir + Path.explode("args.yxml"),
             YXML.string_of_body(encode_args(session_base.used_theories.map(p => p._1.theory))))
@@ -88,18 +85,18 @@ object Profiling {
         }
 
       new Statistics(parent = parent, session = session_name,
-        theories = session.theories,
-        garbage_theories = session.garbage_theories,
-        locales = session.locales,
-        locale_thms = session.locale_thms,
-        global_thms = session.global_thms,
-        heap_size = File.space(store.get_session(session_name).the_heap),
-        thys_id_size = session.sizeof_thys_id,
-        thms_id_size = session.sizeof_thms_id,
-        terms_size = session.sizeof_terms,
-        types_size = session.sizeof_types,
-        names_size = session.sizeof_names,
-        spaces_size = session.sizeof_spaces)
+        theories = session_stats.theories,
+        garbage_theories = session_stats.garbage_theories,
+        locales = session_stats.locales,
+        locale_thms = session_stats.locale_thms,
+        global_thms = session_stats.global_thms,
+        heap_size = store.get_session(session_name).heap_size,
+        thys_id_size = session_stats.sizeof_thys_id,
+        thms_id_size = session_stats.sizeof_thms_id,
+        terms_size = session_stats.sizeof_terms,
+        types_size = session_stats.sizeof_types,
+        names_size = session_stats.sizeof_names,
+        spaces_size = session_stats.sizeof_spaces)
     }
 
     val empty: Statistics = new Statistics()
@@ -145,7 +142,7 @@ object Profiling {
       if (theories == 0) "0"
       else {
         val x = (theories + garbage_theories).toDouble / theories
-        String.format(Locale.ROOT, "%.1f", x.asInstanceOf[AnyRef])
+        Library.format("%.1f", Value.Double.obj(x))
       }
 
     private def size_percentage(space: Space): Percentage =
@@ -305,7 +302,7 @@ object Profiling {
         var dirs: List[Path] = Nil
         var session_groups: List[String] = Nil
         var max_jobs: Option[Int] = None
-        var options = Options.init(specs = Options.Spec.ISABELLE_BUILD_OPTIONS)
+        var options = Options.init(update = Options.Spec.ISABELLE_BUILD_OPTIONS)
         var verbose = false
         var exclude_sessions: List[String] = Nil
 
@@ -346,21 +343,19 @@ Usage: isabelle profiling [OPTIONS] [SESSIONS ...]
         val progress = new Console_Progress(verbose = verbose)
 
         val results =
-          progress.interrupt_handler {
-            profiling(options,
-              selection = Sessions.Selection(
-                all_sessions = all_sessions,
-                base_sessions = base_sessions,
-                exclude_session_groups = exclude_session_groups,
-                exclude_sessions = exclude_sessions,
-                session_groups = session_groups,
-                sessions = sessions),
-              progress = progress,
-              dirs = dirs,
-              select_dirs = select_dirs,
-              numa_shuffling = Host.numa_check(progress, numa_shuffling),
-              max_jobs = max_jobs)
-          }
+          profiling(options,
+            selection = Sessions.Selection(
+              all_sessions = all_sessions,
+              base_sessions = base_sessions,
+              exclude_session_groups = exclude_session_groups,
+              exclude_sessions = exclude_sessions,
+              session_groups = session_groups,
+              sessions = sessions),
+            progress = progress,
+            dirs = dirs,
+            select_dirs = select_dirs,
+            numa_shuffling = Host.numa_check(progress, numa_shuffling),
+            max_jobs = max_jobs)
 
         results.output(output_dir = output_dir.absolute, progress = progress)
       })

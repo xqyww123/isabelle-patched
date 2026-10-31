@@ -6,7 +6,7 @@ Tree view with sensible defaults.
 
 package isabelle
 
-import isabelle.graphview.Tree_Panel
+import scala.language.unsafeNulls
 
 import java.awt.event.{KeyEvent, KeyAdapter, MouseEvent, MouseAdapter}
 import javax.accessibility.AccessibleContext
@@ -78,7 +78,9 @@ class Tree_View(
     }
 
 
-  /* selection events */
+  /* events */
+
+  def handle_escape(): Unit = ()
 
   def handle_selection(path: TreePath): Unit = ()
 
@@ -93,7 +95,11 @@ class Tree_View(
 
   addKeyListener(new KeyAdapter {
     override def keyPressed(e: KeyEvent): Unit = {
-      if (!e.isConsumed() && e.getKeyCode == KeyEvent.VK_ENTER) {
+      if (!e.isConsumed() && GUI.plain_escape(e)) {
+        e.consume()
+        handle_escape()
+      }
+      if (!e.isConsumed() && GUI.plain_enter(e)) {
         e.consume()
         handle_selection(getSelectionPath)
       }
@@ -102,7 +108,9 @@ class Tree_View(
 
   addMouseListener(new MouseAdapter {
     override def mousePressed(e: MouseEvent): Unit =
-      if (e.getClickCount == 1) handle_selection(getPathForLocation(e.getX, e.getY))
+      if (e.getClickCount == 1 && GUI.no_modifier(e)) {
+        handle_selection(getPathForLocation(e.getX, e.getY))
+      }
   })
 
 

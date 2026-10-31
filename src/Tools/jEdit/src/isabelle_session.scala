@@ -6,6 +6,7 @@ Access Isabelle session information via virtual file-system.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -81,7 +82,7 @@ object Isabelle_Session {
 
   def open_browser(view: View): Unit = {
     val path =
-      PIDE.maybe_snapshot(view) match {
+      PIDE.maybe_snapshot(view = Some(view)) match {
         case None => ""
         case Some(snapshot) =>
           val sessions_structure = JEdit_Session.sessions_structure()

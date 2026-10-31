@@ -6,6 +6,7 @@ Dockable window for Isabelle/ML debugger.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -68,13 +69,14 @@ class Debugger_Dockable(view: View, position: String) extends Dockable(view, pos
   /* output area */
 
   private val output: Output_Area =
-    new Output_Area(view, root_name = "Threads") {
+    new Output_Area(editor_context, root_name = "Threads") {
       override def handle_search(search: Pretty_Text_Area.Search_Results): Unit = {}
 
       override def handle_tree_selection(path: TreePath): Unit = ()
 
       override def handle_update(): Unit = {
-        val new_snapshot = PIDE.editor.current_node_snapshot(view).getOrElse(current_snapshot)
+        val new_snapshot =
+          JEdit_Editor.current_node_snapshot(editor_context).getOrElse(current_snapshot)
         val (new_threads, new_output) = debugger.status(tree_selection())
 
         if (new_threads != current_threads) update_tree(new_threads)
@@ -189,7 +191,7 @@ class Debugger_Dockable(view: View, position: String) extends Dockable(view, pos
   private val context_field =
     new Completion_Popup.History_Text_Field("isabelle-debugger-context") {
       override def processKeyEvent(evt: KeyEvent): Unit = {
-        if (evt.getID == KeyEvent.KEY_PRESSED && evt.getKeyCode == KeyEvent.VK_ENTER) {
+        if (evt.getID == KeyEvent.KEY_PRESSED && GUI.plain_enter(evt)) {
           eval_expression()
         }
         super.processKeyEvent(evt)
@@ -206,7 +208,7 @@ class Debugger_Dockable(view: View, position: String) extends Dockable(view, pos
   private val expression_field =
     new Completion_Popup.History_Text_Field("isabelle-debugger-expression") {
       override def processKeyEvent(evt: KeyEvent): Unit = {
-        if (evt.getID == KeyEvent.KEY_PRESSED && evt.getKeyCode == KeyEvent.VK_ENTER) {
+        if (evt.getID == KeyEvent.KEY_PRESSED && GUI.plain_enter(evt)) {
           eval_expression()
         }
         super.processKeyEvent(evt)
@@ -260,8 +262,8 @@ class Debugger_Dockable(view: View, position: String) extends Dockable(view, pos
       debugger.set_focus(c)
       for {
         pos <- c.debug_position
-        link <- PIDE.editor.hyperlink_position(current_snapshot, pos)
-      } link.follow(view)
+        link <- JEdit_Editor.hyperlink_position(current_snapshot, pos)
+      } link.follow(editor_context)
     }
     JEdit_Lib.jedit_text_areas(view.getBuffer).foreach(_.repaint())
   }
@@ -270,7 +272,7 @@ class Debugger_Dockable(view: View, position: String) extends Dockable(view, pos
   /* main */
 
   private val main =
-    Session.Consumer[Any](getClass.getName) {
+    Session.Consumer[Session.Global_Options | Debugger.Update.type](this.class_name) {
       case _: Session.Global_Options =>
         GUI_Thread.later { output.handle_resize() }
 

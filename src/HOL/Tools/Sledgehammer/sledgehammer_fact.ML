@@ -64,7 +64,7 @@ val max_facts_for_duplicates = 50000
 val max_facts_for_complex_check = 25000
 val max_simps_for_clasimpset = 10000
 
-val sledgehammer_goal_as_fact = "Sledgehammer.goal_as_fact"
+val sledgehammer_goal_as_fact = \<^unchecked_name>\<open>Sledgehammer.goal_as_fact\<close>
 
 val no_fact_override = {add = [], del = [], only = false}
 
@@ -189,9 +189,9 @@ fun is_package_def s =
 
 (* FIXME: put other record thms here, or declare as "no_atp" *)
 val multi_base_blacklist =
-  ["defs", "select_defs", "update_defs", "split", "splits", "split_asm", "ext_cases", "eq.simps",
-   "eq.refl", "nchotomy", "case_cong", "case_cong_weak", "nat_of_char_simps", "nibble.simps",
-   "nibble.distinct"]
+  ["defs", "select_defs", "update_defs", "split", "splits", "split_asm", "ext_cases", \<^unchecked_name>\<open>eq.simps\<close>,
+   \<^unchecked_name>\<open>eq.refl\<close>, "nchotomy", "case_cong", "case_cong_weak", "nat_of_char_simps", \<^unchecked_name>\<open>nibble.simps\<close>,
+   \<^unchecked_name>\<open>nibble.distinct\<close>]
   |> map (prefix Long_Name.separator)
 
 (* The maximum apply depth of any "metis" call in "Metis_Examples" (back in 2007) was 11. *)
@@ -300,7 +300,7 @@ fun cartouche_thm ctxt = cartouche_term ctxt o Thm.prop_of
 
 (* TODO: rewrite to use nets and/or to reuse existing data structures *)
 fun clasimpset_rule_table_of ctxt =
-  let val simps = ctxt |> simpset_of |> Simplifier.dest_simps in
+  let val simps = ctxt |> Simplifier.simpset_of |> Simplifier.dest_simps in
     if length simps >= max_simps_for_clasimpset then
       Termtab.empty
     else
@@ -353,8 +353,8 @@ fun if_thm_before th th' =
 (* Hack: Conflate the facts about a class as seen from the outside with the corresponding low-level
    facts, so that MaSh can learn from the low-level proofs. *)
 fun un_class_ify s =
-  (case first_field "_class" s of
-    SOME (pref, suf) => [s, pref ^ suf]
+  (case first_field_substring "_class" (Substring.full s) of
+    SOME (pref, suf) => [s, Substring.string pref ^ Substring.string suf]
   | NONE => [s])
 
 fun build_name_tables name_of facts =

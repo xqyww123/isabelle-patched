@@ -7,6 +7,7 @@ SideKick parsers for Isabelle proof documents.
 
 package isabelle.jedit_main
 
+import scala.language.unsafeNulls
 
 import isabelle._
 import isabelle.jedit._
@@ -44,9 +45,9 @@ object Isabelle_Sidekick {
       val s =
         _name.indexOf(keyword) match {
           case i if i >= 0 && n > 0 =>
-            style.make_text(_name.substring(0, i)) +
+            style.make_text(_name.slice(0, i)) +
             style.make_bold(keyword) +
-            style.make_text(_name.substring(i + n))
+            style.make_text(_name.drop(i + n))
           case _ => style.make_text(_name)
         }
       style.enclose_style(css, s)
@@ -190,7 +191,7 @@ class Isabelle_Sidekick_Markup extends Isabelle_Sidekick("isabelle-markup") {
           Isabelle_Sidekick.swing_markup_tree(markup, data.root,
             { (info: Text.Info[List[XML.Elem]]) =>
               val range = info.range + command_start
-              val content = command.source(info.range).replace('\n', ' ')
+              val content = command.source(info.range).replacing("\n" -> " ")
               val info_text = Pretty.formatted(Pretty.fbreaks(info.info), margin = 40.0).mkString
 
               Tree_View.Node(
@@ -279,7 +280,7 @@ class Isabelle_Sidekick_Bibtex extends SideKickParser("bibtex") {
         val kind = chunk.kind
         val name = chunk.name
         val source = chunk.source
-        if (kind != "") {
+        if (kind.nonEmpty) {
           val label = kind + if_proper(name, " " + name)
           val label_html = style.enclose(GUI.Name(name, kind = kind, style = style).toString)
           val range = Text.Range(offset, offset + source.length)
@@ -290,6 +291,6 @@ class Isabelle_Sidekick_Bibtex extends SideKickParser("bibtex") {
       }
       data
     }
-    catch { case ERROR(msg) => Output.warning(msg); null }
+    catch { case ERROR(msg) => GUI.log.warning(msg); null }
   }
 }

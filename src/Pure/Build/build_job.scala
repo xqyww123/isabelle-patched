@@ -10,6 +10,8 @@ package isabelle
 import java.io.BufferedWriter
 import java.nio.file.Files
 
+import scala.math.Ordering
+
 
 trait Build_Job {
   def cancel(): Unit = ()
@@ -18,8 +20,8 @@ trait Build_Job {
 }
 
 object Build_Job {
-  sealed case class Result(process_result: Process_Result, output_shasum: SHA1.Shasum)
-  val no_result: Result = Result(Process_Result.undefined, SHA1.no_shasum)
+  sealed case class Result(process_result: Process_Result, output_shasum: Shasum)
+  val no_result: Result = Result(Process_Result.undefined, Shasum.none)
 
 
   /* build session */
@@ -27,17 +29,20 @@ object Build_Job {
   def start_session(
     build_context: Build.Context,
     session_context: Session_Context,
+    session_conditions: Thy_Conditions.Context,
     progress: Progress,
     log: Logger,
     server: SSH.Server,
-    session_background: Sessions.Background,
-    sources_shasum: SHA1.Shasum,
-    input_shasum: SHA1.Shasum,
+    parent_background: Sessions.Background,
+    current_background: Sessions.Background,
+    sources_shasum: Shasum,
+    input_shasum: Shasum,
     node_info: Host.Node_Info,
     store_heap: Boolean
   ): Session_Job = {
-    new Session_Job(build_context, session_context, progress, log, server,
-      session_background, sources_shasum, input_shasum, node_info, store_heap)
+    new Session_Job(build_context, session_context, session_conditions, progress, log, server,
+      parent_background = parent_background, current_background = current_background,
+      sources_shasum, input_shasum, node_info, store_heap)
   }
 
   object Session_Context {
@@ -48,7 +53,7 @@ object Build_Job {
       deps: List[String],
       ancestors: List[String],
       session_prefs: String,
-      sources_shasum: SHA1.Shasum,
+      sources_shasum: Shasum,
       timeout: Time,
       store: Store,
       progress: Progress = new Progress
@@ -67,7 +72,7 @@ object Build_Job {
         }
         try {
           val command_timings = store.read_command_timings(db, name)
-          val elapsed = Time.seconds(Markup.Elapsed.get(store.read_session_timing(db, name)))
+          val elapsed = store.read_session_timing(db, name).ml_timing.elapsed
           new Session_Context(
             name, deps, ancestors, session_prefs, sources_shasum, timeout,
             elapsed, command_timings, build_uuid)
@@ -91,7 +96,7 @@ object Build_Job {
     deps: List[String],
     ancestors: List[String],
     session_prefs: String,
-    sources_shasum: SHA1.Shasum,
+    sources_shasum: Shasum,
     timeout: Time,
     old_time: Time,
     old_command_timings_blob: Bytes,
@@ -99,6 +104,11 @@ object Build_Job {
   ) extends Name.T
 
   abstract class Build_Session(progress: Progress) extends Session {
+    session =>
+
+    override def now(): Date = progress.now()
+
+
     /* additional process output */
 
     private val process_output_file = Isabelle_System.tmp_file("process_output")
@@ -106,7 +116,7 @@ object Build_Job {
 
     def read_process_output(): List[String] = synchronized {
       require(process_output_writer.isEmpty, "read_process_output")
-      using(Files.newBufferedReader(process_output_file.toPath))(File.read_lines(_, _ => ()))
+      using(Files.newBufferedReader(process_output_file.java_path))(File.read_lines(_, _ => ()))
     }
 
     def write_process_output(str: String): Unit = synchronized {
@@ -131,13 +141,6 @@ object Build_Job {
     }
 
 
-    /* options */
-
-    val build_progress_delay: Time = session_options.seconds("build_progress_delay")
-    val build_timing_threshold: Time = session_options.seconds("build_timing_threshold")
-    val editor_timing_threshold: Time = session_options.seconds("editor_timing_threshold")
-
-
     /* errors */
 
     private val build_errors: Promise[List[String]] = Future.promise
@@ -152,52 +155,18 @@ object Build_Job {
 
     /* document nodes --- session theories */
 
-    def nodes_domain: List[Document.Node.Name]
+    override def nodes_status_delay: Time = build_progress_delay
 
-    private var nodes_changed = Set.empty[Document_ID.Generic]
-    private var nodes_status = Document_Status.Nodes_Status.empty
+    def nodes_status_domain: List[Document.Node.Name]
 
-    private def nodes_status_progress(state: Document.State = get_state()): Unit = {
-      val result =
-        synchronized {
-          lazy val now = progress.now()
-          for (id <- state.progress_theories if !nodes_changed(id)) nodes_changed += id
-          val nodes_status1 =
-            nodes_changed.foldLeft(nodes_status)({ case (status, state_id) =>
-              state.theory_snapshot(state_id, build_blobs) match {
-                case None => status
-                case Some(snapshot) =>
-                  Exn.Interrupt.expose()
-                  status.update_node(now,
-                    snapshot.state, snapshot.version, snapshot.node_name,
-                    threshold = editor_timing_threshold)
-              }
-            })
-          val result =
-            if (nodes_changed.isEmpty) None
-            else {
-              Some(Progress.Nodes_Status(now,
-                nodes_domain, nodes_status1,
-                session = resources.session_background.session_name,
-                old = Some(nodes_status)))
-            }
+    def nodes_status_progress(nodes_status: Session.Nodes_Status): Unit =
+      progress.nodes_status(
+        Progress.Nodes_Status(nodes_status.now, nodes_status_domain, nodes_status.new_status,
+          session = resources.current_background.session_name,
+          old = Some(nodes_status.old_status)))
 
-          nodes_changed = Set.empty
-          nodes_status = nodes_status1
-
-          result
-        }
-      result.foreach(progress.nodes_status)
-    }
-
-    private lazy val nodes_delay: Delay =
-      Delay.first(build_progress_delay) { nodes_status_progress(); nodes_delay.invoke() }
-
-    def nodes_status_exit(state: Document.State): Unit = synchronized {
-      nodes_delay.revoke()
-      nodes_status_progress(state = state)
-      progress.nodes_status(Progress.Nodes_Status.empty(resources.session_background.session_name))
-    }
+    def nodes_status_exit(): Unit =
+      progress.nodes_status(Progress.Nodes_Status.empty(resources.current_background.session_name))
 
     override def start(start_prover: Prover.Receiver => Prover): Unit = {
       start_process_output()
@@ -205,34 +174,38 @@ object Build_Job {
     }
 
     def command_timing(state_id: Document_ID.Generic, props: Properties.T): Unit = synchronized {
-      val elapsed = Time.seconds(Markup.Elapsed.get(props))
+      val elapsed = Time.seconds(Markup.Timing_Properties.Elapsed.get(props))
       if (elapsed.is_notable(build_timing_threshold)) {
         write_process_output(
           Protocol.Command_Timing_Marker(props.filter(Markup.command_timing_export)))
       }
+    }
 
-      nodes_changed += state_id
-      nodes_delay.invoke()
+    def theory_timing(name: Document.Node.Name, t: Time): Unit = synchronized {
+      val props = Markup.Name(name.theory) ::: Markup.Timing_Properties.Elapsed.make(t.seconds)
+      write_process_output(Protocol.Theory_Timing_Marker(props))
     }
   }
 
   class Session_Job private[Build_Job](
     build_context: Build.Context,
     session_context: Session_Context,
+    session_conditions: Thy_Conditions.Context,
     progress: Progress,
     log: Logger,
     server: SSH.Server,
-    session_background: Sessions.Background,
-    sources_shasum: SHA1.Shasum,
-    input_shasum: SHA1.Shasum,
+    parent_background: Sessions.Background,
+    current_background: Sessions.Background,
+    sources_shasum: Shasum,
+    input_shasum: Shasum,
     node_info: Host.Node_Info,
     store_heap: Boolean
   ) extends Build_Job {
-    def session_name: String = session_background.session_name
+    def session_name: String = current_background.session_name
 
     private val future_result: Future[Result] =
       Future.thread("build", uninterruptible = true) {
-        val info = session_background.sessions_structure(session_name)
+        val info = current_background.sessions_structure(session_name)
         val options = Host.node_options(info.options, node_info)
         val store = build_context.store
 
@@ -240,16 +213,16 @@ object Build_Job {
           store.clean_output(database_server, session_name, session_init = true)
 
           val session_sources =
-            Store.Sources.load(session_background.base, cache = store.cache.compress)
+            Store.Sources.load(current_background.base, cache = store.cache.compress)
 
           val env =
             Isabelle_System.Settings.env(
               List("ISABELLE_ML_DEBUGGER" -> options.bool("ML_debugger").toString))
 
           val session_heaps =
-            session_background.info.parent match {
+            info.parent match {
               case None => Nil
-              case Some(logic) => store.session_heaps(session_background, logic = logic)
+              case Some(logic) => store.session_heaps(current_background, logic = logic)
             }
 
           val use_prelude = if (session_heaps.isEmpty) Thy_Header.ml_roots.map(_._1) else Nil
@@ -263,10 +236,10 @@ object Build_Job {
             else Nil
 
           def session_blobs(node_name: Document.Node.Name): List[(Command.Blob, Document.Blobs.Item)] =
-            session_background.base.theory_load_commands.get(node_name.theory) match {
+            current_background.base.theory_load_commands.get(node_name.theory) match {
               case None => Nil
               case Some(load_commands) =>
-                val syntax = session_background.base.theory_syntax(node_name)
+                val syntax = current_background.base.theory_syntax(node_name)
                 val master_dir = Path.explode(node_name.master_dir)
                 for {
                   (command_span, command_offset) <- load_commands
@@ -285,17 +258,28 @@ object Build_Job {
                   }
             }
 
+          session_conditions.make_immutable()
+
+          val session_theories =
+            current_background.base.used_theories.map(_.eval_conditions(session_conditions))
+
 
           /* session */
 
           val session =
             new Build_Session(progress) {
               override def session_options: Options = options
+              override def interactive: Boolean = false
 
               override val store: Store = build_context.store
 
+              override lazy val conditions: Thy_Conditions.Context = session_conditions
+
               override val resources: Resources =
-                new Resources(session_background, log = log,
+                new Resources(
+                  parent_background = parent_background,
+                  current_background = current_background,
+                  log = log,
                   command_timings =
                     Properties.uncompress(session_context.old_command_timings_blob, cache = cache))
 
@@ -305,8 +289,8 @@ object Build_Job {
               override def build_blobs(node_name: Document.Node.Name): Document.Blobs =
                 Document.Blobs.make(session_blobs(node_name))
 
-              override val nodes_domain: List[Document.Node.Name] =
-                session_background.base.used_theories.map(_._1.symbolic_path)
+              override val nodes_status_domain: List[Document.Node.Name] =
+                session_theories.map(_.name.symbolic_path)
             }
 
           val export_consumer =
@@ -331,7 +315,7 @@ object Build_Job {
 
           session.init_protocol_handler(new Session.Protocol_Handler {
               override def exit(exit_state: Document.State): Unit = {
-                session.nodes_status_exit(exit_state)
+                session.nodes_status_exit()
                 session.errors_cancel()
               }
 
@@ -386,14 +370,19 @@ object Build_Job {
             case Session.Command_Timing(state_id, props) => session.command_timing(state_id, props)
           }
 
+          session.nodes_status += Session.Consumer("nodes_status")(session.nodes_status_progress)
+
           session.runtime_statistics += Session.Consumer("ML_statistics") {
             case Session.Runtime_Statistics(props) =>
               session.write_process_output(Protocol.ML_Statistics_Marker(props))
           }
 
-          session.finished_theories += Session.Consumer[Document.Snapshot]("finished_theories") {
-            case snapshot =>
+          session.finished_theories += Session.Consumer[Session.Finished_Theory]("finished_theories") {
+            case thy =>
               if (!progress.stopped) {
+                val snapshot = thy.snapshot
+                session.theory_timing(snapshot.node_name, thy.node_status.cumulated_time)
+
                 def export_(name: String, xml: XML.Body, compress: Boolean = true): Unit = {
                   if (!progress.stopped) {
                     val theory_name = snapshot.node_name.theory
@@ -427,7 +416,7 @@ object Build_Job {
               }
           }
 
-          session.all_messages += Session.Consumer[Any]("build_session_output") {
+          session.all_messages += Session.Consumer[Prover.Message]("build_session_output") {
             case msg: Prover.Output =>
               val message = msg.message
               if (msg.is_system) session.resources.log(Protocol.message_text(message))
@@ -439,13 +428,8 @@ object Build_Job {
                 session.synchronized { stderr ++= Symbol.encode(XML.content(message)) }
               }
               else if (msg.is_exit) {
-                val err =
-                  "Prover terminated" +
-                    (msg.properties match {
-                      case Markup.Process_Result(result) => ": " + result.print_rc
-                      case _ => ""
-                    })
-                session.errors(List(err))
+                val result = Markup.Process_Result.get(msg.properties)
+                session.errors(List("Prover terminated: " + result.print_rc))
               }
             case _ =>
           }
@@ -458,34 +442,54 @@ object Build_Job {
           /* process */
 
           val process =
-            Isabelle_Process.start(options, session, session_background, session_heaps,
+            Isabelle_Process.start(options, session, current_background, session_heaps,
               use_prelude = use_prelude, eval_main = eval_main, cwd = info.dir, env = env)
 
           val timeout_request: Option[Event_Timer.Request] =
             if (info.timeout_ignored) None
-            else Some(Event_Timer.request(Time.now() + info.timeout) { process.terminate() })
+            else {
+              Some(Event_Timer.request(log, Time.now() + info.timeout) { process.terminate() })
+            }
 
           val build_errors =
-            Isabelle_Thread.interrupt_handler(_ => process.terminate()) {
+            Isabelle_Thread.interrupt_handle(process.terminate()) {
               Exn.capture { process.await_startup() } match {
                 case Exn.Res(_) =>
+                  val prover_options = session.prover_options
                   val resources_xml = session.resources.init_session_xml
-                  val encode_options: XML.Encode.T[Options] =
-                    options => session.prover_options(options).encode
-                  val args_xml =
-                    {
+
+                  sealed case class Theory(options: Options.Update, thy: Resources.Thy) {
+                    def options_eq(other: Theory): Boolean = options == other.options
+                  }
+
+                  val theories: List[(Options.Update, List[Resources.Thy])] =
+                    Library.runs[Theory](
+                      List.from(
+                        for {
+                          thy <- session_theories.iterator
+                          (process_opts, thy_opts) =
+                            process.options.check_update(thy.options)
+                              .partition(opt => process.options.get(opt.name).get.for_ML_process)
+                        } yield Theory(process_opts, thy.copy(options = thy_opts))),
+                      eq = _ options_eq _)
+                      .map(ts => (ts.head.options ::: prover_options, ts.map(_.thy)))
+
+                  val theories_xml =
+                    theories.map({ case (opts, thys) =>
                       import XML.Encode._
-                      pair(string, list(pair(encode_options, list(pair(string, properties)))))(
-                        (session_name, info.theories))
-                    }
-                  session.protocol_command("build_session", resources_xml, args_xml)
+                      pair(Options.encode, list(Resources.Thy.encode))(
+                        (process.options ++ opts, thys))
+                    })
+
+                  session.protocol_command_args("build_session",
+                    XML.string(session_name) :: resources_xml :: theories_xml)
                   session.errors_result()
                 case Exn.Exn(exn) => Exn.Res(List(Exn.message(exn)))
               }
             }
 
           val result0 =
-            Isabelle_Thread.interrupt_handler(_ => process.terminate()) { process.await_shutdown() }
+            Isabelle_Thread.interrupt_handle(process.terminate()) { process.await_shutdown() }
 
           val was_timeout =
             timeout_request match {
@@ -504,7 +508,7 @@ object Build_Job {
               if (Exn.is_res(build_errors) && result0.ok && info.documents.nonEmpty) {
                 using(Export.open_database_context(store, server = server)) { database_context =>
                   val documents =
-                    using(database_context.open_session(session_background)) {
+                    using(database_context.open_session(current_background)) {
                       session_context =>
                         Document_Build.build_documents(
                           Document_Build.context(session_context, progress = progress),
@@ -575,8 +579,8 @@ object Build_Job {
 
           val output_shasum =
             store_session.heap match {
-              case Some(path) => SHA1.shasum(ML_Heap.write_file_digest(path), session_name)
-              case None => SHA1.no_shasum
+              case Some(path) => Shasum.make(ML_Heap.write_file_digest(path), session_name)
+              case None => Shasum.none
             }
 
           val log_lines = process_result.out_lines.filterNot(Protocol_Message.Marker.test)
@@ -584,10 +588,12 @@ object Build_Job {
           val build_log =
             Build_Log.Log_File(session_name, process_result.out_lines, cache = store.cache).
               parse_session_info(
+                process_timing = process_result.timing,
                 command_timings = true,
                 theory_timings = true,
                 ml_statistics = true,
-                task_statistics = true)
+                task_statistics = true
+              ).sort_theories(session_theories)
 
           // write log file
           if (process_result.ok) {
@@ -602,7 +608,7 @@ object Build_Job {
                 if (process_result.timeout) build_log.error("Timeout") else build_log,
               build =
                 Store.Build_Info(
-                  sources = sources_shasum,
+                  sources_conditions = sources_shasum ::: session.conditions.value.shasum,
                   input_heaps = input_shasum,
                   output_heap = output_shasum,
                   process_result.rc,
@@ -620,14 +626,14 @@ object Build_Job {
           process_result.err_lines.foreach(progress.echo(_))
 
           if (process_result.ok) {
-            val props = build_log.session_timing
-            val threads = Markup.Session_Timing.Threads.unapply(props) getOrElse 1
-            val timing = Markup.Timing_Properties.get(props)
+            val ml_threads = build_log.session_timing.ml_threads
+            val ml_timing = build_log.session_timing.ml_timing
+            val process_timing = build_log.session_timing.process_timing
             progress.echo(
-              "Timing " + session_name + " (" + threads + " threads, " + timing.message_factor + ")",
+              "Timing " + session_name + " (" + ml_threads + " threads, " + ml_timing.message_factor + ")",
               verbose = true)
             progress.echo(
-              "Finished " + session_name + " (" + process_result.timing.message_resources + ")")
+              "Finished " + session_name + " (" + process_timing.message_resources + ")")
           }
           else {
             progress.echo(

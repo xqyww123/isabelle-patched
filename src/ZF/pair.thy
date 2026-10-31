@@ -11,12 +11,12 @@ begin
 ML_file \<open>simpdata.ML\<close>
 
 setup \<open>
-  map_theory_simpset
+  Simplifier.map_theory_simpset
     (Simplifier.set_mksimps (fn ctxt => map mk_eq o ZF_atomize o Variable.gen_all ctxt)
       #> Simplifier.add_cong @{thm if_weak_cong})
 \<close>
 
-ML \<open>val ZF_ss = simpset_of \<^context>\<close>
+ML \<open>val ZF_ss = Simplifier.simpset_of \<^context>\<close>
 
 simproc_setup defined_Bex ("\<exists>x\<in>A. P(x) \<and> Q(x)") = \<open>
   K (Quantifier1.rearrange_Bex (fn ctxt => unfold_tac ctxt @{thms Bex_def}))

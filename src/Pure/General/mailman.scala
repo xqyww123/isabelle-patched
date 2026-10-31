@@ -204,10 +204,10 @@ object Mailman {
     )
 
   private def tune(s: String): String =
-    s.replace(64.toChar, 58.toChar).replace(46.toChar, 47.toChar)
+    s.replacing(64.toChar.toString -> 58.toChar.toString, 46.toChar.toString -> 47.toChar.toString)
 
   private def untune(s: String): String =
-    s.replace(58.toChar, 64.toChar).replace(47.toChar, 46.toChar)
+    s.replacing(58.toChar.toString -> 64.toChar.toString, 47.toChar.toString -> 46.toChar.toString)
 
   def standard_author_info(author_info: List[String]): List[String] =
     author_info.flatMap(s =>
@@ -265,7 +265,7 @@ object Mailman {
       val name: String =
         names.headOption getOrElse {
           addresses match {
-            case a :: _ => a.substring(0, a.indexOf('@')).replace('.', ' ')
+            case a :: _ => a.substring(0, a.indexOf('@')).nn.replacing("." -> " ")
             case Nil => error("Empty cluster")
           }
         }
@@ -336,9 +336,11 @@ object Mailman {
 
     def make_name(str: String): String = {
       val s =
-        str.trim.replaceAll("""\s+""", " ").replaceAll(" at ", "@")
-          .replace("mailbroy.informatik.tu-muenchen.de", "in.tum.de")
-          .replace("informatik.tu-muenchen.de", "in.tum.de")
+        Library.trim_string(str).replacing(
+          """\s+""".r -> " ",
+          " at " -> "@",
+          "mailbroy.informatik.tu-muenchen.de" -> "in.tum.de",
+          "informatik.tu-muenchen.de" -> "in.tum.de")
       if (s.startsWith("=") && s.endsWith("=")) "" else s
     }
 
@@ -392,7 +394,7 @@ object Mailman {
           Some(path)
         }
       }
-      finally { connection.getInputStream.close() }
+      finally { connection.getInputStream.nn.close() }
     }
 
     def download_text(target_dir: Path, progress: Progress = new Progress): List[Path] =
@@ -422,16 +424,9 @@ object Mailman {
     def get_messages(): List[Message] =
       for (href <- hrefs_msg) yield message_content(href, split_lines(read_text(href)))
 
-    def find_messages(dir: Path): List[Message] = {
-      for {
-        file <- File.find_files(dir.file, file => File.is_html(file.getName))
-        rel_path <- File.relative_path(dir, File.path(file))
-      }
-      yield {
-        val name = full_name(rel_path.implode)
-        message_content(name, split_lines(File.read(file)))
-      }
-    }
+    def find_messages(dir: Path): List[Message] =
+      for (path <- File.find_files(dir, pred = File.is_html, relative = true))
+      yield message_content(full_name(path.implode), split_lines(File.read(dir + path)))
   }
 
   private class Message_Chunk(bg: String = "", en: String = "") {
@@ -485,7 +480,7 @@ object Mailman {
           "d MMM yy H:m:s Z",
           "d MMM yy H:m:s z")
       def unapply(s: String): Option[Date] = {
-        val s0 = s.replaceAll("""\s+""", " ")
+        val s0 = s.replacing("""\s+""".r -> " ")
         val s1 =
           s0 match {
             case Trim1(s1) => s1
@@ -593,7 +588,7 @@ object Mailman {
 
     private object Date_Format {
       val Format = Date.Format("E MMM d H:m:s z uuuu")
-      def unapply(s: String): Option[Date] = Format.unapply(s.replaceAll("""\s+""", " "))
+      def unapply(s: String): Option[Date] = Format.unapply(s.replacing("""\s+""".r -> " "))
     }
 
     override def message_content(name: String, lines: List[String]): Message = {

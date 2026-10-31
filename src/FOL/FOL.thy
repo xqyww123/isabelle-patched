@@ -151,13 +151,11 @@ proof (rule ex1E)
   assume \<open>P(x)\<close>
   then show \<open>R\<close>
   proof (rule r)
-    {
-      fix y y'
-      assume \<open>P(y)\<close> and \<open>P(y')\<close>
-      with * have \<open>x = y\<close> and \<open>x = y'\<close>
-        by - (tactic "IntPr.fast_tac \<^context> 1")+
-      then have \<open>y = y'\<close> by (rule subst)
-    } note r' = this
+    have r': \<open>y = y'\<close> if \<open>P(y)\<close> and \<open>P(y')\<close> for y y'
+    proof -
+      from that and * have \<open>x = y\<close> and \<open>x = y'\<close> by iprover+
+      then show ?thesis by (rule subst)
+    qed
     show \<open>\<forall>y y'. P(y) \<and> P(y') \<longrightarrow> y = y'\<close>
       by (intro strip, elim conjE) (rule r')
   qed
@@ -344,22 +342,22 @@ simproc_setup defined_all("\<And>x. PROP P(x)") = \<open>K Quantifier1.rearrange
 ML \<open>
 (*intuitionistic simprules only*)
 val IFOL_ss =
-  put_simpset FOL_basic_ss \<^context>
-  |> Simplifier.add_simps @{thms meta_simps IFOL_simps int_ex_simps int_all_simps subst_all}
-  |> Simplifier.add_proc \<^simproc>\<open>defined_All\<close>
-  |> Simplifier.add_proc \<^simproc>\<open>defined_Ex\<close>
-  |> Simplifier.add_cong @{thm imp_cong}
-  |> simpset_of;
+  FOL_basic_ss
+  |> Simplifier.simpset_map \<^context>
+    (Simplifier.add_simps @{thms meta_simps IFOL_simps int_ex_simps int_all_simps subst_all}
+    #> Simplifier.add_proc \<^simproc>\<open>defined_All\<close>
+    #> Simplifier.add_proc \<^simproc>\<open>defined_Ex\<close>
+    #> Simplifier.add_cong @{thm imp_cong})
 
 (*classical simprules too*)
 val FOL_ss =
-  put_simpset IFOL_ss \<^context>
-  |> Simplifier.add_simps @{thms cla_simps cla_ex_simps cla_all_simps}
-  |> simpset_of;
+  IFOL_ss
+  |> Simplifier.simpset_map \<^context>
+    (Simplifier.add_simps @{thms cla_simps cla_ex_simps cla_all_simps})
 \<close>
 
 setup \<open>
-  map_theory_simpset (put_simpset FOL_ss) #>
+  Simplifier.map_theory_simpset (put_simpset FOL_ss) #>
   Simplifier.method_setup Splitter.split_modifiers
 \<close>
 

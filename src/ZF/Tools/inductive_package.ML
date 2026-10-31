@@ -265,9 +265,9 @@ let
   fun basic_elim_tac ctxt =
       REPEAT (SOMEGOAL (eresolve_tac ctxt (Ind_Syntax.elim_rls @ Su.free_SEs)
                 ORELSE' bound_hyp_subst_tac ctxt))
-      THEN prune_params_tac ctxt
+      THEN Simplifier.prune_params_tac ctxt
           (*Mutual recursion: collapse references to Part(D,h)*)
-      THEN (PRIMITIVE (fold_rule ctxt part_rec_defs));
+      THEN (PRIMITIVE (Simplifier.fold_rule ctxt part_rec_defs));
 
   (*Elimination*)
   val (elim, thy4) = thy3
@@ -341,9 +341,9 @@ let
      (*We use a MINIMAL simpset. Even FOL_ss contains too many simpules.
        If the premises get simplified, then the proofs could fail.*)
      val min_ss =
-           empty_simpset ctxt4
+           Simplifier.empty_simpset ctxt4
            |> Simplifier.set_mksimps (fn ctxt => map mk_eq o ZF_atomize o Variable.gen_all ctxt)
-           |> Simplifier.set_unsafe_solver (mk_solver "minimal"
+           |> Simplifier.set_unsafe_solver (Simplifier.mk_solver "minimal"
                       (fn ctxt => resolve_tac ctxt (triv_rls @ Simplifier.prems_of ctxt)
                                    ORELSE' assume_tac ctxt
                                    ORELSE' eresolve_tac ctxt @{thms FalseE}));

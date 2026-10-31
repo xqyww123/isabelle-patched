@@ -70,8 +70,8 @@ object VSCode_Resources {
 class VSCode_Resources(
   val options: Options,
   session_background: Sessions.Background,
-  log: Logger = new Logger)
-extends Resources(session_background, log = log) {
+  log_file: Logger)
+extends Resources(session_background, session_background, log = log_file) {
   resources =>
 
   private val state = Synchronized(VSCode_Resources.State())
@@ -95,7 +95,7 @@ extends Resources(session_background, log = log) {
 
   def node_name(file: JFile): Document.Node.Name =
     find_theory(file) getOrElse {
-      val node = file.getPath
+      val node = file.getPath.nn
       val theory = theory_name(Sessions.DRAFT, Thy_Header.theory_name(node))
       if (loaded_theory(theory)) Document.Node.Name.loaded_theory(theory)
       else Document.Node.Name(node, theory = theory)
@@ -111,7 +111,7 @@ extends Resources(session_background, log = log) {
     else if (path.is_basic && !prefix.endsWith("/") && !prefix.endsWith(JFile.separator))
       prefix + JFile.separator + File.platform_path(path)
     else if (path.is_basic) prefix + File.platform_path(path)
-    else File.absolute(new JFile(prefix + JFile.separator + File.platform_path(path))).getPath
+    else File.absolute(new JFile(prefix + JFile.separator.nn + File.platform_path(path))).getPath.nn
   }
 
   override def read_dir(dir: String): List[String] =
@@ -154,7 +154,7 @@ extends Resources(session_background, log = log) {
 
   def read_file_content(name: Document.Node.Name): Option[String] = {
     make_theory_content(name) orElse {
-      try { Some(Line.normalize(File.read(node_file(name)))) }
+      try { Some(Symbol.decode(Line.normalize(File.read(node_file(name))))) }
       catch { case ERROR(_) => None }
     }
   }
@@ -242,7 +242,8 @@ extends Resources(session_background, log = log) {
       val stable_tip_version = session.stable_tip_version(st.models.values)
 
       val thy_files =
-        resources.resolve_dependencies(st.models.values, editor.document_required())
+        resources.resolve_dependencies(session.conditions,
+          st.models.values, editor.document_required())
 
       val aux_files = stable_tip_version.toList.flatMap(undefined_blobs)
 
@@ -316,7 +317,7 @@ extends Resources(session_background, log = log) {
             channel.write(LSP.PublishDiagnostics(file, rendering.diagnostics_output(diags)))
           if (pide_extensions) {
             for (decos <- changed_decos)
-              channel.write(rendering.decoration_output(decos).json(file))
+              channel.write(rendering.decoration_output(decos).notification(file))
           }
           (file, model1)
         }
@@ -369,7 +370,7 @@ extends Resources(session_background, log = log) {
     val rendering1 = rendering(model)
     val (_, decos, model1) = model.publish_full(rendering1)
     if (pide_extensions) {
-      channel.write(rendering1.decoration_output(decos).json(file))
+      channel.write(rendering1.decoration_output(decos).notification(file))
     }
   }
 

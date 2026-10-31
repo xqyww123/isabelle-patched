@@ -98,11 +98,12 @@ object Bibtex {
 
     for (chunk <- chunks) {
       val name = chunk.name
-      if (name != "" && !chunk_pos.isDefinedAt(name)) {
+      if (name.nonEmpty && !chunk_pos.isDefinedAt(name)) {
         chunk_pos += (name -> make_pos(chunk.heading_length))
       }
       for (tok <- chunk.tokens) {
-        tokens += (tok.copy(source = tok.source.replace("\n", " ")) -> make_pos(tok.source.length))
+        tokens +=
+          (tok.copy(source = tok.source.replacing("\n" -> " ")) -> make_pos(tok.source.length))
         advance_pos(tok)
       }
     }
@@ -176,7 +177,7 @@ object Bibtex {
       try {
         for (chunk <- Bibtex.parse(text)) {
           val pos1 = pos.advance(chunk.source)
-          if (chunk.name != "" && !chunk.is_command) {
+          if (chunk.name.nonEmpty && !chunk.is_command) {
             entries += Entry(chunk.name, pos.position(pos1.offset))
           }
           if (chunk.is_malformed && err_line == 0) { err_line = pos.line }
@@ -238,10 +239,10 @@ object Bibtex {
     "oct",
     "nov",
     "dec")
-  def is_month(s: String): Boolean = months.contains(s.toLowerCase)
+  def is_month(s: String): Boolean = months.contains(Word.lowercase(s))
 
   private val commands = List("preamble", "string")
-  def is_command(s: String): Boolean = commands.contains(s.toLowerCase)
+  def is_command(s: String): Boolean = commands.contains(Word.lowercase(s))
 
   sealed case class Entry_Type(
     kind: String,
@@ -251,11 +252,11 @@ object Bibtex {
   ) {
     val optional_standard: List[String] = List("url", "doi", "ee")
 
-    def is_required(s: String): Boolean = required.contains(s.toLowerCase)
+    def is_required(s: String): Boolean = required.contains(Word.lowercase(s))
     def is_optional(s: String): Boolean =
-      optional_crossref.contains(s.toLowerCase) ||
-      optional_other.contains(s.toLowerCase) ||
-      optional_standard.contains(s.toLowerCase)
+      optional_crossref.contains(Word.lowercase(s)) ||
+      optional_other.contains(Word.lowercase(s)) ||
+      optional_standard.contains(Word.lowercase(s))
 
     def fields: List[String] =
       required ::: optional_crossref ::: optional_other ::: optional_standard
@@ -323,7 +324,7 @@ object Bibtex {
         List("author", "title", "howpublished", "month", "year", "note")))
 
   def known_entry(kind: String): Option[Entry_Type] =
-    known_entries.find(entry => entry.kind.toLowerCase == kind.toLowerCase)
+    known_entries.find(entry => Word.lowercase(entry.kind) == Word.lowercase(kind))
 
 
 
@@ -393,8 +394,8 @@ object Bibtex {
 
     def is_ignored: Boolean = kind == "" && tokens.forall(_.is_ignored)
     def is_malformed: Boolean = tokens.exists(_.is_malformed)
-    def is_command: Boolean = Bibtex.is_command(kind) && name != "" && content.isDefined
-    def is_entry: Boolean = Bibtex.known_entry(kind).isDefined && name != "" && content.isDefined
+    def is_command: Boolean = Bibtex.is_command(kind) && name.nonEmpty && content.isDefined
+    def is_entry: Boolean = Bibtex.known_entry(kind).isDefined && name.nonEmpty && content.isDefined
   }
 
 
@@ -471,7 +472,7 @@ object Bibtex {
           }
           if (i == start) Failure("bad input", in)
           else {
-            val s = in.source.subSequence(start, i).toString
+            val s = Library.make_string(in.source, start, i)
             Success((s, Delimited(q, d)), in.drop(i - start))
           }
         }
@@ -536,7 +537,7 @@ object Bibtex {
       "(" ^^ { case a => (")", keyword(a)) }
 
     private def item_name(kind: String) =
-      kind.toLowerCase match {
+      Word.lowercase(kind) match {
         case "preamble" => failure("")
         case "string" => identifier ^^ token(Token.Kind.NAME)
         case _ => name
@@ -784,10 +785,10 @@ object Bibtex {
             ant match {
               case Antiquote.Control(source) =>
                 for {
-                  head <- Symbol.iterator(source).nextOption
+                  head <- Symbol.iterator(source).nextOption()
                   kind <- Symbol.control_name(Symbol.encode(head))
                 } {
-                  val rest = source.substring(head.length)
+                  val rest = source.drop(head.length)
                   val (body, pos1) =
                     if (rest.isEmpty) (rest, pos)
                     else (Scan.Parsers.cartouche_content(rest), pos.advance(Symbol.open))
@@ -824,9 +825,9 @@ object Bibtex {
       val name = m.group(1)
       val loc = m.group(2)
       val location =
-        if (loc.startsWith("[") && loc.endsWith("]")) loc.substring(1, loc.length - 1)
+        if (loc.startsWith("[") && loc.endsWith("]")) loc.slice(1, loc.length - 1)
         else loc
-      val citations = space_explode(',', m.group(3)).map(_.trim)
+      val citations = space_explode(',', m.group(3)).map(Library.trim_string)
       Regex.quoteReplacement(cite_antiquotation(name, location, citations))
     })
 
@@ -835,7 +836,7 @@ object Bibtex {
       for {
         str1 <- Library.try_unprefix("@{cite", str)
         str2 <- Library.try_unsuffix("}", str1)
-      } yield str2.trim
+      } yield Library.trim_string(str2)
 
     opt_body match {
       case None => str
@@ -845,7 +846,7 @@ object Bibtex {
             case None => (CITE, body0)
             case Some(m) => (m.group(1), Cite_Macro.replaceAllIn(body0, ""))
           }
-        val body2 = body1.replace("""\<close>""", """\<close> in""")
+        val body2 = body1.replacing("""\<close>""" -> """\<close> in""")
         if (cite_commands.contains(name)) cite_antiquotation(name, body2)
         else cite_antiquotation(CITE, body2 + " using " + quote(name))
     }

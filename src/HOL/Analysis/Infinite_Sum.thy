@@ -919,6 +919,93 @@ next
 qed
 
 
+text \<open>Pushing @{const infsum} through a finite (basis) sum\<close>
+
+lemma summable_on_finite_sum:
+  fixes f :: "'i \<Rightarrow> 'j \<Rightarrow> 'b::{topological_comm_monoid_add}"
+  assumes "finite I" and "\<And>i. i \<in> I \<Longrightarrow> (f i) summable_on A"
+  shows "(\<lambda>a. \<Sum>i\<in>I. f i a) summable_on A"
+  using assms
+proof (induction I rule: finite_induct)
+  case empty
+  show ?case by simp
+next
+  case (insert x F)
+  have fx: "(f x) summable_on A" using insert.prems by simp
+  have fF: "\<And>i. i \<in> F \<Longrightarrow> (f i) summable_on A" using insert.prems by simp
+  have "(\<lambda>a. f x a + (\<Sum>i\<in>F. f i a)) summable_on A"
+    by (rule summable_on_add[OF fx insert.IH[OF fF]])
+  thus ?case by (simp add: sum.insert[OF insert.hyps(1,2)])
+qed
+
+lemma infsum_finite_sum:
+  fixes f :: "'i \<Rightarrow> 'j \<Rightarrow> 'b::banach"
+  assumes "finite I" and "\<And>i. i \<in> I \<Longrightarrow> (f i) summable_on A"
+  shows "infsum (\<lambda>a. \<Sum>i\<in>I. f i a) A = (\<Sum>i\<in>I. infsum (f i) A)"
+  using assms
+proof (induction I rule: finite_induct)
+  case empty
+  show ?case by simp
+next
+  case (insert x F)
+  have fx: "(f x) summable_on A" using insert.prems by simp
+  have fF: "\<And>i. i \<in> F \<Longrightarrow> (f i) summable_on A" using insert.prems by simp
+  have sumF: "(\<lambda>a. \<Sum>i\<in>F. f i a) summable_on A"
+    by (rule summable_on_finite_sum[OF insert.hyps(1) fF])
+  have IH: "infsum (\<lambda>a. \<Sum>i\<in>F. f i a) A = (\<Sum>i\<in>F. infsum (f i) A)"
+    by (rule insert.IH[OF fF])
+  have "infsum (\<lambda>a. \<Sum>i\<in>insert x F. f i a) A
+        = infsum (\<lambda>a. f x a + (\<Sum>i\<in>F. f i a)) A"
+    by (simp add: sum.insert[OF insert.hyps(1,2)])
+  also have "\<dots> = infsum (f x) A + infsum (\<lambda>a. \<Sum>i\<in>F. f i a) A"
+    by (rule infsum_add[OF fx sumF])
+  also have "\<dots> = infsum (f x) A + (\<Sum>i\<in>F. infsum (f i) A)" by (simp add: IH)
+  also have "\<dots> = (\<Sum>i\<in>insert x F. infsum (f i) A)"
+    by (simp add: sum.insert[OF insert.hyps(1,2)])
+  finally show ?case .
+qed
+
+lemma has_sum_imp_bounded_terms:
+  fixes g :: "'i \<Rightarrow> 'b::real_normed_vector"
+  assumes "(g has_sum S) A"
+  obtains M where "M \<ge> 0" and "\<And>a. a \<in> A \<Longrightarrow> norm (g a) \<le> M"
+proof -
+  have tend: "(sum g \<longlongrightarrow> S) (finite_subsets_at_top A)"
+    using assms by (simp only: has_sum_def)
+  have "eventually (\<lambda>F. dist (sum g F) S < 1) (finite_subsets_at_top A)"
+    by (rule tendstoD[OF tend]) simp
+  then obtain F0 where F0: "finite F0" "F0 \<subseteq> A"
+    and near: "\<And>F. finite F \<Longrightarrow> F0 \<subseteq> F \<Longrightarrow> F \<subseteq> A \<Longrightarrow> dist (sum g F) S < 1"
+    unfolding eventually_finite_subsets_at_top by metis
+  define M where "M = (\<Sum>b\<in>F0. norm (g b)) + 2"
+  have Mnn: "M \<ge> 0" unfolding M_def by (simp add: sum_nonneg)
+  have "norm (g a) \<le> M" if aA: "a \<in> A" for a
+  proof (cases "a \<in> F0")
+    case True
+    have "norm (g a) \<le> (\<Sum>b\<in>F0. norm (g b))"
+      using True F0(1) by (intro member_le_sum) auto
+    also have "\<dots> \<le> M" unfolding M_def by simp
+    finally show ?thesis .
+  next
+    case False
+    have fin1: "finite (insert a F0)" using F0(1) by simp
+    have sub1: "insert a F0 \<subseteq> A" using F0(2) aA by simp
+    have d1: "dist (sum g (insert a F0)) S < 1" by (rule near[OF fin1 _ sub1]) auto
+    have d0: "dist (sum g F0) S < 1" by (rule near[OF F0(1) order_refl F0(2)])
+    have "sum g (insert a F0) = g a + sum g F0"
+      using False F0(1) by simp
+    hence ga: "g a = (sum g (insert a F0) - S) - (sum g F0 - S)" by simp
+    have "norm (g a) \<le> norm (sum g (insert a F0) - S) + norm (sum g F0 - S)"
+      by (subst ga) (rule norm_triangle_ineq4)
+    also have "\<dots> = dist (sum g (insert a F0)) S + dist (sum g F0) S"
+      by (simp only: dist_norm)
+    also have "\<dots> < 1 + 1" using d1 d0 by simp
+    also have "\<dots> \<le> M" unfolding M_def by (simp add: sum_nonneg)
+    finally show ?thesis by simp
+  qed
+  with Mnn that show ?thesis by blast
+qed
+
 lemma summable_on_finite_union_disjoint:
   fixes f :: "'a \<Rightarrow> 'b::topological_comm_monoid_add"
   assumes finite: \<open>finite A\<close>
@@ -1591,7 +1678,7 @@ lemma has_sum_uminus:
 lemma summable_on_uminus:
   fixes f :: \<open>'a \<Rightarrow> 'b::topological_ab_group_add\<close>
   shows\<open>(\<lambda>x. - f x) summable_on A \<longleftrightarrow> f summable_on A\<close>
-  by (metis summable_on_def has_sum_uminus verit_minus_simplify(4))
+  by (metis summable_on_def has_sum_uminus alethe_minus_simplify(4))
 
 lemma infsum_uminus:
   fixes f :: \<open>'a \<Rightarrow> 'b::{topological_ab_group_add, t2_space}\<close>
@@ -2407,7 +2494,6 @@ lemma (in topological_space) convergent_filter_bot [simp, intro]: "convergent_fi
   by (simp add: convergent_filter_iff)
 
 
-
 class complete_uniform_space = uniform_space +
   assumes cauchy_filter_convergent': "cauchy_filter (F :: 'a filter) \<Longrightarrow> F \<noteq> bot \<Longrightarrow> convergent_filter F"
 
@@ -2688,6 +2774,7 @@ lemma (in uniform_space) Cauchy_seq_iff_tendsto:
   "Cauchy f \<longleftrightarrow> filterlim (map_prod f f) uniformity (at_top \<times>\<^sub>F at_top)"
   unfolding Cauchy_uniform cauchy_filter_def filterlim_def filtermap_prod_filter ..
 
+
 theorem (in uniform_space) controlled_seq_imp_Cauchy_seq:
   fixes U :: "nat \<Rightarrow> ('a \<times> 'a) set"
   assumes U: "\<And>P. eventually P uniformity \<Longrightarrow> (\<exists>n. \<forall>x\<in>U n. P x)"
@@ -2786,6 +2873,45 @@ lemma (in complete_uniform_space) complete_UNIV_cuspace [intro]: "complete UNIV"
   unfolding complete_uniform using cauchy_filter_convergent
   by (auto simp: convergent_filter.simps)
 
+lemma convergent_eq_Cauchy_within:
+  fixes f :: "'a::metric_space \<Rightarrow> 'b::complete_space"
+  shows "(\<exists>l. (f \<longlongrightarrow> l) (at a within S)) \<longleftrightarrow>
+         (\<forall>e>0. \<exists>d>0. \<forall>x\<in>S. \<forall>y\<in>S.
+            x \<noteq> a \<and> dist x a < d \<and> y \<noteq> a \<and> dist y a < d \<longrightarrow> dist (f x) (f y) < e)"
+proof -
+  have "(\<exists>l. (f \<longlongrightarrow> l) (at a within S)) \<longleftrightarrow> convergent_filter (filtermap f (at a within S))"
+    unfolding filterlim_def convergent_filter_iff by auto
+  also have "\<dots> \<longleftrightarrow> (\<forall>e>0. \<exists>P. eventually P (at a within S) \<and> (\<forall>x y. P x \<and> P y \<longrightarrow> dist (f x) (f y) < e))"
+    by (simp add: cauchy_filter_metric_filtermap convergent_filter_iff_cauchy)
+  also have "\<dots> \<longleftrightarrow> (\<forall>e>0. \<exists>d>0. \<forall>x\<in>S. \<forall>x'\<in>S.
+      x \<noteq> a \<and> dist x a < d \<and> x' \<noteq> a \<and> dist x' a < d \<longrightarrow> dist (f x) (f x') < e)"
+    (is "?L \<longleftrightarrow> ?R")
+  proof
+    assume ?L
+    show ?R
+    proof (intro allI impI)
+      fix e :: real assume "e > 0"
+      with \<open>?L\<close> obtain P where ev: "eventually P (at a within S)"
+        and P: "\<And>x y. P x \<Longrightarrow> P y \<Longrightarrow> dist (f x) (f y) < e" by auto
+      then show "\<exists>d>0. \<forall>x\<in>S. \<forall>x'\<in>S. x \<noteq> a \<and> dist x a < d \<and> x' \<noteq> a \<and> dist x' a < d \<longrightarrow> dist (f x) (f x') < e"
+        by (metis eventually_at)
+    qed
+  next
+    assume ?R
+    show ?L
+    proof (intro allI impI)
+      fix e :: real assume "e > 0"
+      with \<open>?R\<close> obtain d where "d > 0"
+        and d: "\<And>x x'. x \<in> S \<Longrightarrow> x' \<in> S \<Longrightarrow> x \<noteq> a \<Longrightarrow> dist x a < d \<Longrightarrow> x' \<noteq> a \<Longrightarrow> dist x' a < d \<Longrightarrow> dist (f x) (f x') < e"
+        by auto
+      have "\<forall>\<^sub>F x in at a within S. x \<in> S \<and> x \<noteq> a \<and> dist x a < d"
+        unfolding eventually_at using \<open>d > 0\<close> by auto
+      with d show "\<exists>P. eventually P (at a within S) \<and> (\<forall>x y. P x \<and> P y \<longrightarrow> dist (f x) (f y) < e)"
+        by blast
+    qed
+  qed
+  finally show ?thesis .
+qed
 
 
 lemma norm_infsum_le:

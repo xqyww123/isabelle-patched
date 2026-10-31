@@ -51,17 +51,23 @@ lemma has_vector_derivative_eq_rhs:
   "(f has_vector_derivative X) F \<Longrightarrow> X = Y \<Longrightarrow> (f has_vector_derivative Y) F"
   by simp
 
-named_theorems derivative_intros "structural introduction rules for derivatives"
+named_theorems derivative_intros
+named_theorems derivative_cong
+
+lemmas [derivative_cong] =
+  has_derivative_eq_rhs DERIV_cong has_vector_derivative_eq_rhs
+
+(* TODO: make version in distribution similarly extensible and then drop this *)
 setup \<open>
   let
-    val eq_thms = @{thms has_derivative_eq_rhs DERIV_cong has_vector_derivative_eq_rhs}
-    fun eq_rule thm = get_first (try (fn eq_thm => eq_thm OF [thm])) eq_thms
+    fun eq_thms ctxt = Named_Theorems.get ctxt \<^named_theorems>\<open>derivative_cong\<close>
+    fun eq_rule ctxt thm = get_first (try (fn eq_thm => eq_thm OF [thm])) (eq_thms ctxt)
   in
     Global_Theory.add_thms_dynamic
       (\<^binding>\<open>derivative_eq_intros\<close>,
         fn context =>
           Named_Theorems.get (Context.proof_of context) \<^named_theorems>\<open>derivative_intros\<close>
-          |> map_filter eq_rule)
+          |> map_filter (eq_rule (Context.proof_of context)))
   end
 \<close>
 
@@ -963,6 +969,52 @@ lemma has_vector_derivative_divide[derivative_intros]:
   using has_vector_derivative_mult_left [of f x F "inverse a"]
   by (simp add: field_class.field_divide_inverse)
 
+lemma has_vector_derivative_within_1D:
+  fixes f :: "real \<Rightarrow> 'a::real_normed_vector"
+  shows "(f has_vector_derivative f') (at x within S) \<longleftrightarrow>
+         ((\<lambda>y. (f y - f x) /\<^sub>R (y - x)) \<longlongrightarrow> f') (at x within S)"
+proof -
+  have ev_eq: "\<forall>\<^sub>F y in at x within S. (f y - f x) /\<^sub>R (y - x) - f' = (f y - f x - (y - x) *\<^sub>R f') /\<^sub>R (y - x)"
+    unfolding eventually_at_filter by (simp add: scaleR_diff_right scaleR_scaleR)
+  show ?thesis
+  proof
+    assume "(f has_vector_derivative f') (at x within S)"
+    then have "Zfun (\<lambda>y. (f y - f x - (y - x) *\<^sub>R f') /\<^sub>R \<bar>y - x\<bar>) (at x within S)"
+      unfolding has_vector_derivative_def has_derivative_at_within tendsto_Zfun_iff by auto
+    then have "Zfun (\<lambda>y. norm ((f y - f x - (y - x) *\<^sub>R f') /\<^sub>R \<bar>y - x\<bar>)) (at x within S)"
+      using Zfun_norm_iff by fastforce
+    then show "((\<lambda>y. (f y - f x) /\<^sub>R (y - x)) \<longlongrightarrow> f') (at x within S)"
+      using Zfun_norm_iff Zfun_ssubst ev_eq tendsto_Zfun_iff by fastforce
+  next
+    assume R: "((\<lambda>y. (f y - f x) /\<^sub>R (y - x)) \<longlongrightarrow> f') (at x within S)"
+    have "Zfun (\<lambda>y. (f y - f x) /\<^sub>R (y - x) - f') (at x within S)"
+      using R by (simp add: tendsto_Zfun_iff)
+    then have "Zfun (\<lambda>y. (f y - f x - (y - x) *\<^sub>R f') /\<^sub>R (y - x)) (at x within S)"
+      by (smt (verit, del_insts) Zfun_ssubst ev_eq eventually_mono)
+    then have "Zfun (\<lambda>y. (f y - f x - (y - x) *\<^sub>R f') /\<^sub>R \<bar>y - x\<bar>) (at x within S)"
+      using Zfun_norm_iff by (fastforce simp add: Zfun_le)
+    then show "(f has_vector_derivative f') (at x within S)"
+      unfolding has_vector_derivative_def has_derivative_at_within tendsto_Zfun_iff
+      using bounded_linear_scaleR_left by auto
+  qed
+qed
+
+lemma norm_vector_derivatives_le_within:
+  fixes f :: "real \<Rightarrow> 'a::real_normed_vector" and g :: "real \<Rightarrow> 'b::real_normed_vector"
+  assumes fderiv: "(f has_vector_derivative f') (at x within S)"
+      and gderiv: "(g has_vector_derivative g') (at x within S)"
+      and ev: "eventually (\<lambda>y. norm (f y - f x) \<le> norm (g y - g x)) (at x within S)"
+      and nontrivial: "at x within S \<noteq> bot"
+  shows "norm f' \<le> norm g'"
+proof (rule tendsto_le [OF nontrivial])
+  let ?f = "\<lambda>y. norm(inverse(y - x) *\<^sub>R (f y - f x))"
+  let ?g = "\<lambda>y. norm(inverse(y - x) *\<^sub>R (g y - g x))"
+  show "(?f \<longlongrightarrow> norm f') (at x within S)" 
+       "(?g \<longlongrightarrow> norm g') (at x within S)"
+    using fderiv gderiv has_vector_derivative_within_1D tendsto_norm by blast+
+  show "\<forall>\<^sub>F x in at x within S. ?f x \<le> ?g x"
+    using eventually_mono [OF ev] by (simp add: mult_left_mono)
+qed
 
 subsection \<open>Derivatives\<close>
 
@@ -1071,6 +1123,11 @@ lemma DERIV_sum[derivative_intros]:
     ((\<lambda>x. sum (f x) S) has_field_derivative sum f' S) F"
   by (rule has_derivative_imp_has_field_derivative [OF has_derivative_sum])
      (auto simp: sum_distrib_left mult_commute_abs dest: has_field_derivative_imp_has_derivative)
+
+lemma DERIV_sum_list[derivative_intros]:
+  "(\<And> n. n \<in> set xs \<Longrightarrow> ((\<lambda>x. f x n) has_field_derivative (f' n)) F) \<Longrightarrow>
+    ((\<lambda>x. sum_list (map (f x) xs)) has_field_derivative sum_list (map f' xs)) F"
+  by (induction xs) (auto intro!: derivative_intros)
 
 lemma DERIV_inverse'[derivative_intros]:
   assumes "(f has_field_derivative D) (at x within s)"
@@ -2509,5 +2566,152 @@ lemma lhopital_at_top_at_bot:
   using assms unfolding eventually_at_split filterlim_at_split
   by (auto intro!: lhopital_right_at_top_at_bot[of f a g f' g'] 
                    lhopital_left_at_top_at_bot[of f a g f' g'])
+
+subsection \<open>Logarithmic derivatives\<close>
+
+definition has_log_derivative :: "('a::real_normed_field \<Rightarrow> 'a) \<Rightarrow> 'a \<Rightarrow> 'a filter \<Rightarrow> bool"
+    (infix \<open>(has'_log'_derivative)\<close> 50)
+    where "(f has_log_derivative D) F \<longleftrightarrow> 
+             (F = bot \<or> f (Lim F (\<lambda>x. x)) \<noteq> 0) \<and> (f has_field_derivative (D * f (Lim F (\<lambda>x. x)))) F"
+
+lemma has_log_derivative_bot [simp, intro]: "(f has_log_derivative f') bot"
+  by (auto simp: has_log_derivative_def)
+
+lemma has_log_derivative_unique:
+  assumes "(f has_log_derivative D1) (at x within A)" "(f has_log_derivative D2) (at x within A)"
+  assumes "at x within A \<noteq> bot"
+  shows   "D1 = D2"
+proof -
+  from assms have "D1 * f (Lim (at x within A) (\<lambda>x. x)) = D2 * f (Lim (at x within A) (\<lambda>x. x))"
+    using assms has_field_derivative_unique unfolding has_log_derivative_def by blast
+  with assms show "D1 = D2"
+    by (auto simp: has_log_derivative_def)
+qed
+
+lemma has_log_derivative_cong_ev':
+  assumes "eventually (\<lambda>x. f x = g x) (nhds x)"
+  shows   "(f has_log_derivative f') (at x) \<longleftrightarrow>
+           (g has_log_derivative f') (at x)"
+proof -
+  from assms(1) have [simp]: "f x = g x"
+    using eventually_nhds_x_imp_x by blast
+  show ?thesis
+    unfolding has_log_derivative_def
+    apply (intro conj_cong)
+    using DERIV_cong_ev[OF refl assms refl] assms
+    apply (simp_all add: Lim_ident_at)
+    done
+qed
+
+lemma has_log_derivative_cong_ev:
+  assumes "eventually (\<lambda>x. f x = g x) (at x within A)" "f x = g x"
+  shows   "(f has_log_derivative f') (at x within A) \<longleftrightarrow>
+           (g has_log_derivative f') (at x within A)"
+  unfolding has_log_derivative_def
+  apply (cases "at x within A = bot"; intro conj_cong)
+  using has_field_derivative_cong_eventually[OF assms] assms
+     apply (simp_all add: Lim_ident_at)
+  done  
+
+lemma has_log_derivative_cong [derivative_cong]:
+  "(f has_log_derivative X) F \<Longrightarrow> X = Y \<Longrightarrow> (f has_log_derivative Y) F"
+  by simp
+
+lemma has_log_derivative_imp_has_field_derivative:
+  assumes "(f has_log_derivative (f' / f x)) (at x within A)"
+  shows   "(f has_field_derivative f') (at x within A)"
+  using assms by (cases "at x within A = bot") (auto simp: has_log_derivative_def Lim_ident_at)
+
+lemma has_log_derivative_imp_has_field_derivative':
+  assumes "(f has_log_derivative f') (at x within A)"
+  shows   "(f has_field_derivative (f' * f x)) (at x within A)"
+  using assms by (cases "at x within A = bot") (auto simp: has_log_derivative_def Lim_ident_at)
+
+lemma has_log_derivative_imp_nonzero:
+  assumes "(f has_log_derivative f') (at x within A)" "at x within A \<noteq> bot"
+  shows   "f x \<noteq> 0"
+  using assms unfolding has_log_derivative_def by (auto simp: Lim_ident_at)
+
+lemma has_field_derivative_imp_has_log_derivative:
+  assumes "(f has_field_derivative (f' * f x)) (at x within A)" "f x \<noteq> 0"
+  shows   "(f has_log_derivative f') (at x within A)"
+  using assms by (cases "at x within A = bot") (auto simp: has_log_derivative_def Lim_ident_at)
+
+lemma has_field_derivative_imp_has_log_derivative':
+  assumes "(f has_field_derivative f') (at x within A)" "f x \<noteq> 0"
+  shows   "(f has_log_derivative (f' / f x)) (at x within A)"
+  using assms by (cases "at x within A = bot") (auto simp: has_log_derivative_def Lim_ident_at)
+
+lemma has_log_derivative_chain:
+  assumes "(f has_log_derivative f') (at (g x))"
+  assumes "(g has_field_derivative g') (at x within A)"
+  shows "((f \<circ> g) has_log_derivative (f' * g')) (at x within A)"
+proof (cases "at x within A = bot")
+  case False
+  hence [simp]: "Lim (at x within A) (\<lambda>x. x) = x"
+    by (simp add: Lim_ident_at)
+  show ?thesis
+    unfolding has_log_derivative_def
+  proof
+    have "((f \<circ> g) has_field_derivative f' * f (g x) * g') (at x within A)"
+      by (rule DERIV_chain) (use assms False in \<open>auto simp: has_log_derivative_def Lim_ident_at\<close>)
+    thus "(f \<circ> g has_field_derivative (f' * g') * (f \<circ> g) (Lim (at x within A) (\<lambda>x. x))) (at x within A)"
+      by (simp add: mult_ac)
+  qed (use assms in \<open>auto simp: has_log_derivative_def Lim_ident_at\<close>)
+qed auto
+
+lemma has_log_derivative_const [intro, derivative_intros]:
+  "c \<noteq> 0 \<Longrightarrow> ((\<lambda>_. c) has_log_derivative 0) (at x within A)"
+  by (auto simp: has_log_derivative_def intro!: derivative_eq_intros)
+
+lemma has_log_derivative_uminus [derivative_intros]:
+  assumes "((\<lambda>x. f x) has_log_derivative f') (at x within A)"
+  shows   "((\<lambda>x. -f x) has_log_derivative f') (at x within A)"
+  using assms
+  by (cases "at x within A = bot")
+     (auto simp: has_log_derivative_def algebra_simps Lim_ident_at intro!: derivative_eq_intros)
+
+lemma has_log_derivative_mult [derivative_intros]:
+  assumes "((\<lambda>x. f x) has_log_derivative f') (at x within A)"
+  assumes "((\<lambda>x. g x) has_log_derivative g') (at x within A)"
+  shows   "((\<lambda>x. f x * g x) has_log_derivative (f' + g')) (at x within A)"
+  using assms
+  by (cases "at x within A = bot")
+     (auto simp: has_log_derivative_def algebra_simps Lim_ident_at intro!: derivative_eq_intros)
+
+lemma has_log_derivative_inverse [derivative_intros]:
+  assumes "((\<lambda>x. f x) has_log_derivative f') (at x within A)"
+  shows   "((\<lambda>x. inverse (f x)) has_log_derivative (-f')) (at x within A)"
+  using assms
+  by (cases "at x within A = bot")
+     (auto simp: has_log_derivative_def algebra_simps Lim_ident_at intro!: derivative_eq_intros)
+
+lemma has_log_derivative_divide [derivative_intros]:
+  assumes "((\<lambda>x. f x) has_log_derivative f') (at x within A)"
+  assumes "((\<lambda>x. g x) has_log_derivative g') (at x within A)"
+  shows   "((\<lambda>x. f x / g x) has_log_derivative (f' - g')) (at x within A)"
+  using assms
+  by (cases "at x within A = bot")
+     (auto simp: has_log_derivative_def field_simps Lim_ident_at intro!: derivative_eq_intros)
+
+lemma has_log_derivative_power [derivative_intros]:
+  assumes "((\<lambda>x. f x) has_log_derivative f') (at x within A)"
+  shows   "((\<lambda>x. f x ^ n) has_log_derivative (of_nat n * f')) (at x within A)"
+  using assms by (induction n) (auto intro!: derivative_eq_intros simp: algebra_simps)
+
+lemma has_log_derivative_power_int [derivative_intros]:
+  assumes [derivative_intros]: "((\<lambda>x. f x) has_log_derivative f') (at x within A)"
+  shows   "((\<lambda>x. f x powi n) has_log_derivative (of_int n * f')) (at x within A)"
+  by (cases "n \<ge> 0") (auto simp: power_int_def intro!: derivative_eq_intros)
+
+lemma has_log_derivative_prod [derivative_intros]:
+  assumes "\<And>i. i \<in> I \<Longrightarrow> (f i has_log_derivative f' i) (at x within A)"
+  shows "((\<lambda>x. \<Prod>i\<in>I. f i x) has_log_derivative (\<Sum>i\<in>I. f' i)) (at x within A)"
+  using assms by (induction I rule: infinite_finite_induct) (auto intro!: derivative_eq_intros)
+
+lemma has_log_derivative_prod_list [derivative_intros]:
+  assumes "\<And>i. i \<in> set is \<Longrightarrow> (f i has_log_derivative f' i) (at x within A)"
+  shows "((\<lambda>x. \<Prod>i\<leftarrow>is. f i x) has_log_derivative (\<Sum>i\<leftarrow>is. f' i)) (at x within A)"
+  using assms by (induction "is") (auto intro!: derivative_eq_intros)
 
 end

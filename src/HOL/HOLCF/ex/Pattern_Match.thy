@@ -382,7 +382,9 @@ val beta_rules =
   @{thms cont2cont_fst cont2cont_snd cont2cont_Pair};
 
 val beta_ss =
-  simpset_of (put_simpset HOL_basic_ss \<^context> addsimps (@{thms simp_thms} @ beta_rules));
+  HOL_basic_ss
+  |> Simplifier.simpset_map \<^context>
+    (Simplifier.add_simps (@{thms simp_thms} @ beta_rules));
 
 fun define_consts
     (specs : (binding * term * mixfix) list)
@@ -554,7 +556,7 @@ fun add_pattern_combinators
           val defs = @{thm branch_def} :: pat_defs;
           val goal = mk_trp (mk_strict fun1);
           val rules = @{thms match_bind_simps} @ case_rews;
-          fun tacs ctxt = [simp_tac (put_simpset beta_ss ctxt addsimps rules) 1];
+          fun tacs ctxt = [simp_tac (ctxt |> put_simpset beta_ss |> Simplifier.add_simps rules) 1];
         in prove thy defs goal (tacs o #context) end;
       fun pat_apps (i, (pat, (con, args))) =
         let
@@ -569,7 +571,7 @@ fun add_pattern_combinators
               val goal = Logic.list_implies (assms, concl);
               val defs = @{thm branch_def} :: pat_defs;
               val rules = @{thms match_bind_simps} @ case_rews;
-              fun tacs ctxt = [asm_simp_tac (put_simpset beta_ss ctxt addsimps rules) 1];
+              fun tacs ctxt = [asm_simp_tac (ctxt |> put_simpset beta_ss |> Simplifier.add_simps rules) 1];
             in prove thy defs goal (tacs o #context) end;
         in map_index pat_app spec end;
     in

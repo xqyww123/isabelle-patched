@@ -7,6 +7,7 @@ text area.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -22,7 +23,6 @@ import scala.util.matching.Regex
 import org.gjt.sp.jedit.{jEdit, View, Registers, JEditBeanShellAction}
 import org.gjt.sp.jedit.buffer.JEditBuffer
 import org.gjt.sp.jedit.input.{DefaultInputHandlerProvider, TextAreaInputHandler}
-import org.gjt.sp.jedit.textarea.JEditEmbeddedTextArea
 import org.gjt.sp.jedit.search.HyperSearchResults
 import org.gjt.sp.jedit.syntax.SyntaxStyle
 import org.gjt.sp.jedit.gui.KeyEventTranslator
@@ -42,7 +42,7 @@ object Pretty_Text_Area {
   ) {
     lazy val line_text: String =
       Library.trim_line(JEdit_Lib.get_text(buffer, line_range).getOrElse(""))
-        .replace('\t',' ')
+        .replacing("\t" -> " ")
 
     lazy val gui_text: String = Library.string_builder(line_range.length * 2) { s =>
       val style = GUI.Style_HTML
@@ -60,15 +60,15 @@ object Pretty_Text_Area {
       var last = plain_start
       for (range <- JEdit_Lib.search_text(buffer, search_range, regex)) {
         val next = range.start - line_start
-        if (last < next) s ++= style.make_text(line_text.substring(last, next))
+        if (last < next) s ++= style.make_text(line_text.slice(last, next))
         s ++= "<span style=\""
         s ++= highlight_style
         s ++= "\">"
-        s ++= style.make_text(line_text.substring(next, next + range.length))
+        s ++= style.make_text(line_text.slice(next, next + range.length))
         s ++= "</span>"
         last = range.stop - line_start
       }
-      if (last < plain_stop) s ++= style.make_text(line_text.substring(last))
+      if (last < plain_stop) s ++= style.make_text(line_text.drop(last))
       s ++= "</html>"
     }
     override def toString: String = gui_text
@@ -95,7 +95,7 @@ object Pretty_Text_Area {
           List.from(
             for {
               line <- (start_line until buffer.getLineCount).iterator
-              line_range = JEdit_Lib.line_range(buffer, line)
+              line_range = JEdit_Lib.trim_line_range(buffer, line)
               if JEdit_Lib.can_search_text(buffer, line_range, regex)
             } yield Search_Result(buffer, highlight_style, regex, line, line_range))
         (results1.length, copy(results = results1 ::: results2))
@@ -110,8 +110,10 @@ object Pretty_Text_Area {
 class Pretty_Text_Area(
   view: View,
   close_action: () => Unit = () => (),
-  propagate_keys: Boolean = false
-) extends JEditEmbeddedTextArea {
+  propagate_keys: Boolean = false,
+  caret_visible: Boolean = false,
+  unicode_symbols: Boolean = Isabelle_Encoding.is_active()
+) extends JEdit_Accessible.EmbeddedTextArea(view) {
   pretty_text_area =>
 
   GUI_Thread.require {}
@@ -130,9 +132,15 @@ class Pretty_Text_Area(
       (future, Some(future))
     })
 
+  val editor_context: JEdit_Editor.Static_Context =
+    JEdit_Editor.Context(view, pretty_text_area)
+
   private val rich_text_area =
-    new Rich_Text_Area(view, pretty_text_area, () => current_rendering, close_action,
-      get_search_pattern _, () => (), caret_visible = false, enable_hovering = true)
+    new Rich_Text_Area(editor_context, () => current_rendering, close_action = close_action,
+      get_search_pattern = get_search_pattern, caret_visible = caret_visible,
+      enable_hovering = true)
+
+  Isabelle_Encoding.set_active(getBuffer, unicode_symbols)
 
   private var current_search_results =
     Pretty_Text_Area.Search_Results(getBuffer, Pretty_Text_Area.make_highlight_style())
@@ -184,7 +192,8 @@ class Pretty_Text_Area(
         {
           val (rich_texts, rendering) =
             try {
-              val rich_texts = Rich_Text.format(output, margin, metric, cache = PIDE.session.cache)
+              val rich_texts =
+                Rich_Text.format(output, margin, metric, unicode_symbols, cache = PIDE.session.cache)
               val rendering =
                 JEdit_Rendering.make(snapshot, rich_texts = rich_texts, results = results)
               (rich_texts, rendering)
@@ -274,7 +283,7 @@ class Pretty_Text_Area(
   private val search_field: Component =
     Component.wrap(new Completion_Popup.History_Text_Field("isabelle-search") {
       private val input_delay =
-        Delay.last(PIDE.session.input_delay, gui = true) { search_action(this) }
+        GUI.Delay.last(PIDE.session.input_delay) { search_action(this) }
       getDocument.addDocumentListener(new DocumentListener {
         def changedUpdate(e: DocumentEvent): Unit = input_delay.invoke()
         def insertUpdate(e: DocumentEvent): Unit = input_delay.invoke()
@@ -341,30 +350,49 @@ class Pretty_Text_Area(
 
   addKeyListener(JEdit_Lib.key_listener(
     key_pressed = { (evt: KeyEvent) =>
-      val strict_control =
-        JEdit_Lib.command_modifier(evt) && !JEdit_Lib.shift_modifier(evt)
-
       evt.getKeyCode match {
         case KeyEvent.VK_C | KeyEvent.VK_INSERT
-        if strict_control && pretty_text_area.getSelectionCount != 0 =>
+        if GUI.command_modifier(evt, only = true) && pretty_text_area.getSelectionCount != 0 =>
           Registers.copy(pretty_text_area, '$')
           evt.consume()
 
         case KeyEvent.VK_A
-        if strict_control =>
+        if GUI.command_modifier(evt, only = true) =>
           pretty_text_area.selectAll()
           evt.consume()
 
-        case KeyEvent.VK_ESCAPE =>
+        case KeyEvent.VK_ESCAPE
+        if GUI.no_modifier(evt) =>
           if (Isabelle.dismissed_popups(view)) evt.consume()
           else if (getSelectionCount != 0) { selectNone(); evt.consume() }
+
+        case KeyEvent.VK_LEFT if !propagate_keys =>
+          pretty_text_area.goToPrevCharacter(GUI.shift_modifier(evt, only = true))
+          evt.consume()
+        case KeyEvent.VK_RIGHT if !propagate_keys =>
+          pretty_text_area.goToNextCharacter(GUI.shift_modifier(evt, only = true))
+          evt.consume()
+        case KeyEvent.VK_UP if !propagate_keys =>
+          pretty_text_area.goToPrevLine(GUI.shift_modifier(evt, only = true))
+          evt.consume()
+        case KeyEvent.VK_DOWN if !propagate_keys =>
+          pretty_text_area.goToNextLine(GUI.shift_modifier(evt, only = true))
+          evt.consume()
+        case KeyEvent.VK_HOME if !propagate_keys =>
+          pretty_text_area.goToStartOfLine(GUI.shift_modifier(evt, only = true))
+          evt.consume()
+        case KeyEvent.VK_END if !propagate_keys =>
+          pretty_text_area.goToEndOfLine(GUI.shift_modifier(evt, only = true))
+          evt.consume()
 
         case _ =>
       }
       if (propagate_keys) JEdit_Lib.propagate_key(view, evt)
+      else evt.consume()
     },
     key_typed = { (evt: KeyEvent) =>
       if (propagate_keys) JEdit_Lib.propagate_key(view, evt)
+      else evt.consume()
     })
   )
 

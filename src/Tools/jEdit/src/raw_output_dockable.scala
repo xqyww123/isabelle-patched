@@ -6,6 +6,7 @@ Dockable window for raw process output (stdout).
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -22,7 +23,7 @@ class Raw_Output_Dockable(view: View, position: String) extends Dockable(view, p
   /* main */
 
   private val main =
-    Session.Consumer[Prover.Output](getClass.getName) {
+    Session.Consumer[Prover.Output](this.class_name) {
       case output: Prover.Output =>
         GUI_Thread.later {
           text_area.append(XML.content(output.message))

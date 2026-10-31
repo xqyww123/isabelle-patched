@@ -8,6 +8,8 @@ package isabelle
 
 import isabelle.find_facts.Find_Facts
 
+import java.nio.file.Files
+
 import scala.collection.mutable
 
 
@@ -73,18 +75,22 @@ directory individually.
 """)
     }
 
-    def bundle_info(platform: Platform.Family): Bundle_Info =
+    def bundle_info(platform: Platform_Family): Bundle_Info =
       platform match {
-        case Platform.Family.linux_arm =>
+        case Platform_Family.linux_arm =>
           Bundle_Info(platform, "Linux (ARM)", dist_name + "_linux_arm.tar.gz")
-        case Platform.Family.linux => Bundle_Info(platform, "Linux", dist_name + "_linux.tar.gz")
-        case Platform.Family.macos => Bundle_Info(platform, "macOS", dist_name + "_macos.tar.gz")
-        case Platform.Family.windows => Bundle_Info(platform, "Windows", dist_name + ".exe")
+        case Platform_Family.linux =>
+          Bundle_Info(platform, "Linux", dist_name + "_linux.tar.gz")
+        case Platform_Family.macos =>
+          Bundle_Info(platform, "macOS (Intel)", dist_name + "_macos.tar.gz")
+        case Platform_Family.macos_arm =>
+          Bundle_Info(platform, "macOS (ARM)", dist_name + "_macos_arm.tar.gz")
+        case Platform_Family.windows => Bundle_Info(platform, "Windows", dist_name + ".exe")
       }
   }
 
   sealed case class Bundle_Info(
-    platform: Platform.Family,
+    platform: Platform_Family,
     platform_description: String,
     name: String
   ) {
@@ -99,6 +105,7 @@ directory individually.
   val ISABELLE_ID: Path = Path.explode("etc/ISABELLE_ID")
   val ISABELLE_TAGS: Path = Path.explode("etc/ISABELLE_TAGS")
   val ISABELLE_IDENTIFIER: Path = Path.explode("etc/ISABELLE_IDENTIFIER")
+  val ISABELLE_APP: Path = Path.explode("lib/scripts/Isabelle_app")
 
   object Release_Archive {
     def make(bytes: Bytes, rename: String = ""): Release_Archive = {
@@ -152,7 +159,7 @@ directory individually.
 
   /* bundled components */
 
-  class Bundled(platform: Option[Platform.Family] = None) {
+  class Bundled(platform: Option[Platform_Family] = None) {
     def detect(s: String): Boolean =
       s.startsWith("#bundled") && !s.startsWith("#bundled ")
 
@@ -165,7 +172,7 @@ directory individually.
     def unapply(s: String): Option[String] =
       s match {
         case Pattern1(name) => Some(name)
-        case Pattern2(Platform.Family(plat), name) if platform == Some(plat) => Some(name)
+        case Pattern2(Platform_Family(plat), name) if platform == Some(plat) => Some(name)
         case _ => None
       }
   }
@@ -173,7 +180,7 @@ directory individually.
   def record_bundled_components(dir: Path): Unit = {
     val catalogs =
       List("main", "bundled").map((_, new Bundled())) :::
-      Platform.Family.list.flatMap(platform =>
+      Platform_Family.list.flatMap(platform =>
         List(platform.toString, "bundled-" + platform.toString).
           map((_, new Bundled(platform = Some(platform)))))
 
@@ -188,16 +195,20 @@ directory individually.
         } yield bundled(line)).toList))
   }
 
-  def get_bundled_components(dir: Path, platform: Platform.Family): (List[String], String) = {
+  def get_bundled_components(dir: Path, platform: Platform_Family): (List[String], String, String) = {
     val Bundled = new Bundled(platform = Some(platform))
     val components =
       for { case Bundled(name) <- Components.Directory(dir).read_components() } yield name
     val jdk_component =
-      components.find(_.startsWith("jdk")) getOrElse error("Missing jdk component")
-    (components, jdk_component)
+      components.find(_.startsWith("jdk"))
+        .getOrElse(error("Missing jdk component"))
+    val setup_component =
+      components.find(_.startsWith("isabelle_setup"))
+        .getOrElse(error("Missing isabelle_setup component"))
+    (components, jdk_component, setup_component)
   }
 
-  def activate_components(dir: Path, platform: Platform.Family, more_names: List[String]): Unit = {
+  def activate_components(dir: Path, platform: Platform_Family, more_names: List[String]): Unit = {
     def contrib_name(name: String): String =
       Components.contrib(name = name).implode
 
@@ -220,7 +231,7 @@ directory individually.
 
   private def build_heaps(
     options: Options,
-    platform: Platform.Family,
+    platform: Platform_Family,
     build_sessions: List[String],
     local_dir: Path,
     progress: Progress = new Progress,
@@ -232,36 +243,27 @@ directory individually.
 
     val ssh =
       if (server.nonEmpty) SSH.open_session(options, server)
-      else if (Platform.family == platform) SSH.Local
+      else if (Platform.family == platform || Platform.is_macos && platform == Platform_Family.macos) {
+        SSH.Local
+      }
       else error("Undefined option " + server_option + ": cannot build heaps")
 
     try {
-      Isabelle_System.with_tmp_file("tmp", ext = "tar") { local_tmp_tar =>
-        execute_tar(local_dir, "-cf " + File.bash_path(local_tmp_tar) + " .")
-        ssh.with_tmp_dir { remote_dir =>
-          val remote_tmp_tar = remote_dir + Path.basic("tmp.tar")
-          ssh.write_file(remote_tmp_tar, local_tmp_tar)
+      ssh.with_tmp_dir { remote_dir =>
+        ssh.write_directory(remote_dir, local_dir, direct = true)
 
-          val build_command =
-            "bin/isabelle build -o parallel_proofs=0 -o system_heaps -b -- " + Bash.strings(build_sessions)
-          def system_apple(b: Boolean): String =
-            """{ echo "ML_system_apple = """ + b + """" > "$(bin/isabelle getenv -b ISABELLE_HOME_USER)/etc/preferences"; }"""
+        ssh.bash(
+          "bin/isabelle build -o parallel_proofs=0 -o system_heaps -b -- " +
+            Bash.strings(build_sessions),
+          cwd = remote_dir, settings = false).check
 
-          val build_script =
-            List(
-              "cd " + File.bash_path(remote_dir),
-              "tar -xf tmp.tar",
-              """mkdir -p "$(bin/isabelle getenv -b ISABELLE_HOME_USER)/etc" """,
-              system_apple(false),
-              build_command,
-              system_apple(true),
-              build_command,
-              "tar -cf tmp.tar heaps")
-          ssh.execute(build_script.mkString(" && "), settings = false).check
-          ssh.read_file(remote_tmp_tar, local_tmp_tar)
-        }
-        execute_tar(local_dir, "-xvf " + File.bash_path(local_tmp_tar))
-          .out_lines.sorted.foreach(progress.echo(_))
+        val local_heaps = local_dir + Path.basic("heaps")
+        val remote_heaps = remote_dir + Path.basic("heaps")
+        ssh.read_directory(remote_heaps, local_heaps, direct = true)
+
+        File.find_files(local_heaps, relative = true)
+          .map(path => path.implode + " " + File.space(local_heaps + path).print)
+          .sorted.foreach(progress.echo(_))
       }
     }
     finally { ssh.close() }
@@ -270,18 +272,26 @@ directory individually.
 
   /* Isabelle application */
 
-  def make_isabelle_options(path: Path, options: List[String], line_ending: String = "\n"): Unit = {
+  val isabelle_options_path: Path = Path.basic("Isabelle.options")
+
+  def read_isabelle_options(platform: Platform_Family, dir: Path, name: String): List[String] =
+    Library.trim_split_lines(File.read(dir + isabelle_options_path))
+      .filterNot(line => line.startsWith("#") || Library.trim_string(line).isEmpty)
+
+  def make_isabelle_options(
+    platform: Platform_Family, dir: Path, name: String, options: List[String]
+  ): Unit = {
+    val path = dir + isabelle_options_path
     val title = "# Java runtime options"
-    File.write(path, (title :: options).map(_ + line_ending).mkString)
+    File.write(path, (title :: options).map(_ + platform.line_ending).mkString)
   }
 
   def make_isabelle_app(
-    platform: Platform.Family,
+    platform: Platform_Family,
     isabelle_target: Path,
     isabelle_name: String,
     jdk_component: String,
-    classpath: List[Path],
-    dock_icon: Boolean = false
+    classpath: List[Path]
   ): Unit = {
     val script_classpath =
       "-classpath " + quote(classpath.map(p => "$ISABELLE_HOME/" + p.implode).mkString(":"))
@@ -318,94 +328,38 @@ exec "$ISABELLE_JDK_HOME/bin/java" \
   "-Disabelle.root=$ISABELLE_HOME" "${JAVA_OPTIONS[@]}" \
   """ + script_classpath + """ \
   "-splash:$ISABELLE_HOME/lib/logo/isabelle.gif" \
-""" + (if (dock_icon) """"-Xdock:icon=$ISABELLE_HOME/lib/logo/isabelle_transparent-128.png" \
-""" else "") + """  isabelle.jedit.JEdit_Main "$@"
+  isabelle.jedit.JEdit_Main "$@"
 """
-    val script_path = isabelle_target + Path.explode("lib/scripts/Isabelle_app")
+    val script_path = isabelle_target + ISABELLE_APP
     File.write(script_path, script)
     File.set_executable(script_path)
 
     val component_dir = isabelle_target + Path.explode("contrib/Isabelle_app")
     Isabelle_System.move_file(
-      component_dir + Path.explode(Platform.Family.standard(platform)) + Path.explode("Isabelle"),
+      component_dir + Path.explode(platform.native) + Path.explode("Isabelle"),
       isabelle_target + Path.explode(isabelle_name))
     Isabelle_System.rm_tree(component_dir)
   }
 
 
-  def make_isabelle_plist(path: Path, isabelle_name: String, isabelle_rev: String): Unit = {
-    File.write(path, """<?xml version="1.0" ?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-<key>CFBundleDevelopmentRegion</key>
-<string>English</string>
-<key>CFBundleIconFile</key>
-<string>isabelle.icns</string>
-<key>CFBundleIdentifier</key>
-<string>de.tum.in.isabelle</string>
-<key>CFBundleDisplayName</key>
-<string>""" + isabelle_name + """</string>
-<key>CFBundleInfoDictionaryVersion</key>
-<string>6.0</string>
-<key>CFBundleName</key>
-<string>""" + isabelle_name + """</string>
-<key>CFBundlePackageType</key>
-<string>APPL</string>
-<key>CFBundleShortVersionString</key>
-<string>""" + isabelle_name + """</string>
-<key>CFBundleSignature</key>
-<string>????</string>
-<key>CFBundleVersion</key>
-<string>""" + isabelle_rev + """</string>
-<key>NSHumanReadableCopyright</key>
-<string></string>
-<key>LSMinimumSystemVersion</key>
-<string>10.11</string>
-<key>LSApplicationCategoryType</key>
-<string>public.app-category.developer-tools</string>
-<key>NSHighResolutionCapable</key>
-<string>true</string>
-<key>NSSupportsAutomaticGraphicsSwitching</key>
-<string>true</string>
-<key>CFBundleDocumentTypes</key>
-<array>
-<dict>
-<key>CFBundleTypeExtensions</key>
-<array>
-<string>thy</string>
-</array>
-<key>CFBundleTypeIconFile</key>
-<string>theory.icns</string>
-<key>CFBundleTypeName</key>
-<string>Isabelle theory file</string>
-<key>CFBundleTypeRole</key>
-<string>Editor</string>
-<key>LSTypeIsPackage</key>
-<false/>
-</dict>
-</array>
-</dict>
-</plist>
-""")
-  }
-
-
   /* NEWS */
 
+  def write_news(isabelle_home: Path, target_dir: Path): Unit =
+    HTML.write_document(Isabelle_System.make_directory(target_dir),
+      "NEWS.html",
+      List(HTML.title("NEWS")),
+      List(
+        HTML.chapter("NEWS"),
+        HTML.source(Symbol.decode(File.read(isabelle_home + Path.explode("NEWS"))))))
+
   private def make_news(other_isabelle: Other_Isabelle): Unit = {
-    val news_file = other_isabelle.isabelle_home + Path.explode("NEWS")
     val doc_dir = other_isabelle.isabelle_home + Path.explode("doc")
     val fonts_dir = Isabelle_System.make_directory(doc_dir + Path.explode("fonts"))
 
     Isabelle_Fonts.make_entries(getenv = other_isabelle.getenv, hidden = true).
       foreach(entry => Isabelle_System.copy_file(entry.path, fonts_dir))
 
-    HTML.write_document(doc_dir, "NEWS.html",
-      List(HTML.title("NEWS")),
-      List(
-        HTML.chapter("NEWS"),
-        HTML.source(Symbol.decode(File.read(news_file)))))
+    write_news(other_isabelle.isabelle_home, doc_dir)
   }
 
 
@@ -554,13 +508,13 @@ exec "$ISABELLE_JDK_HOME/bin/java" \
     }
   }
 
-  def default_platform_families: List[Platform.Family] = Platform.Family.list
+  def default_platform_families: List[Platform_Family] = Platform_Family.list
 
   def build_release(
     options: Options,
     context: Release_Context,
     afp_rev: String = "",
-    platform_families: List[Platform.Family] = default_platform_families,
+    platform_families: List[Platform_Family] = default_platform_families,
     more_components: List[Path] = Nil,
     more_settings: List[String] = Nil,
     website: Option[Path] = None,
@@ -614,8 +568,9 @@ exec "$ISABELLE_JDK_HOME/bin/java" \
 
         val contrib_dir = Components.contrib(isabelle_target)
 
-        val (bundled_components, jdk_component) =
+        val (bundled_components, jdk_component, setup_component) =
           get_bundled_components(isabelle_target, platform)
+        val jdk_home = Path.explode("contrib") + Path.explode(jdk_component)
 
         for (name <- bundled_components) {
           Components.resolve(Components.default_components_base, name,
@@ -632,29 +587,32 @@ exec "$ISABELLE_JDK_HOME/bin/java" \
 
         // Java parameters
 
-        val java_options: List[String] =
-          (for {
-            variable <-
-              List(
-                "ISABELLE_JAVA_SYSTEM_OPTIONS",
-                "JEDIT_JAVA_SYSTEM_OPTIONS",
-                "JEDIT_JAVA_OPTIONS")
-            opt <- Word.explode(other_isabelle.getenv(variable))
-          }
-          yield {
-            val s = "-Dapple.awt.application.name="
-            if (opt.startsWith(s)) s + isabelle_name else opt
-          }) ::: List("-Disabelle.jedit_server=" + isabelle_name)
+        val java_options: List[String] = {
+          val opts1 =
+            if (platform.any_windows) List("-Dcygwin.root=$ROOTDIR/contrib/cygwin") else Nil
+          val opts2 =
+            for {
+              variable <-
+                List(
+                  "ISABELLE_JAVA_SYSTEM_OPTIONS",
+                  "JEDIT_JAVA_SYSTEM_OPTIONS",
+                  "JEDIT_JAVA_OPTIONS")
+              opt <- Word.explode(other_isabelle.getenv(variable))
+            }
+            yield {
+              val s = "-Dapple.awt.application.name="
+              if (opt.startsWith(s)) s + isabelle_name else opt
+            }
+          val opts3 = List("-Disabelle.jedit_server=" + isabelle_name)
+
+          opts1 ::: opts2 ::: opts3
+        }
 
         val classpath: List[Path] = {
           val base = isabelle_target.absolute
           val classpath1 = Path.split(other_isabelle.getenv("ISABELLE_CLASSPATH"))
           val classpath2 = Path.split(other_isabelle.getenv("ISABELLE_SETUP_CLASSPATH"))
-          (classpath1 ::: classpath2).map { path =>
-            val abs_path = path.absolute
-            File.relative_path(base, abs_path)
-              .getOrElse(error("Bad classpath element: " + abs_path))
-          }
+          (classpath1 ::: classpath2).map(File.the_relative_path(base, _))
         }
 
         val jedit_options = Path.explode("src/Tools/jEdit/etc/options")
@@ -663,6 +621,13 @@ exec "$ISABELLE_JDK_HOME/bin/java" \
 
 
         // build heaps
+
+        if (platform == Platform_Family.macos) {
+          File.change_lines(isabelle_target + Path.explode("etc/options"))(_.map { line =>
+            if (line.containsSlice("ML_system_apple")) line.replacing("true" -> "false")
+            else line
+          })
+        }
 
         if (build_sessions.nonEmpty) {
           build_heaps(options, platform, build_sessions, isabelle_target, progress = progress)
@@ -673,173 +638,170 @@ exec "$ISABELLE_JDK_HOME/bin/java" \
 
         Components.clean_base(contrib_dir, platforms = List(platform))
 
-        platform match {
-          case Platform.Family.linux_arm | Platform.Family.linux =>
-            make_isabelle_options(
-              isabelle_target + Path.explode("Isabelle.options"), java_options)
+        if (platform.any_linux) {
+          make_isabelle_options(platform, isabelle_target, isabelle_name, java_options)
 
-            make_isabelle_app(platform, isabelle_target, isabelle_name, jdk_component, classpath)
+          make_isabelle_app(platform, isabelle_target, isabelle_name, jdk_component, classpath)
 
-            progress.echo("Packaging " + bundle_info.name + " ...")
-            execute_tar(tmp_dir,
-              "-czf " + File.bash_path(context.dist_dir + bundle_info.path) + " " +
+          progress.echo("Packaging " + bundle_info.name + " ...")
+          execute_tar(tmp_dir,
+            "-czf " + File.bash_path(context.dist_dir + bundle_info.path) + " " +
+            Bash.string(isabelle_name))
+        }
+
+        if (platform.any_macos) {
+          File.change(isabelle_target + jedit_props) {
+            _.replacing(
+              "lookAndFeel=.*".r -> "lookAndFeel=com.formdev.flatlaf.themes.FlatMacLightLaf",
+              "delete-line.shortcut=.*".r -> "delete-line.shortcut=C+d",
+              "delete.shortcut2=.*".r -> "delete.shortcut2=A+d")
+          }
+
+          // macOS application bundle
+
+          val isabelle_app = Path.explode(isabelle_name).app
+
+          val app_root = tmp_dir + isabelle_app
+          val app_contents = app_root + Path.explode("Contents")
+          val app_resources = app_contents + Path.explode("Resources")
+
+          Isabelle_System.new_directory(app_contents)
+          Isabelle_System.move_file(tmp_dir + Path.explode(isabelle_name), app_resources)
+
+          for (name <- File.read_dir(app_resources)) {
+            val path = Path.basic(name)
+            Isabelle_System.symlink(Path.explode("Contents/Resources") + path, app_root)
+          }
+
+          Java_Launcher.setup(platform,
+            app_root = app_root,
+            jdk_home = jdk_home,
+            classpath = classpath.map(_.implode),
+            java_options =
+              java_options :::
+              List(
+                "-Xdock:icon=$ROOTDIR/Contents/Resources/lib/logo/isabelle_transparent-128.png",
+                "-Disabelle.app=true"))
+
+
+          // application archive
+
+          progress.echo("Packaging " + bundle_info.name + " ...")
+
+          execute_tar(tmp_dir,
+            "-czf " + File.bash_path(context.dist_dir + bundle_info.path) + " " +
+            File.bash_path(isabelle_app))
+        }
+
+        if (platform.any_windows) {
+          File.change(isabelle_target + jedit_props) {
+            _.replacing("foldPainter=.*".r -> "foldPainter=Square")
+          }
+
+
+          // application launcher
+
+          Isabelle_System.move_file(isabelle_target + Path.explode("contrib/windows_app"), tmp_dir)
+
+          Isabelle_System.copy_file(tmp_dir + Component_Windows_App.isabelle_exe(),
+            isabelle_target + Path.basic(isabelle_name).exe)
+
+          Java_Launcher.setup(platform,
+            app_root = isabelle_target,
+            jdk_home = jdk_home,
+            classpath = classpath.map(_.implode),
+            java_options = java_options)
+
+
+          // Cygwin setup
+
+          val cygwin_template = Path.explode("~~/Admin/Windows/Cygwin")
+
+          val cygwin_terminal = Path.explode("Cygwin-Terminal.bat")
+          Isabelle_System.copy_file(cygwin_template + cygwin_terminal, isabelle_target)
+          File.change(isabelle_target + cygwin_terminal, strict = true) {
+            _.replacing("{JDK_COMPONENT}" -> jdk_component, "{SETUP_COMPONENT}" -> setup_component)
+          }
+
+          val cygwin_mirror =
+            File.read(isabelle_target + Path.explode("contrib/cygwin/isabelle/cygwin_mirror"))
+
+          val cygwin_bat = Path.explode("Cygwin-Setup.bat")
+          File.write(isabelle_target + cygwin_bat,
+            File.read(cygwin_template + cygwin_bat).replacing("{MIRROR}" -> cygwin_mirror))
+          File.set_executable(isabelle_target + cygwin_bat)
+
+          for (name <- List("isabelle/postinstall", "isabelle/rebaseall")) {
+            val path = Path.explode(name)
+            Isabelle_System.copy_file(cygwin_template + path,
+              isabelle_target + Path.explode("contrib/cygwin") + path)
+          }
+
+          val permissions =
+            Isabelle_System.make_directory(
+              isabelle_target + Path.explode("contrib/cygwin/isabelle/permissions"))
+
+          def write_permissions(name: String, pred: Path => Boolean, dirs: Boolean = false): Unit = {
+            val entries =
+              File.find_files(isabelle_target,
+                pred = path => !Files.isSymbolicLink(path.java_path) && pred(path),
+                include_dirs = dirs, relative = true
+              ).map(_.implode).sorted
+            File.write_gzip(permissions + Path.basic(name).gz, entries.mkString("\u0000"))
+          }
+
+          def ext_permissive(path: Path): String = Url.get_ext(path.implode)
+
+          val non_executable =
+            Set("css", "ftl", "gz", "html", "js", "json", "md", "mp3", "png", "svg", "ts", "ttf",
+              "txt", "woff", "woff2")
+
+          def pred_755(path: Path): Boolean =
+            ext_permissive(path) match {
+              case "exe" | "dll" | "bat" => true
+              case ext => !non_executable(ext) && File.is_executable(path)
+            }
+
+          def pred_444(path: Path): Boolean =
+            ext_permissive(path) match {
+              case "scala" | "ML" | "thy" => true
+              case _ => false
+            }
+
+          write_permissions("directories", _.is_dir, dirs = true)
+          write_permissions("755", pred_755)
+          write_permissions("444", pred_444)
+          write_permissions("644", path => !pred_755(path) && !pred_444(path))
+
+          execute(isabelle_target,
+            """find . -type l -exec echo "{}" ";" -exec readlink "{}" ";" """ +
+            """> contrib/cygwin/isabelle/symlinks""")
+
+          execute(isabelle_target,
+            """find . -type d -not -perm """ +
+            (if (Platform.is_macos) "+" else "/") + """222 -exec chmod +w "{}" ";" """)
+
+          execute(isabelle_target, """find . -type l -exec rm "{}" ";" """)
+
+          File.write(isabelle_target + Path.explode("contrib/cygwin/isabelle/uninitialized"), "")
+
+
+          // executable archive (self-extracting 7z)
+
+          val sfx_path = tmp_dir + Component_Windows_App.sfx_path()
+
+          val archive_name = bundle_info.name
+          val archive_path = context.dist_dir + bundle_info.path
+
+          progress.echo("Packaging " + archive_name + " ...")
+          execute(tmp_dir,
+            File.bash_path(Component_Windows_App.seven_zip_exe()) +
+              " -sfx" + File.bash_path(sfx_path) +
+              " -y -bd a " + File.bash_path(archive_path) + " " +
               Bash.string(isabelle_name))
+          if (!archive_path.is_file) error("Failed to create archive: " + archive_path)
 
-
-          case Platform.Family.macos =>
-            File.change(isabelle_target + jedit_props) {
-              _.replaceAll("lookAndFeel=.*", "lookAndFeel=com.formdev.flatlaf.themes.FlatMacLightLaf")
-               .replaceAll("delete-line.shortcut=.*", "delete-line.shortcut=C+d")
-               .replaceAll("delete.shortcut2=.*", "delete.shortcut2=A+d")
-            }
-
-
-            // macOS application bundle
-
-            val app_contents = isabelle_target + Path.explode("Contents")
-
-            for (icon <- List("lib/logo/isabelle.icns", "lib/logo/theory.icns")) {
-              Isabelle_System.copy_file(isabelle_target + Path.explode(icon),
-                Isabelle_System.make_directory(app_contents + Path.explode("Resources")))
-            }
-
-            make_isabelle_plist(
-              app_contents + Path.explode("Info.plist"), isabelle_name, archive.id)
-
-            make_isabelle_app(platform, isabelle_target, isabelle_name, jdk_component,
-              classpath, dock_icon = true)
-
-            val isabelle_options = Path.explode("Isabelle.options")
-            make_isabelle_options(
-              isabelle_target + isabelle_options,
-              java_options ::: List("-Disabelle.app=true"))
-
-
-            // application archive
-
-            progress.echo("Packaging " + bundle_info.name + " ...")
-
-            val isabelle_app = Path.explode(isabelle_name + ".app")
-            Isabelle_System.move_file(tmp_dir + Path.explode(isabelle_name),
-              tmp_dir + isabelle_app)
-
-            execute_tar(tmp_dir,
-              "-czf " + File.bash_path(context.dist_dir + bundle_info.path) + " " +
-              File.bash_path(isabelle_app))
-
-
-          case Platform.Family.windows =>
-            File.change(isabelle_target + jedit_props) {
-              _.replaceAll("foldPainter=.*", "foldPainter=Square")
-            }
-
-
-            // application launcher
-
-            Isabelle_System.move_file(isabelle_target + Path.explode("contrib/windows_app"), tmp_dir)
-
-            val app_template = Path.explode("~~/Admin/Windows/launch4j")
-
-            make_isabelle_options(
-              isabelle_target + Path.explode(isabelle_name + ".l4j.ini"),
-              java_options, line_ending = "\r\n")
-
-            val isabelle_xml = Path.explode("isabelle.xml")
-            val isabelle_exe = bundle_info.path
-
-            File.write(tmp_dir + isabelle_xml,
-              File.read(app_template + isabelle_xml)
-                .replace("{ISABELLE_NAME}", isabelle_name)
-                .replace("{OUTFILE}", File.platform_path(isabelle_target + isabelle_exe))
-                .replace("{ICON}",
-                  File.platform_path(app_template + Path.explode("isabelle_transparent.ico")))
-                .replace("{SPLASH}",
-                  File.platform_path(app_template + Path.explode("isabelle.bmp")))
-                .replace("{CLASSPATH}",
-                  cat_lines(classpath.map(cp =>
-                    "    <cp>%EXEDIR%\\" + File.platform_path(cp).replace('/', '\\') + "</cp>")))
-                .replace("\\jdk\\", "\\" + jdk_component + "\\"))
-
-            val java_opts =
-              bash_java_opens(
-                "java.base/java.io",
-                "java.base/java.lang",
-                "java.base/java.lang.reflect",
-                "java.base/java.text",
-                "java.base/java.util",
-                "java.desktop/java.awt.font")
-            val launch4j_jar = Component_Windows_App.launch4j_jar()
-
-            execute(tmp_dir,
-              cat_lines(List(
-                "export LAUNCH4J=" + File.bash_platform_path(launch4j_jar),
-                "isabelle java " + java_opts + " -jar \"$LAUNCH4J\" isabelle.xml")))
-
-            Isabelle_System.copy_file(app_template + Path.explode("manifest.xml"),
-              isabelle_target + isabelle_exe.ext("manifest"))
-
-
-            // Cygwin setup
-
-            val cygwin_template = Path.explode("~~/Admin/Windows/Cygwin")
-
-            Isabelle_System.copy_file(cygwin_template + Path.explode("Cygwin-Terminal.bat"),
-              isabelle_target)
-
-            val cygwin_mirror =
-              File.read(isabelle_target + Path.explode("contrib/cygwin/isabelle/cygwin_mirror"))
-
-            val cygwin_bat = Path.explode("Cygwin-Setup.bat")
-            File.write(isabelle_target + cygwin_bat,
-              File.read(cygwin_template + cygwin_bat).replace("{MIRROR}", cygwin_mirror))
-            File.set_executable(isabelle_target + cygwin_bat)
-
-            for (name <- List("isabelle/postinstall", "isabelle/rebaseall")) {
-              val path = Path.explode(name)
-              Isabelle_System.copy_file(cygwin_template + path,
-                isabelle_target + Path.explode("contrib/cygwin") + path)
-            }
-
-            execute(isabelle_target,
-              """find . -type f -not -name "*.exe" -not -name "*.dll" """ +
-              (if (Platform.is_macos) "-perm +100" else "-executable") +
-              " -print0 > contrib/cygwin/isabelle/executables")
-
-            execute(isabelle_target,
-              """find . -type l -exec echo "{}" ";" -exec readlink "{}" ";" """ +
-              """> contrib/cygwin/isabelle/symlinks""")
-
-            execute(isabelle_target,
-              """find . -type d -not -perm """ +
-              (if (Platform.is_macos) "+" else "/") + """222 -exec chmod +w "{}" ";" """)
-
-            execute(isabelle_target, """find . -type l -exec rm "{}" ";" """)
-
-            File.write(isabelle_target + Path.explode("contrib/cygwin/isabelle/uninitialized"), "")
-
-
-            // executable archive (self-extracting 7z)
-
-            val archive_name = isabelle_name + ".7z"
-            val exe_archive = tmp_dir + Path.explode(archive_name)
-            exe_archive.file.delete
-
-            progress.echo("Packaging " + archive_name + " ...")
-            execute(tmp_dir,
-              File.bash_path(Component_Windows_App.seven_zip(exe = true)) +
-                " -myv=1602 -y -bd a " + File.bash_path(exe_archive) + " " +
-                Bash.string(isabelle_name))
-            if (!exe_archive.is_file) error("Failed to create archive: " + exe_archive)
-
-            val sfx_exe = tmp_dir + Component_Windows_App.sfx_path
-            val sfx_txt =
-              Library.trim_split_lines(
-                Component_Windows_App.sfx_txt.replace("{ISABELLE_NAME}", isabelle_name)
-              ).map(_ + "\r\n").mkString
-
-            Bytes.write(context.dist_dir + isabelle_exe,
-              Bytes.read(sfx_exe) + Bytes(sfx_txt) + Bytes.read(exe_archive))
-            File.set_executable(context.dist_dir + isabelle_exe)
+          File.set_executable(archive_path)
         }
 
         other_isabelle.cleanup()
@@ -947,7 +909,7 @@ Usage: Admin/build_release [OPTIONS]
         "j:" -> (arg => parallel_jobs = Value.Int.parse(arg)),
         "l" -> (_ => build_library = true),
         "o:" -> (arg => options = options + arg),
-        "p:" -> (arg => platform_families = space_explode(',', arg).map(Platform.Family.parse)),
+        "p:" -> (arg => platform_families = space_explode(',', arg).map(Platform_Family.parse)),
         "r:" -> (arg => rev = arg))
 
       val more_args = getopts(args)

@@ -21,7 +21,7 @@ object ML_Settings {
             Isabelle_Platform.make(env = env)
               .ISABELLE_PLATFORM(windows = true, apple = options.bool("ML_system_apple"))
           if (options.bool("ML_system_64")) platform_64
-          else platform_64.replace("64", "64_32")
+          else platform_64.replacing("64" -> "64_32")
         }
       }
       override def ml_options: String =
@@ -30,7 +30,7 @@ object ML_Settings {
     }
 
   def init(ml_platform: String = ""): ML_Settings =
-    apply(Options.init(specs =
+    apply(Options.init(update =
       if (ml_platform.isEmpty) Nil else List(Options.Spec("ML_platform", Some(ml_platform)))))
 }
 
@@ -53,6 +53,9 @@ abstract class ML_Settings {
 
   def polyml_exe: Path =
     ml_home + Path.basic("poly").exe_if(ml_platform_is_windows)
+
+  def polyml_uuid: Path =
+    ml_home + Path.basic("poly.uuid")
 
   override def toString: String = ml_identifier
 }

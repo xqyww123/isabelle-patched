@@ -2967,15 +2967,16 @@ lemma unat_sub_if_size:
      then unat x - unat y
      else unat x + 2 ^ size x - unat y)"
 proof -
-  { assume xy: "\<not> uint y \<le> uint x"
+  have "nat (uint x - uint y + 2 ^ LENGTH('a)) = nat (uint x) + 2 ^ LENGTH('a) - nat (uint y)"
+  proof -
     have "nat (uint x - uint y + 2 ^ LENGTH('a)) = nat (uint x + 2 ^ LENGTH('a) - uint y)"
       by simp
     also have "\<dots> = nat (uint x + 2 ^ LENGTH('a)) - nat (uint y)"
       by (simp add: nat_diff_distrib')
     also have "\<dots> = nat (uint x) + 2 ^ LENGTH('a) - nat (uint y)"
       by (simp add: nat_add_distrib nat_power_eq)
-    finally have "nat (uint x - uint y + 2 ^ LENGTH('a)) = nat (uint x) + 2 ^ LENGTH('a) - nat (uint y)" .
-  }
+    finally show ?thesis .
+  qed
   then show ?thesis
     by (metis nat_diff_distrib' uint_range_size uint_sub_if' un_ui_le unat_eq_nat_uint
         word_size)
@@ -3018,10 +3019,10 @@ lemmas uint_arith_simps =
 ML \<open>
 val unat_arith_simpset =
   @{context} (* TODO: completely explicitly determined simpset *)
-  |> fold Simplifier.add_simp @{thms unat_arith_simps}
+  |> Simplifier.add_simps @{thms unat_arith_simps}
   |> fold Splitter.add_split @{thms if_split_asm}
   |> fold Simplifier.add_cong @{thms power_False_cong}
-  |> simpset_of
+  |> Simplifier.simpset_of
 
 fun unat_arith_tacs ctxt =
   let
@@ -3053,10 +3054,10 @@ method_setup unat_arith =
 ML \<open>
 val uint_arith_simpset =
   @{context} (* TODO: completely explicitly determined simpset *)
-  |> fold Simplifier.add_simp @{thms uint_arith_simps}
+  |> Simplifier.add_simps @{thms uint_arith_simps}
   |> fold Splitter.add_split @{thms if_split_asm}
   |> fold Simplifier.add_cong @{thms power_False_cong}
-  |> simpset_of;
+  |> Simplifier.simpset_of;
   
 fun uint_arith_tacs ctxt =
   let
@@ -3391,6 +3392,21 @@ lemma word_arith_nat_div: "a div b = of_nat (unat a div unat b)"
   
 lemma word_arith_nat_mod: "a mod b = of_nat (unat a mod unat b)"
   by (metis of_int_of_nat_eq of_nat_mod of_nat_unat word_mod_def)
+
+text \<open>the standard theorems for addition, subtraction and multiplication just work for words\<close>
+lemma word_of_nat_div: 
+  assumes m: \<open>m < 2^ LENGTH('a::len)\<close> and n: \<open>n < 2^ LENGTH('a)\<close>
+  shows \<open>(of_nat (m div n)::'a word) = of_nat m div of_nat n\<close>
+proof (cases \<open>n=0\<close>)
+  case False
+  show ?thesis
+    using m
+  proof (induction m rule: less_induct)
+    case (less m)
+    then show ?case
+      by (simp add: n of_nat_inverse word_arith_nat_div)
+  qed
+qed auto
 
 lemmas word_arith_nat_defs =
   word_arith_nat_add word_arith_nat_mult
@@ -4614,7 +4630,6 @@ subsection \<open>Executable intervals\<close>
 instance word :: (len) \<open>{interval_top, interval_bot}\<close>
   by standard
     (simp_all add: less_eq_dec_self_iff_eq inc_less_eq_self_iff_eq less_inc_imp_less_eq dec_less_imp_less_eq)
-
 
 subsection \<open>Tool support\<close>
 

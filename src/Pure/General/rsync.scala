@@ -8,67 +8,82 @@ package isabelle
 
 
 object Rsync {
-  object Context {
-    def apply(
-      progress: Progress = new Progress,
-      ssh: SSH.System = SSH.Local,
-      chmod: String = "",
-      chown: String = "",
-      archive: Boolean = true,
-      stats: Boolean = true
-    ): Context = {
-      val directory = Components.provide(Component_Rsync.home, ssh = ssh, progress = progress)
-      new Context(directory, progress, chmod, chown, archive, stats)
-    }
-  }
+  def home: Path = Path.explode("$ISABELLE_RSYNC_HOME")
 
-  final class Context private(
-    directory: Components.Directory,
-    val progress: Progress,
-    chmod: String,
-    chown: String,
-    archive: Boolean,
-    stats: Boolean
-  ) {
-    override def toString: String = directory.toString
+  def program(base: Path = home, platform: Isabelle_Platform = Isabelle_Platform.local): Path =
+    base + Path.basic(platform.ISABELLE_PLATFORM(apple = true)) + Path.basic("rsync")
 
-    def ssh: SSH.System = directory.ssh
-
-    def command: String = {
-      val program = Component_Rsync.remote_program(directory)
-      val ssh_command = ssh.client_command
-      File.bash_path(Component_Rsync.local_program) + " --secluded-args" +
-        if_proper(ssh_command, " --rsh=" + Bash.string(ssh_command)) +
-        " --rsync-path=" + Bash.string(quote(File.standard_path(program))) +
-        if_proper(chmod, " --chmod=" + Bash.string(chmod)) +
-        if_proper(chown, " --chown=" + Bash.string(chown)) +
-        if_proper(archive, " --archive") +
-        if_proper(stats, " --stats")
-    }
-
-    def target(path: Path, direct: Boolean = false): String =
-      Url.dir_path(ssh.rsync_path(path), direct = direct)
-  }
-
-  def exec(
-    context: Context,
+  def command_line(
+    local_rsync: String = File.standard_path(program()),
+    ssh_command: String = "",
+    remote_rsync: String = "",
+    verbose: Boolean = false,
+    chmod: String = "",
+    chown: String = "",
+    archive: Boolean = true,
     thorough: Boolean = false,
     prune_empty_dirs: Boolean = false,
     dry_run: Boolean = false,
     clean: Boolean = false,
     filter: List[String] = Nil,
     args: List[String] = Nil
-  ): Process_Result = {
-    val progress = context.progress
-    val script =
-      context.command +
-        if_proper(progress.verbose, " --verbose") +
-        (if (thorough) " --ignore-times" else " --omit-dir-times") +
-        if_proper(prune_empty_dirs, " --prune-empty-dirs") +
-        if_proper(dry_run, " --dry-run") +
-        if_proper(clean, " --delete-excluded") +
-        filter.map(s => " --filter=" + Bash.string(s)).mkString +
-        if_proper(args, " " + Bash.strings(args))
-    progress.bash(script, echo = true)
+  ): String = {
+    Bash.string(local_rsync) + " --secluded-args" +
+      if_proper(ssh_command, " --rsh=" + Bash.string(ssh_command)) +
+      if_proper(remote_rsync, " --rsync-path=" + Bash.string(Bash.string(remote_rsync))) +
+      if_proper(chmod, " --chmod=" + Bash.string(chmod)) +
+      if_proper(chown, " --chown=" + Bash.string(chown)) +
+      if_proper(archive, " --archive") +
+      if_proper(verbose, " --verbose --stats") +
+      (if (thorough) " --ignore-times" else " --omit-dir-times") +
+      if_proper(prune_empty_dirs, " --prune-empty-dirs") +
+      if_proper(dry_run, " --dry-run") +
+      if_proper(clean, " --delete-excluded") +
+      filter.map(s => " --filter=" + Bash.string(s)).mkString +
+      if_proper(args, " " + Bash.strings(args))
+  }
+
+  object Context {
+    def apply(progress: Progress = new Progress, ssh: SSH.System = SSH.Local): Context = {
+      val directory = Components.provide(home, ssh = ssh, progress = progress)
+      new Context(directory.path, ssh, progress)
+    }
+  }
+
+  final class Context private(base: Path, val ssh: SSH.System, val progress: Progress) {
+    override def toString: String = base.toString + ssh.print
+
+    def target(path: Path, direct: Boolean = false): String =
+      Url.dir_path(ssh.rsync_path(path), direct = direct)
+
+    def remote_program: Path = program(base = base, platform = ssh.isabelle_platform)
+
+    def exec(
+      chmod: String = "",
+      chown: String = "",
+      archive: Boolean = true,
+      thorough: Boolean = false,
+      prune_empty_dirs: Boolean = false,
+      dry_run: Boolean = false,
+      clean: Boolean = false,
+      filter: List[String] = Nil,
+      args: List[String] = Nil
+    ): Process_Result = {
+      val script =
+        Rsync.command_line(
+          ssh_command = ssh.client_command,
+          remote_rsync = ssh.standard_path(remote_program),
+          verbose = progress.verbose,
+          chmod = chmod,
+          chown = chown,
+          archive = archive,
+          thorough = thorough,
+          prune_empty_dirs = prune_empty_dirs,
+          dry_run = dry_run,
+          clean = clean,
+          filter = filter,
+          args = args)
+      progress.bash(script, echo = true)
+    }
   }
 }

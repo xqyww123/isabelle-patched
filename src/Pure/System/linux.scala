@@ -43,6 +43,7 @@ object Linux {
     def is_ubuntu_20_04: Boolean = is_ubuntu && release == "20.04"
     def is_ubuntu_22_04: Boolean = is_ubuntu && release == "22.04"
     def is_ubuntu_24_04: Boolean = is_ubuntu && release == "24.04"
+    def is_ubuntu_26_04: Boolean = is_ubuntu && release == "26.04"
   }
 
 
@@ -64,8 +65,8 @@ object Linux {
 
   def package_installed(name: String): Boolean = {
     val result = Isabelle_System.bash("dpkg-query -s " + Bash.string(name))
-    val pattern = """^Status:.*installed.*$""".r.pattern
-    result.ok && result.out_lines.exists(line => pattern.matcher(line).matches)
+    val pattern = """^Status:.*installed.*$""".r.pattern.nn
+    result.ok && result.out_lines.exists(line => pattern.matcher(line).nn.matches)
   }
 
 

@@ -17,26 +17,25 @@ object Scala_Build {
   class Context private[Scala_Build](java_context: isabelle.setup.Build.Context) {
     override def toString: String = java_context.toString
 
-    def is_module(path: Path): Boolean = {
-      val module_name = java_context.module_name()
-      module_name.nonEmpty && File.eq(java_context.path(module_name).toFile, path.file)
-    }
-
-    def module_result: Option[Path] = {
-      java_context.module_result() match {
-        case "" => None
-        case module => Some(File.path(java_context.path(module).toFile))
+    def is_module(path: Path): Boolean =
+      proper_string(java_context.module_name()) match {
+        case Some(module_name) => File.eq(java_context.path(module_name).nn.java_file, path.file)
+        case None => false
       }
-    }
+
+    def module_result: Option[Path] =
+      proper_string(java_context.module_result())
+        .map(module => File.path(java_context.path(module).nn.java_file))
 
     def sources: List[Path] =
-      java_context.sources().asScala.toList.map(s => File.path(java_context.path(s).toFile))
+      java_context.sources().nn.asScala.toList.map(s =>
+        File.path(java_context.path(s.nn).nn.java_file))
 
     def requirements: List[Path] =
       (for {
-        s <- java_context.requirements().asScala.iterator
-        p <- java_context.requirement_paths(s).asScala.iterator
-      } yield (File.path(p.toFile))).toList
+        s <- java_context.requirements().nn.asScala.iterator
+        p <- java_context.requirement_paths(s).nn.asScala.iterator
+      } yield (File.path(p.java_file))).toList
 
     def build(
       classpath: List[Path] = Path.split(Isabelle_System.getenv("ISABELLE_CLASSPATH")),
@@ -45,15 +44,15 @@ object Scala_Build {
       val java_classpath = new java.util.LinkedList[JPath]
       classpath.foreach(path => java_classpath.add(path.java_path))
 
-      val output0 = new ByteArrayOutputStream
-      val output = new PrintStream(output0)
+      val out_stream = new ByteArrayOutputStream(1024)
+      val out = new PrintStream(out_stream)
       def get_output(): String = {
-        output.flush()
-        Library.trim_line(output0.toString(UTF8.charset))
+        out.flush()
+        Library.trim_line(out_stream.toString(UTF8.charset))
       }
 
       try {
-        isabelle.setup.Build.build(java_classpath, output, java_context, fresh)
+        isabelle.setup.Build.build(java_classpath, out, java_context, fresh)
         get_output()
       }
       catch { case ERROR(msg) => cat_error(get_output(), msg) }
@@ -67,8 +66,8 @@ object Scala_Build {
     module: Option[Path] = None
   ): Context = {
     val props_name =
-      if (component) isabelle.setup.Build.COMPONENT_BUILD_PROPS
-      else isabelle.setup.Build.BUILD_PROPS
+      if (component) isabelle.setup.Build.COMPONENT_BUILD_PROPS.nn
+      else isabelle.setup.Build.BUILD_PROPS.nn
     val props_path = dir + Path.explode(props_name)
 
     val props = File.read_props(props_path)
@@ -116,5 +115,5 @@ object Scala_Build {
   }
 
   def component_contexts(): List[Context] =
-    isabelle.setup.Build.component_contexts().asScala.toList.map(new Context(_))
+    isabelle.setup.Build.component_contexts().nn.asScala.toList.map(c => new Context(c.nn))
 }

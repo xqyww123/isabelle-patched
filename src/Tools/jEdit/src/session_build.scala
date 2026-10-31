@@ -6,6 +6,7 @@ Session build management.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -28,7 +29,8 @@ object Session_Build {
       }
       catch {
         case exn: Throwable =>
-          GUI.dialog(view, "Isabelle build", GUI.scrollable_text(Exn.print(exn)))
+          GUI.dialog(title = "Isabelle build", message = Seq(GUI.scrollable_text(Exn.print(exn))),
+            parent = proper_value(view))
       }
     }
   }
@@ -121,7 +123,7 @@ object Session_Build {
       }
 
     private val delay_exit =
-      Delay.first(Time.seconds(1.0), gui = true) {
+      GUI.Delay.first(Time.seconds(1.0)) {
         if (can_auto_close) conclude()
         else {
           val button = new GUI.Button("Close") { override def clicked(): Unit = conclude() }
@@ -172,7 +174,7 @@ object Session_Build {
 
     /* main */
 
-    setTitle("Isabelle build (" + PIDE.ml_settings.ml_identifier + " / " +
+    setTitle("Isabelle build (" + PIDE.session.store.ml_settings.ml_identifier + " / " +
       "jdk-" + Platform.jvm_version + "_" + Platform.jvm_platform + ")")
 
     pack()
@@ -180,7 +182,7 @@ object Session_Build {
     setVisible(true)
 
     Isabelle_Thread.fork(name = "session_build") {
-      progress.echo(Build.build_logic_started(PIDE.resources.session_base.session_name))
+      progress.echo(Build.build_logic_started(PIDE.resources.current_background.session_name))
 
       val (out, rc) =
         try { ("", JEdit_Session.session_build(progress)) }
@@ -195,7 +197,7 @@ object Session_Build {
       if (ok) JEdit_Session.session_start()
       else {
         progress.echo(
-          Build.build_logic_failed(PIDE.resources.session_base.session_name, editor = true))
+          Build.build_logic_failed(PIDE.resources.current_background.session_name, editor = true))
       }
 
       return_code(rc)

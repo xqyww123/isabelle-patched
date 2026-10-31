@@ -19,7 +19,7 @@ object Protocol_Handlers {
     def get(name: String): Option[Session.Protocol_Handler] = handlers.get(name)
 
     def init(handler: Session.Protocol_Handler): State = {
-      val name = handler.getClass.getName
+      val name = handler.class_name
       try {
         if (handlers.isDefinedAt(name)) error("Duplicate protocol handler: " + name)
         else {
@@ -35,20 +35,20 @@ object Protocol_Handlers {
     def init(name: String): State = {
       val handler =
         try {
-          Class.forName(name).getDeclaredConstructor().newInstance()
+          Classpath.the_class(name).getDeclaredConstructor().nn.newInstance().nn
             .asInstanceOf[Session.Protocol_Handler]
         }
         catch { case exn: Throwable => err_handler(exn, name) }
       init(handler)
     }
 
-    def invoke(msg: Prover.Protocol_Output): Boolean =
+    def invoke(log: Logger, msg: Prover.Protocol_Output): Boolean =
       msg.properties match {
         case (Markup.FUNCTION, a) :: _ if functions.isDefinedAt(a) =>
           try { functions(a)(msg) }
           catch {
             case exn: Throwable =>
-              Output.error_message(
+              log.error_message(
                 "Failed invocation of protocol function: " + quote(a) + "\n" + Exn.print(exn))
             false
           }
@@ -68,14 +68,11 @@ object Protocol_Handlers {
 class Protocol_Handlers private(session: Session) {
   private val state = Synchronized(Protocol_Handlers.State(session))
 
-  def prover_options(options: Options): Options =
-    state.value.handlers.foldLeft(options) {
-      case (opts, (_, handler)) => handler.prover_options(opts)
-    }
-
+  def prover_options: Options.Update =
+    state.value.handlers.valuesIterator.flatMap(_.prover_options).toList
   def get(name: String): Option[Session.Protocol_Handler] = state.value.get(name)
   def init(handler: Session.Protocol_Handler): Unit = state.change(_.init(handler))
   def init(name: String): Unit = state.change(_.init(name))
-  def invoke(msg: Prover.Protocol_Output): Boolean = state.value.invoke(msg)
+  def invoke(log: Logger, msg: Prover.Protocol_Output): Boolean = state.value.invoke(log, msg)
   def exit(exit_state: Document.State): Unit = state.change(_.exit(exit_state))
 }

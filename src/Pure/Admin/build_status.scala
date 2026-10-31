@@ -10,10 +10,8 @@ package isabelle
 object Build_Status {
   /* defaults */
 
-  val default_target_dir = Path.explode("build_status")
-  val default_image_size = (800, 600)
-  val default_history = 30
-
+  def default_target_dir: Path = Path.explode("build_status")
+  def default_history: Int = 30
   def default_profiles: List[Profile] = Isabelle_Cronjob.build_status_profiles
 
 
@@ -77,23 +75,26 @@ object Build_Status {
 
   /* build status */
 
+  private val build_status_fields =
+    List(ML_Statistics.heap_fields, ML_Statistics.program_fields, ML_Statistics.tasks_fields,
+      ML_Statistics.workers_fields).flatMap(_.content)
+
   def build_status(options: Options,
     progress: Progress = new Progress,
     profiles: List[Profile] = default_profiles,
     only_sessions: Set[String] = Set.empty,
     target_dir: Path = default_target_dir,
     ml_statistics: Boolean = false,
-    image_size: (Int, Int) = default_image_size
+    image_width: Int = Build_Profiling.default_image_width,
+    image_height: Int = Build_Profiling.default_image_height
   ): Unit = {
-    val ml_statistics_domain =
-      Iterator(ML_Statistics.heap_fields, ML_Statistics.program_fields, ML_Statistics.tasks_fields,
-        ML_Statistics.workers_fields).flatMap(_._2).toSet
-
     val data =
       read_data(options, progress = progress, profiles = profiles, only_sessions = only_sessions,
-        ml_statistics = ml_statistics, ml_statistics_domain = ml_statistics_domain)
+        ml_statistics = ml_statistics,
+        ml_statistics_domain = ML_Statistics.make_domain(build_status_fields))
 
-    present_data(data, progress = progress, target_dir = target_dir, image_size = image_size)
+    present_data(data, progress = progress, target_dir = target_dir,
+      image_width = image_width, image_height = image_height)
   }
 
 
@@ -119,7 +120,7 @@ object Build_Status {
     require(entries.nonEmpty, "no entries")
 
     lazy val sorted_entries: List[Entry] =
-      entries.valuesIterator.toList.sortBy(entry => - entry.date)
+      entries.valuesIterator.toList.sortBy(_.order)
 
     def head: Entry = sorted_entries.head
     def order: Long = - head.timing.elapsed.ms
@@ -206,6 +207,7 @@ object Build_Status {
     errors: List[String]
   ) {
     val date: Long = (afp_pull_date getOrElse pull_date).unix_epoch
+    def order: Long = - date
 
     def finished: Boolean = status == Build_Log.Session_Status.finished
     def failed: Boolean = status == Build_Log.Session_Status.failed
@@ -218,10 +220,6 @@ object Build_Status {
           HTML.text(print_version(isabelle_version, afp_version, chapter))
       }
     }
-  }
-
-  sealed case class Image(name: String, width: Int, height: Int) {
-    def path: Path = Path.basic(name)
   }
 
   def print_version(
@@ -309,8 +307,8 @@ object Build_Status {
               val entry =
                 Entry(
                   chapter = chapter,
-                  build_start = res.date(Build_Log.Prop.build_start),
-                  pull_date = res.date(Build_Log.Column.pull_date(afp = false)),
+                  build_start = res.the_date(Build_Log.Prop.build_start),
+                  pull_date = res.the_date(Build_Log.Column.pull_date(afp = false)),
                   afp_pull_date =
                     if (afp) res.get_date(Build_Log.Column.pull_date(afp = true)) else None,
                   isabelle_version = isabelle_version,
@@ -325,12 +323,12 @@ object Build_Status {
                       Build_Log.Column.ml_timing_elapsed,
                       Build_Log.Column.ml_timing_cpu,
                       Build_Log.Column.ml_timing_gc),
-                  maximum_code = Space.B(ml_stats.maximum(ML_Statistics.CODE_SIZE)),
-                  average_code = Space.B(ml_stats.average(ML_Statistics.CODE_SIZE)),
-                  maximum_stack = Space.B(ml_stats.maximum(ML_Statistics.STACK_SIZE)),
-                  average_stack = Space.B(ml_stats.average(ML_Statistics.STACK_SIZE)),
-                  maximum_heap = Space.B(ml_stats.maximum(ML_Statistics.HEAP_SIZE)),
-                  average_heap = Space.B(ml_stats.average(ML_Statistics.HEAP_SIZE)),
+                  maximum_code = ml_stats.maximum_code,
+                  average_code = ml_stats.average_code,
+                  maximum_stack = ml_stats.maximum_stack,
+                  average_stack = ml_stats.average_stack,
+                  maximum_heap = ml_stats.maximum_heap,
+                  average_heap = ml_stats.average_heap,
                   stored_heap = Space.bytes(res.long(Build_Log.Column.heap_size)),
                   status = Build_Log.Session_Status.valueOf(res.string(Build_Log.Column.status)),
                   errors =
@@ -366,7 +364,7 @@ object Build_Status {
     val sorted_entries =
       (for {
         (name, sessions) <- data_entries.toList
-        sorted_sessions <- proper_list(sessions.toList.map(_._2).sortBy(_.order))
+        sorted_sessions <- proper_list(sessions.valuesIterator.toList.sortBy(_.order))
       }
       yield {
         val hosts = get_hosts(name).toList.sorted
@@ -383,7 +381,8 @@ object Build_Status {
   def present_data(data: Data,
     progress: Progress = new Progress,
     target_dir: Path = default_target_dir,
-    image_size: (Int, Int) = default_image_size
+    image_width: Int = Build_Profiling.default_image_width,
+    image_height: Int = Build_Profiling.default_image_height
   ): Unit = {
     def clean_name(name: String): String =
       name.flatMap(c => if (c == ' ' || c == '/') "_" else if (c == ',') "" else c.toString)
@@ -411,7 +410,6 @@ object Build_Status {
     for (data_entry <- data.entries) {
       val data_name = data_entry.name
 
-      val (image_width, image_height) = image_size
       val image_width_stretch = (image_width * data_entry.stretch).toInt
 
       progress.echo("output " + quote(data_name))
@@ -428,122 +426,98 @@ object Build_Status {
       val session_plots =
         Par_List.map((session: Session) =>
           Isabelle_System.with_tmp_file(session.name, "data") { data_file =>
-            Isabelle_System.with_tmp_file(session.name, "gnuplot") { gnuplot_file =>
+            File.write(data_file,
+              cat_lines(
+                session.finished_entries.map(entry =>
+                  List(entry.date.toString,
+                    entry.timing.elapsed.minutes.toString,
+                    entry.timing.resources.minutes.toString,
+                    entry.ml_timing.elapsed.minutes.toString,
+                    entry.ml_timing.resources.minutes.toString,
+                    entry.maximum_code.MiB.toString,
+                    entry.average_code.MiB.toString,
+                    entry.maximum_stack.MiB.toString,
+                    entry.average_stack.MiB.toString,
+                    entry.maximum_heap.MiB.toString,
+                    entry.average_heap.MiB.toString,
+                    entry.stored_heap.MiB.toString).mkString(" "))))
 
-              def plot_name(kind: String): String = session.name + "_" + kind + ".png"
+            val max_time =
+              (session.finished_entries.foldLeft(0.0) {
+                case (m, entry) =>
+                  m.max(entry.timing.elapsed.minutes).
+                    max(entry.timing.resources.minutes).
+                    max(entry.ml_timing.elapsed.minutes).
+                    max(entry.ml_timing.resources.minutes)
+              } max 0.1) * 1.1
+            val timing_range = "[0:" + max_time + "]"
 
-              File.write(data_file,
-                cat_lines(
-                  session.finished_entries.map(entry =>
-                    List(entry.date.toString,
-                      entry.timing.elapsed.minutes.toString,
-                      entry.timing.resources.minutes.toString,
-                      entry.ml_timing.elapsed.minutes.toString,
-                      entry.ml_timing.resources.minutes.toString,
-                      entry.maximum_code.MiB.toString,
-                      entry.average_code.MiB.toString,
-                      entry.maximum_stack.MiB.toString,
-                      entry.average_stack.MiB.toString,
-                      entry.maximum_heap.MiB.toString,
-                      entry.average_heap.MiB.toString,
-                      entry.stored_heap.MiB.toString).mkString(" "))))
-
-              val max_time =
-                (session.finished_entries.foldLeft(0.0) {
-                  case (m, entry) =>
-                    m.max(entry.timing.elapsed.minutes).
-                      max(entry.timing.resources.minutes).
-                      max(entry.ml_timing.elapsed.minutes).
-                      max(entry.ml_timing.resources.minutes)
-                } max 0.1) * 1.1
-              val timing_range = "[0:" + max_time + "]"
-
-              def gnuplot(plot_name: String, plots: List[String], range: String): Image = {
-                val image = Image(plot_name, image_width_stretch, image_height)
-
-                File.write(gnuplot_file, """
-set terminal png size """ + image.width + "," + image.height + """
-set output """ + quote(File.standard_path(dir + image.path)) + """
-set xdata time
-set timefmt "%s"
-set format x "%d-%b"
-set xlabel """ + quote(session.name) + """ noenhanced
-set key left bottom
-plot [] """ + range + " " +
-                plots.map(s => quote(data_file.implode) + " " + s).mkString(", ") + "\n")
-
-                val result =
-                  Isabelle_System.bash("\"$ISABELLE_GNUPLOT\" " + File.bash_path(gnuplot_file))
-                if (!result.ok)
-                  result.error("Gnuplot failed for " + data_name + "/" + plot_name).check
-
-                image
-              }
-
-              val timing_plots = {
-                val plots1 =
-                  List(
-                    """ using 1:2 smooth sbezier title "elapsed time (smooth)" """,
-                    """ using 1:2 smooth csplines title "elapsed time" """)
-                val plots2 =
-                  List(
-                    """ using 1:3 smooth sbezier title "cpu time (smooth)" """,
-                    """ using 1:3 smooth csplines title "cpu time" """)
-                if (session.threads == 1) plots1 else plots1 ::: plots2
-              }
-
-              val ml_timing_plots =
+            val timing_plots = {
+              val plots1 =
                 List(
-                  """ using 1:4 smooth sbezier title "ML elapsed time (smooth)" """,
-                  """ using 1:4 smooth csplines title "ML elapsed time" """,
-                  """ using 1:5 smooth sbezier title "ML cpu time (smooth)" """,
-                  """ using 1:5 smooth csplines title "ML cpu time" """)
-
-              val heap_plots =
+                  """ using 1:2 smooth sbezier title "elapsed time (smooth)" """,
+                  """ using 1:2 smooth csplines title "elapsed time" """)
+              val plots2 =
                 List(
-                  """ using 1:10 smooth sbezier title "heap maximum (smooth)" """,
-                  """ using 1:10 smooth csplines title "heap maximum" """,
-                  """ using 1:11 smooth sbezier title "heap average (smooth)" """,
-                  """ using 1:11 smooth csplines title "heap average" """,
-                  """ using 1:12 smooth sbezier title "heap stored (smooth)" """,
-                  """ using 1:12 smooth csplines title "heap stored" """)
-
-              def jfreechart(plot_name: String, fields: ML_Statistics.Fields): Image = {
-                val image = Image(plot_name, image_width, image_height)
-                val chart =
-                  session.ml_statistics.chart(
-                    fields.title + ": " + session.ml_statistics.heading, fields.names)
-                Graphics_File.write_chart_png(
-                  (dir + image.path).file, chart, image.width, image.height)
-                image
-              }
-
-              val images =
-                (if (session.check_timing)
-                  List(
-                    gnuplot(plot_name("timing"), timing_plots, timing_range),
-                    gnuplot(plot_name("ml_timing"), ml_timing_plots, timing_range))
-                 else Nil) :::
-                (if (session.check_heap)
-                  List(gnuplot(plot_name("heap"), heap_plots, "[0:]"))
-                 else Nil) :::
-                (if (session.ml_statistics.content.nonEmpty)
-                  List(jfreechart(plot_name("heap_chart"), ML_Statistics.heap_fields),
-                    jfreechart(plot_name("program_chart"), ML_Statistics.program_fields)) :::
-                  (if (session.threads > 1)
-                    List(
-                      jfreechart(plot_name("tasks_chart"), ML_Statistics.tasks_fields),
-                      jfreechart(plot_name("workers_chart"), ML_Statistics.workers_fields))
-                   else Nil)
-                 else Nil)
-
-              session.name -> images
+                  """ using 1:3 smooth sbezier title "cpu time (smooth)" """,
+                  """ using 1:3 smooth csplines title "cpu time" """)
+              if (session.threads == 1) plots1 else plots1 ::: plots2
             }
+
+            val ml_timing_plots =
+              List(
+                """ using 1:4 smooth sbezier title "ML elapsed time (smooth)" """,
+                """ using 1:4 smooth csplines title "ML elapsed time" """,
+                """ using 1:5 smooth sbezier title "ML cpu time (smooth)" """,
+                """ using 1:5 smooth csplines title "ML cpu time" """)
+
+            val heap_plots =
+              List(
+                """ using 1:10 smooth sbezier title "heap maximum (smooth)" """,
+                """ using 1:10 smooth csplines title "heap maximum" """,
+                """ using 1:11 smooth sbezier title "heap average (smooth)" """,
+                """ using 1:11 smooth csplines title "heap average" """,
+                """ using 1:12 smooth sbezier title "heap stored (smooth)" """,
+                """ using 1:12 smooth csplines title "heap stored" """)
+
+            def image(kind: String): Build_Profiling.Image =
+              Build_Profiling.Image(
+                Build_Profiling.image_name(session.name, kind), image_width, image_height)
+
+            def gnuplot_image(
+                kind: String, plots: List[String], range: String): Build_Profiling.Image =
+              image(kind).write_gnuplot_png(dir, data_file, session.name, plots, range)
+
+            def chart_image(kind: String, fields: ML_Statistics.Fields): Build_Profiling.Image =
+              image(kind).write_chart_png(dir, session.ml_statistics, fields)
+
+            val images =
+              (if (session.check_timing)
+                List(
+                  gnuplot_image("timing", timing_plots, timing_range),
+                  gnuplot_image("ml_timing", ml_timing_plots, timing_range))
+               else Nil) :::
+              (if (session.check_heap)
+                List(gnuplot_image("heap", heap_plots, "[0:]"))
+               else Nil) :::
+              (if (session.ml_statistics.content.nonEmpty)
+                List(
+                  chart_image("heap_chart", ML_Statistics.heap_fields),
+                  chart_image("program_chart", ML_Statistics.program_fields)) :::
+                (if (session.threads > 1)
+                  List(
+                    chart_image("tasks_chart", ML_Statistics.tasks_fields),
+                    chart_image("workers_chart", ML_Statistics.workers_fields))
+                 else Nil)
+               else Nil)
+
+            session.name -> images
           }, data_entry.sessions).toMap
 
+      val heading = "Isabelle build status for " + data_name
       HTML.write_document(dir, "index.html",
-        List(HTML.title("Isabelle build status for " + data_name)),
-        HTML.chapter("Isabelle build status for " + data_name) ::
+        List(HTML.title(heading)),
+        HTML.chapter(heading) ::
         HTML.par(
           List(HTML.description(
             List(
@@ -559,29 +533,20 @@ plot [] """ + range + " " +
             HTML.section(HTML.id("session_" + session.name), session.name),
             HTML.par(
               HTML.description(
-                List(
-                  HTML.text("data:") ->
-                    List(HTML.link(data_files(session.name).file_name, HTML.text("CSV"))),
-                  HTML.text("timing:") -> HTML.text(session.head.timing.message_resources),
-                  HTML.text("ML timing:") -> HTML.text(session.head.ml_timing.message_resources)) :::
-                session.head.maximum_code.print_relevant.map(s =>
-                  HTML.text("code maximum:") -> HTML.text(s)).toList :::
-                session.head.average_code.print_relevant.map(s =>
-                  HTML.text("code average:") -> HTML.text(s)).toList :::
-                session.head.maximum_stack.print_relevant.map(s =>
-                  HTML.text("stack maximum:") -> HTML.text(s)).toList :::
-                session.head.average_stack.print_relevant.map(s =>
-                  HTML.text("stack average:") -> HTML.text(s)).toList :::
-                session.head.maximum_heap.print_relevant.map(s =>
-                  HTML.text("heap maximum:") -> HTML.text(s)).toList :::
-                session.head.average_heap.print_relevant.map(s =>
-                  HTML.text("heap average:") -> HTML.text(s)).toList :::
-                session.head.stored_heap.print_relevant.map(s =>
-                  HTML.text("heap stored:") -> HTML.text(s)).toList :::
-                proper_string(session.head.isabelle_version).map(s =>
-                  HTML.text("Isabelle version:") -> HTML.text(s)).toList :::
-                proper_string(session.head.afp_version).map(s =>
-                  HTML.text("AFP version:") -> HTML.text(s)).toList) ::
+                (HTML.text("data:") ->
+                  List(HTML.link(data_files(session.name).file_name, HTML.text("CSV")))) ::
+                Build_Profiling.html_description_items(
+                  timing = session.head.timing,
+                  ml_timing = session.head.ml_timing,
+                  maximum_code = session.head.maximum_code,
+                  average_code = session.head.average_code,
+                  maximum_stack = session.head.maximum_stack,
+                  average_stack = session.head.average_stack,
+                  maximum_heap = session.head.maximum_heap,
+                  average_heap = session.head.average_heap,
+                  stored_heap = session.head.stored_heap,
+                  isabelle_version = session.head.isabelle_version,
+                  afp_version = session.head.afp_version)) ::
               session_plots.getOrElse(session.name, Nil).map(image =>
                 HTML.size(image.width / 2, image.height / 2)(HTML.image(image.name)))))))
     }
@@ -598,7 +563,8 @@ plot [] """ + range + " " +
         var ml_statistics = false
         var only_sessions = Set.empty[String]
         var options = Options.init()
-        var image_size = default_image_size
+        var image_width = Build_Profiling.default_image_width
+        var image_height = Build_Profiling.default_image_height
         var verbose = false
 
         val getopts = Getopts("""
@@ -610,7 +576,8 @@ Usage: isabelle build_status [OPTIONS]
     -S SESSIONS  only given SESSIONS (comma separated)
     -l DAYS      length of relevant history (default """ + options.int("build_log_history") + """)
     -o OPTION    override Isabelle system OPTION (via NAME=VAL or NAME)
-    -s WxH       size of PNG image (default """ + image_size._1 + "x" + image_size._2 + """)
+    -s WxH       size of PNG image (default """ +
+          Build_Profiling.default_image_width + "x" + Build_Profiling.default_image_height + """)
     -v           verbose
 
   Present performance statistics from build log database, which is specified
@@ -624,7 +591,9 @@ Usage: isabelle build_status [OPTIONS]
           "o:" -> (arg => options = options + arg),
           "s:" -> (arg =>
             space_explode('x', arg).map(Value.Int.parse) match {
-              case List(w, h) if w > 0 && h > 0 => image_size = (w, h)
+              case List(w, h) if w > 0 && h > 0 =>
+                image_width = w
+                image_height = h
               case _ => error("Error bad PNG image size: " + quote(arg))
             }),
           "v" -> (_ => verbose = true))
@@ -635,6 +604,7 @@ Usage: isabelle build_status [OPTIONS]
         val progress = new Console_Progress(verbose = verbose)
 
         build_status(options, progress = progress, only_sessions = only_sessions,
-          target_dir = target_dir, ml_statistics = ml_statistics, image_size = image_size)
+          target_dir = target_dir, ml_statistics = ml_statistics,
+          image_width = image_width, image_height = image_height)
       })
 }

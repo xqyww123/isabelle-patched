@@ -477,8 +477,8 @@ fun put_sel_upd names more depth simps defs thy =
       make_data records
         {selectors = fold Symtab.update_new sels selectors,
           updates = fold Symtab.update_new upds updates,
-          simpset = simpset_map ctxt0 (Simplifier.add_simps simps) simpset,
-          defset = simpset_map ctxt0 (Simplifier.add_simps defs) defset}
+          simpset = Simplifier.simpset_map ctxt0 (Simplifier.add_simps simps) simpset,
+          defset = Simplifier.simpset_map ctxt0 (Simplifier.add_simps defs) defset}
          equalities extinjects extsplit splits extfields fieldext;
   in Data.put data thy end;
 
@@ -1330,7 +1330,7 @@ val eq_simproc = \<^simproc_setup>\<open>eq ("r = s") = \<open>K eq_proc\<close>
 fun split_simproc P =
   Simplifier.make_simproc \<^context>
    {name = "record_split",
-    kind = Simproc,
+    kind = Simplifier.Simproc,
     lhss = [\<^term>\<open>x::'a::{}\<close>],
     proc = fn _ => fn ctxt => fn ct =>
       let
@@ -1760,7 +1760,7 @@ fun instantiate_sort_record (sort, mk_eq) tyco vs extN Ts thy =
     thy
     |> Class.instantiation ([tyco], vs, sort)
     |> `(fn lthy => Syntax.check_term lthy eq)
-    |-> (fn eq => Specification.definition NONE [] [] ((Binding.concealed Binding.empty, []), eq))
+    |-> (fn eq => Specification.definition {verbose = false} NONE [] [] ((Binding.concealed Binding.empty, []), eq))
     |> snd
     |> Class.prove_instantiation_exit (fn ctxt => Class.intro_classes_tac ctxt [])
   end;
@@ -1810,7 +1810,7 @@ fun add_code ext_tyco vs extT ext simps inject thy =
       |> Code.declare_default_eqns_global (map (rpair true) simps)
       |> Class.instantiation ([ext_tyco], vs, [HOLogic.class_equal])
       |> `(fn lthy => Syntax.check_term lthy eq)
-      |-> (fn eq => Specification.definition NONE [] [] (Binding.empty_atts, eq))
+      |-> (fn eq => Specification.definition {verbose = false} NONE [] [] (Binding.empty_atts, eq))
       |-> (fn (_, (_, eq_def)) =>
          Class.prove_instantiation_exit_result Morphism.thm tac eq_def)
       |-> add_code
@@ -2137,9 +2137,9 @@ fun definition overloaded (alphas, binding) parent (parents: parent_info list) r
 
     val record_ss = get_simpset defs_thy;
     val sel_upd_ss =
-      simpset_of
-        (put_simpset record_ss defs_ctxt
-          |> Simplifier.add_simps (sel_defs @ accessor_thms @ upd_defs @ updator_thms));
+      record_ss
+      |> Simplifier.simpset_map defs_ctxt
+          (Simplifier.add_simps (sel_defs @ accessor_thms @ upd_defs @ updator_thms));
 
     val (sel_convs, upd_convs) =
       timeit_msg defs_ctxt "record sel_convs/upd_convs proof:" (fn () =>

@@ -26,7 +26,7 @@ object Component_CSDP {
 
     def change(path: Path): Unit = {
       def change_line(line: String, p: (String, String)): String =
-        line.replaceAll(p._1 + "=.*", Properties.Eq(p))
+        line.replacing((p._1 + "=.*").r -> Properties.Eq(p))
       File.change_lines(path) { _.map(line => changed.foldLeft(line)(change_line)) }
     }
   }
@@ -54,10 +54,8 @@ object Component_CSDP {
     download_url: String = default_download_url,
     progress: Progress = new Progress,
     target_dir: Path = Path.current,
-    mingw: MinGW = MinGW.none
+    mingw_root: Path = MinGW.default_root
   ): Unit = {
-    mingw.check()
-
     Isabelle_System.with_tmp_dir("build") { tmp_dir =>
       /* component */
 
@@ -83,7 +81,9 @@ object Component_CSDP {
 
       /* platform */
 
-      val platform_name = Isabelle_Platform.local.ISABELLE_PLATFORM(windows = true, apple = true)
+      val platform_context =
+        Isabelle_Platform.Bash_Context(mingw_root = Some(mingw_root), progress = progress)
+      val platform_name = platform_context.ISABELLE_PLATFORM
       val platform_dir =
         Isabelle_System.make_directory(component_dir.path + Path.basic(platform_name))
 
@@ -106,13 +106,11 @@ object Component_CSDP {
       build_flags.find(flags => flags.platform == platform_name) match {
         case None => error("No build flags for platform " + quote(platform_name))
         case Some(flags) =>
-          File.find_files(source_dir.file, pred = file => file.getName == "Makefile").
-            foreach(file => flags.change(File.path(file)))
+          File.find_files(source_dir, pred = file => file.file_name == "Makefile")
+            .foreach(flags.change)
       }
 
-      progress.bash(mingw.bash_script("make"),
-        cwd = source_dir,
-        echo = progress.verbose).check
+      platform_context.bash("make", cwd = source_dir).check
 
 
       /* install */
@@ -121,7 +119,7 @@ object Component_CSDP {
       Isabelle_System.copy_file(source_dir + Path.explode("solver/csdp").platform_exe, platform_dir)
 
       if (Platform.is_windows) {
-        Executable.library_closure(platform_dir + Path.explode("csdp.exe"), mingw = mingw,
+        platform_context.library_closure(platform_dir + Path.explode("csdp.exe"),
           filter =
             Set("libblas", "liblapack", "libgfortran", "libgcc_s_seh",
               "libquadmath", "libwinpthread"))
@@ -164,7 +162,7 @@ Only the bare "solver/csdp" program is used for Isabelle.
     Isabelle_Tool("component_csdp", "build prover component from official download", Scala_Project.here,
       { args =>
         var target_dir = Path.current
-        var mingw = MinGW.none
+        var mingw_root = MinGW.default_root
         var download_url = default_download_url
         var verbose = false
 
@@ -174,6 +172,7 @@ Usage: isabelle component_csdp [OPTIONS]
   Options are:
     -D DIR       target directory (default ".")
     -M DIR       msys/mingw root specification for Windows
+                 (default: """ + MinGW.default_root + """)
     -U URL       download URL
                  (default: """" + default_download_url + """")
     -v           verbose
@@ -181,7 +180,7 @@ Usage: isabelle component_csdp [OPTIONS]
   Build prover component from official download.
 """,
           "D:" -> (arg => target_dir = Path.explode(arg)),
-          "M:" -> (arg => mingw = MinGW(Path.explode(arg))),
+          "M:" -> (arg => mingw_root = Path.explode(arg)),
           "U:" -> (arg => download_url = arg),
           "v" -> (_ => verbose = true))
 
@@ -191,6 +190,6 @@ Usage: isabelle component_csdp [OPTIONS]
         val progress = new Console_Progress(verbose = verbose)
 
         build_csdp(download_url = download_url, progress = progress,
-          target_dir = target_dir, mingw = mingw)
+          target_dir = target_dir, mingw_root = mingw_root)
       })
 }

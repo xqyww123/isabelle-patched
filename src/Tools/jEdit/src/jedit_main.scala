@@ -6,6 +6,7 @@ Main application entry point for Isabelle/jEdit.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -16,8 +17,15 @@ object JEdit_Main {
   /* main entry point */
 
   def main(args: Array[String]): Unit = {
+    def err(title: String, exn: Throwable): Nothing = {
+      try { GUI.init_laf() } catch { case _: Throwable => }
+      GUI.dialog(title = title, message = Seq(GUI.scrollable_text(Exn.print(exn))))
+      sys.exit(Process_Result.RC.failure)
+    }
+
     if (args.nonEmpty && args(0) == "-init") {
-      Isabelle_System.init()
+      try { Isabelle_System.init() }
+      catch { case exn: Throwable => err("Isabelle init", exn) }
     }
     else {
       val start = {
@@ -26,6 +34,8 @@ object JEdit_Main {
           Isabelle_Fonts.init()
 
           GUI.init_lafs()
+
+          Platform.check_jvm_platform()
 
 
           /* ROOTS template */
@@ -88,8 +98,8 @@ object JEdit_Main {
             "-settings=" + File.platform_path(Path.explode("$JEDIT_SETTINGS"))
 
           val jedit_server =
-            System.getProperty("isabelle.jedit_server") match {
-              case null | "" => "-noserver"
+            Isabelle_System.get_property("isabelle.jedit_server") match {
+              case "" => "-noserver"
               case name => "-server=" + name
             }
 
@@ -125,12 +135,7 @@ object JEdit_Main {
 
           () => jEdit.main(Array(jedit_settings, jedit_server) ++ jedit_options ++ more_args)
         }
-        catch {
-          case exn: Throwable =>
-            GUI.init_laf()
-            GUI.dialog(null, "Isabelle main", GUI.scrollable_text(Exn.print(exn)))
-            sys.exit(Process_Result.RC.failure)
-        }
+        catch { case exn: Throwable => err("Isabelle main", exn) }
       }
       start()
     }

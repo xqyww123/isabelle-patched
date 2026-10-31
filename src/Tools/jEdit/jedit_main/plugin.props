@@ -13,7 +13,7 @@ plugin.isabelle.jedit_main.Plugin.activate=defer
 plugin.isabelle.jedit_main.Plugin.usePluginHome=false
 
 #dependencies
-plugin.isabelle.jedit_main.Plugin.depend.0=jdk 21
+plugin.isabelle.jedit_main.Plugin.depend.0=jdk 25
 plugin.isabelle.jedit_main.Plugin.depend.1=jedit 05.06.00.00
 plugin.isabelle.jedit_main.Plugin.depend.2=plugin console.ConsolePlugin 5.1.4
 plugin.isabelle.jedit_main.Plugin.depend.3=plugin errorlist.ErrorListPlugin 2.4.0
@@ -28,8 +28,8 @@ options.isabelle-rendering.label=Rendering
 options.isabelle-rendering.code=new isabelle.jedit.JEdit_Options$Isabelle_Rendering_Options();
 
 #menu actions and dockables
-plugin.isabelle.jedit_main.Plugin.menu.label=Isabelle
-plugin.isabelle.jedit_main.Plugin.menu= \
+isabelle-menu.label=$Isabelle
+isabelle-menu= \
   isabelle.browser-info \
   isabelle-export-browser \
   isabelle-session-browser \
@@ -39,7 +39,6 @@ plugin.isabelle.jedit_main.Plugin.menu= \
   - \
   isabelle-debugger \
   isabelle-document \
-  isabelle-documentation \
   isabelle-monitor \
   isabelle-output \
   isabelle-protocol \
@@ -52,41 +51,128 @@ plugin.isabelle.jedit_main.Plugin.menu= \
   isabelle-syslog \
   isabelle-theories \
   isabelle-timing
-isabelle.browser-info.label=Browse HTML library
-isabelle-debugger.label=Debugger panel
+isabelle-debugger.label=Debu$gger panel
 isabelle-debugger.title=Debugger
-isabelle-document.label=Document panel
+isabelle-document.label=$Document panel
 isabelle-document.title=Document
-isabelle-documentation.label=Documentation panel
+isabelle-documentation.label=Isabelle $Documentation
 isabelle-documentation.title=Documentation
-isabelle-graphview.label=Graphview panel
+isabelle-documentation.shortcut=F1
+isabelle-export-browser.label=Browse theory exports
+isabelle-graphview.label=$Graphview panel
 isabelle-graphview.title=Graphview
 isabelle-info.label=Info panel
 isabelle-info.title=Info
-isabelle-monitor.label=Monitor panel
+isabelle.java-monitor.label=Java/VM monitor
+isabelle-monitor.label=$Monitor panel
 isabelle-monitor.title=Monitor
-isabelle-output.label=Output panel
+isabelle-output.label=$Output panel
 isabelle-output.title=Output
+isabelle.preview.label=Show $preview in browser
 isabelle-protocol.label=Protocol panel
 isabelle-protocol.title=Protocol
-isabelle-query.label=Query panel
+isabelle-query.label=$Query panel
 isabelle-query.title=Query
 isabelle-raw-output.label=Raw Output panel
 isabelle-raw-output.title=Raw Output
+isabelle-session-browser.label=Browse session information
 isabelle-simplifier-trace.label=Simplifier Trace panel
 isabelle-simplifier-trace.title=Simplifier Trace
-isabelle-sledgehammer.label=Sledgehammer panel
+isabelle-sledgehammer.label=$Sledgehammer panel
 isabelle-sledgehammer.title=Sledgehammer
-isabelle-state.label=State panel
+isabelle-state.label=St$ate panel
 isabelle-state.title=State
-isabelle-symbols.label=Symbols panel
+isabelle-symbols.label=S$ymbols panel
 isabelle-symbols.title=Symbols
 isabelle-syslog.label=Syslog panel
 isabelle-syslog.title=Syslog
-isabelle-theories.label=Theories panel
+isabelle-theories.label=$Theories panel
 isabelle-theories.title=Theories
 isabelle-timing.label=Timing panel
 isabelle-timing.title=Timing
+isabelle.browser-info.label=Browse HTML library
+isabelle.draft.label=Show draft in browser
+isabelle.options.label=$Isabelle Options...
+isabelle.options.icon.small=32x32/categories/preferences-system.svg?scale=0.5
+isabelle.recode-plain.icon.small=16x16/actions/view-refresh.svg
+isabelle.recode-plain.label=Recode as Plain $Text
+isabelle.recode-plain.shortcut=F9
+isabelle.recode-symbols.icon.small=16x16/actions/view-refresh.svg
+isabelle.recode-symbols.label=Recode as Unicode S$ymbols
+isabelle.recode-symbols.shortcut=S+F9
+
+#other actions
+isabelle.antiquoted_cartouche.label=Make antiquoted cartouche
+isabelle.complete-word.label=Complete word
+isabelle.complete.label=Complete Isabelle text
+isabelle.complete.shortcut2=C+b
+isabelle.control-bold.label=Control bold
+isabelle.control-bold.shortcut=C+e RIGHT
+isabelle.control-emph.label=Control emphasized
+isabelle.control-emph.shortcut=C+e LEFT
+isabelle.control-reset.label=Control reset
+isabelle.control-reset.shortcut=C+e BACK_SPACE
+isabelle.control-sub.label=Control subscript
+isabelle.control-sub.shortcut=C+e DOWN
+isabelle.control-sup.label=Control superscript
+isabelle.control-sup.shortcut=C+e UP
+isabelle.decrease-font-size.label=Decrease font size
+isabelle.decrease-font-size.shortcut2=C+SUBTRACT
+isabelle.decrease-font-size.shortcut=C+MINUS
+isabelle.decrease-font-size2.label=Decrease font size (clone)
+isabelle.exclude-word-permanently.label=Exclude word permanently
+isabelle.exclude-word.label=Exclude word
+isabelle.first-error.label=Go to first error
+isabelle.first-error.shortcut=CS+a
+isabelle.follow-link.label=Follow hyperlink at caret
+isabelle.follow-link.shortcut2=AS+DOWN
+isabelle.include-word-permanently.label=Include word permanently
+isabelle.include-word.label=Include word
+isabelle.increase-font-size.label=Increase font size
+isabelle.increase-font-size.shortcut2=C+ADD
+isabelle.increase-font-size.shortcut=C+PLUS
+isabelle.increase-font-size2.label=Increase font size (clone)
+isabelle.increase-font-size2.shortcut=C+EQUALS
+isabelle.last-error.label=Go to last error
+isabelle.last-error.shortcut=CS+z
+isabelle.line-status.label=Show line status
+isabelle.line-status.shortcut=CS+l
+isabelle.message.label=Show message
+isabelle.message.shortcut=CS+m
+isabelle.newline.label=Newline with indentation of Isabelle keywords
+isabelle.newline.shortcut=ENTER
+isabelle.next-error.label=Go to next error
+isabelle.next-error.shortcut=CS+n
+isabelle.prev-error.label=Go to previous error
+isabelle.prev-error.shortcut=CS+p
+isabelle.reset-continuous-checking.label=Reset continuous checking
+isabelle.reset-font-size.label=Reset font size
+isabelle.reset-node-required.label=Reset node required
+isabelle.reset-words.label=Reset non-permanent words
+isabelle.select-entity.label=Select all occurences of formal entity at caret
+isabelle.select-entity.shortcut=CS+ENTER
+isabelle.select-entity.shortcut2=AS+ENTER
+isabelle.select-structure.label=Select structure around selection or caret
+isabelle.select-structure.shortcut=C+7
+isabelle.set-continuous-checking.label=Set continuous checking
+isabelle.set-node-required.label=Set node required
+isabelle.show-links.label=Show hyperlinks at caret
+isabelle.show-links.shortcut2=AS+UP
+isabelle.toggle-breakpoint.label=Toggle Breakpoint
+isabelle.toggle-continuous-checking.label=Toggle continuous checking
+isabelle.toggle-continuous-checking.shortcut=C+e ENTER
+isabelle.toggle-node-required.label=Toggle node required
+isabelle.toggle-node-required.shortcut=C+e SPACE
+isabelle.tooltip.label=Show tooltip
+isabelle.tooltip.shortcut=CS+b
+isabelle.update-state.label=Update state output
+isabelle.update-state.shortcut=S+ENTER
+navigate-backwards.label=Navigate backwards
+navigate-backwards.shortcut2=AS+LEFT
+navigate-forwards.label=Navigate forwards
+navigate-forwards.shortcut2=AS+RIGHT
+focus-buffer-switcher2.label=Focus on Buffer S$witcher
+focus-buffer-switcher2.shortcut=CS+SPACE
 
 #SideKick
 mode.isabelle-news.folding=sidekick
@@ -114,3 +200,5 @@ sidekick.parser.isabelle-news.label=isabelle-news
 sidekick.parser.isabelle-options.label=isabelle-options
 sidekick.parser.isabelle-root.label=isabelle-root
 sidekick.parser.bibtex.label=bibtex
+sidekick-tree.shortcut=F8
+

@@ -11,9 +11,9 @@ sig
   val map_element: ('a -> 'b) -> 'a element -> 'b element
   val flat_element: 'a element -> 'a list
   val last_element: 'a element -> 'a
-  val parse_elements_generic: Keyword.keywords -> ('a -> Command_Span.span) -> 'a Scan.stopper ->
-    'a list -> 'a element list
-  val parse_elements: Keyword.keywords -> Command_Span.span list -> Command_Span.span element list
+  val parse_elements_generic: ('a -> Command_Span.span) -> 'a Scan.stopper -> 'a list ->
+    'a element list
+  val parse_elements: Command_Span.span list -> Command_Span.span element list
 end;
 
 structure Thy_Element: THY_ELEMENT =
@@ -40,22 +40,23 @@ fun last_element (Element (a, NONE)) = a
 
 (* parse *)
 
-fun parse_elements_generic keywords get_span stopper =
+fun parse_elements_generic get_span stopper =
   let
     val not_eof = not o Scan.is_stopper stopper;
 
-    fun category pred other =
+    fun category kinds other =
       Scan.one (fn x =>
         (case get_span x of
-          Command_Span.Span (Command_Span.Command_Span (name, _), _) => pred keywords name
+          Command_Span.Span (Command_Span.Command_Span {kind, ...}, _) =>
+            Symset.member kinds kind
         | _ => other));
 
     fun theory_element x =
-      (category Keyword.is_theory_goal false -- proof >> element) x
+      (category Keyword.theory_goal_kinds false -- proof >> element) x
     and proof_element x =
-      (category Keyword.is_proof_goal false -- proof >> element ||
-        category Keyword.is_proof_body true >> atom) x
-    and proof x = (Scan.repeat proof_element -- category Keyword.is_qed false) x;
+      (category Keyword.proof_goal_kinds false -- proof >> element ||
+        category Keyword.proof_body_kinds true >> atom) x
+    and proof x = (Scan.repeat proof_element -- category Keyword.qed_kinds false) x;
 
     val default_element = Scan.one not_eof >> atom;
 
@@ -66,7 +67,6 @@ fun parse_elements_generic keywords get_span stopper =
     Source.exhaust
   end;
 
-fun parse_elements keywords =
-  parse_elements_generic keywords I Command_Span.stopper;
+val parse_elements = parse_elements_generic I Command_Span.stopper;
 
 end;

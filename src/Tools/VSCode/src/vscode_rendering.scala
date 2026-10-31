@@ -63,7 +63,7 @@ object VSCode_Rendering {
     Rendering.tooltip_elements
 
   private val hyperlink_elements =
-    Markup.Elements(Markup.ENTITY, Markup.PATH, Markup.POSITION)
+    Markup.Elements(Markup.ENTITY, Markup.PATH, Markup.DOC, Markup.POSITION)
 }
 
 class VSCode_Rendering(snapshot: Document.Snapshot, val model: VSCode_Model)
@@ -74,13 +74,15 @@ extends Rendering(snapshot, model.session.resources.options, model.session) {
 
   override def get_text(range: Text.Range): Option[String] = model.get_text(range)
 
+  override def gui_style: GUI.Style = GUI.Style_Symbol_Recoded(resources.unicode_symbols_edits)
+
 
   /* completion */
 
   def completion(node_pos: Line.Node_Position, caret: Text.Offset): List[LSP.CompletionItem] = {
     val doc = model.content.doc
     val line = node_pos.line
-    val unicode = resources.unicode_symbols_edits
+    val unicode_symbols = resources.unicode_symbols_edits
     doc.offset(Line.Position(line)) match {
       case None => Nil
       case Some(line_start) =>
@@ -89,13 +91,13 @@ extends Rendering(snapshot, model.session.resources.options, model.session) {
 
         val syntax = model.syntax()
         val syntax_completion =
-          syntax.complete(history, unicode, explicit = false,
+          syntax.complete(history, unicode_symbols, explicit = false,
             line_start, doc.lines(line).text, caret - line_start,
             language_context(caret_range) getOrElse syntax.language_context)
 
         val (no_completion, semantic_completion) =
           rendering.semantic_completion_result(
-            history, unicode, syntax_completion.map(_.range), caret_range)
+            history, unicode_symbols, syntax_completion.map(_.range), caret_range)
 
         if (no_completion) Nil
         else {
@@ -251,7 +253,7 @@ extends Rendering(snapshot, model.session.resources.options, model.session) {
          catch { case ERROR(_) => None })
     }
     yield {
-      Line.Node_Range(file.getPath,
+      Line.Node_Range(file.getPath.nn,
         if (range.start > 0) {
           resources.get_file_content(resources.node_name(file)) match {
             case Some(text) =>
@@ -288,20 +290,13 @@ extends Rendering(snapshot, model.session.resources.options, model.session) {
       case _ => None
     }
 
-  def hyperlinks(range: Text.Range): List[Line.Node_Range] =
-    snapshot.cumulate[List[Line.Node_Range]](
-      range, Nil, VSCode_Rendering.hyperlink_elements, _ =>
-        {
-          case (links, Text.Info(_, XML.Elem(Markup.Path(name), _))) =>
-            val file = perhaps_append_file(snapshot.node_name, name)
-            Some(Line.Node_Range(file) :: links)
-
-          case (links, Text.Info(info_range, XML.Elem(Markup(Markup.ENTITY, props), _))) =>
-            hyperlink_def_position(props).map(_ :: links)
-
-          case (links, Text.Info(info_range, XML.Elem(Markup(Markup.POSITION, props), _))) =>
-            hyperlink_position(props).map(_ :: links)
-
-          case _ => None
-        }) match { case Text.Info(_, links) :: _ => links.reverse case _ => Nil }
+  def hyperlinks(range: Text.Range): List[Text.Info[Line.Node_Range]] =
+    make_hyperlinks(range, elements = VSCode_Rendering.hyperlink_elements) {
+      case Markup(Markup.ENTITY, props) => hyperlink_def_position(props)
+      case Markup(Markup.POSITION, props) => hyperlink_position(props)
+      case Markup.Path(name) => Some(Line.Node_Range(perhaps_append_file(snapshot.node_name, name)))
+      case Markup.Doc(name) =>
+        model.session.doc_entry(name).map(entry => Line.Node_Range(File.platform_path(entry.path)))
+      case _ => None
+    }
 }

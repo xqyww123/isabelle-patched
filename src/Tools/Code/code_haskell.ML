@@ -386,7 +386,7 @@ fun serialize_haskell module_prefix string_classes ctxt { module_name,
       :: Pretty.enclose "import Data.Bits (" ");" (Pretty.commas
         (map (Pretty.str o enclose "(" ")") data_bits_import_operators))
       :: print_qualified_import "Prelude"
-      :: print_qualified_import "Data.Bits"
+      :: print_qualified_import \<^verbatim>\<open>Data.Bits\<close>
       :: map (print_qualified_import o fst) includes;
     fun print_module module_name (gr, imports) =
       let
@@ -473,15 +473,15 @@ fun pretty_haskell_monad c_bind =
           (print_term vars (INFX (1, L)) t1, Pretty.str ">>=", print_term vars (INFX (1, X)) t2)
   in (2, pretty) end;
 
-fun add_monad target' raw_c_bind thy =
+fun add_monad for_target raw_c_bind thy =
   let
+    val _ = if Code_Target.language_of_target thy for_target = target then ()
+      else error "Only targets based on Haskell allow for monad syntax"
     val c_bind = Code.read_const (Proof_Context.init_global thy) raw_c_bind;
   in
-    if target = target' then
-      thy
-      |> Code_Target.set_printings (Constant (c_bind, [(target,
-        SOME (Code_Printer.complex_const_syntax (pretty_haskell_monad c_bind)))]))
-    else error "Only Haskell target allows for monad syntax"
+    thy
+    |> Code_Target.set_printings (Constant (c_bind, [(target,
+      SOME (Code_Printer.complex_const_syntax (pretty_haskell_monad c_bind)))]))
   end;
 
 

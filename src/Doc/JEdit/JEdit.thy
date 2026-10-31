@@ -79,10 +79,10 @@ text \<open>
   The overall look-and-feel of jEdit is changed significantly, and the
   different name of Isabelle/jEdit is justified even from the surface.
 
-  The main plugin is called ``Isabelle'' and has its own menu \<^emph>\<open>Plugins~/
-  Isabelle\<close> with access to several actions and add-on panels (see also
-  \secref{sec:dockables}), as well as \<^emph>\<open>Plugins~/ Plugin Options~/ Isabelle\<close>
-  (see also \secref{sec:options}).
+  The main plugin is called ``Isabelle'' and has its own entry in the toplevel
+  menu bar, with access to several actions and add-on panels (see also
+  \secref{sec:dockables}), as well as \<^emph>\<open>Options~/ Isabelle Options\<close> (see also
+  \secref{sec:options}).
 
   The plugin options allow to specify a logic session name, but the same
   selector is also accessible in the \<^emph>\<open>Theories\<close> panel
@@ -132,13 +132,18 @@ text \<open>
   official jEdit documentation does not know about the Isabelle plugin with
   its support for continuous checking of formal source text: jEdit is a plain
   text editor, but Isabelle/jEdit is a Prover IDE.
+
+  The \<^emph>\<open>Documentation\<close> panel can be navigated quickly using the keyboard:
+  arrow keys to move the selected entry, \<^verbatim>\<open>ENTER\<close> to open an entry, and
+  \<^verbatim>\<open>ESCAPE\<close> or \<^verbatim>\<open>S+F1\<close> to focus to the main text area --- which then allows
+  \<^verbatim>\<open>F1\<close> to reactivate \<^emph>\<open>Documentation\<close>.
 \<close>
 
 
 subsection \<open>Plugins\<close>
 
 text \<open>
-  The \<^emph>\<open>Plugin Manager\<close> of jEdit allows to augment editor functionality by JVM
+  \<^emph>\<open>Utilities / Plugin Manager\<close> allows to augment editor functionality by JVM
   modules (jars) that are provided by the central plugin repository, which is
   accessible via various mirror sites.
 
@@ -168,8 +173,8 @@ subsection \<open>Options \label{sec:options}\<close>
 text \<open>
   Both jEdit and Isabelle have distinctive management of persistent options.
 
-  Regular jEdit options are accessible via the dialogs \<^emph>\<open>Utilities~/ Global
-  Options\<close> or \<^emph>\<open>Plugins~/ Plugin Options\<close>, with a second chance to flip the
+  Regular jEdit options are accessible via the dialogs \<^emph>\<open>Options~/ Global
+  Options\<close> or \<^emph>\<open>Options~/ Plugin Options\<close>, with a second chance to flip the
   two within the central options dialog. Changes are stored in
   \<^path>\<open>$JEDIT_SETTINGS/properties\<close> and \<^path>\<open>$JEDIT_SETTINGS/keymaps\<close>.
 
@@ -177,13 +182,13 @@ text \<open>
   in \<^path>\<open>$ISABELLE_HOME_USER/etc/preferences\<close>, independently of
   other jEdit properties. See also \<^cite>\<open>"isabelle-system"\<close>, especially the
   coverage of sessions and command-line tools like @{tool build} or @{tool
-  options}.
+  "options"}.
 
   Those Isabelle options that are declared as \<^verbatim>\<open>public\<close> are configurable in
-  Isabelle/jEdit via \<^emph>\<open>Plugin Options~/ Isabelle~/ General\<close>. Moreover, there
+  Isabelle/jEdit via \<^emph>\<open>Options~/ Isabelle Options~/ General\<close>. Moreover, there
   are various options for rendering document content, which are configurable
-  via \<^emph>\<open>Plugin Options~/ Isabelle~/ Rendering\<close>. Thus \<^emph>\<open>Plugin Options~/
-  Isabelle\<close> in jEdit provides a view on a subset of Isabelle system options.
+  via \<^emph>\<open>Options~/ Isabelle Options~/ Rendering\<close>. Thus \<^emph>\<open>Options~/ Isabelle
+  Options\<close> in jEdit provides a view on a subset of Isabelle system options.
   Note that some of these options affect general parameters that are relevant
   outside Isabelle/jEdit as well, e.g.\ @{system_option threads} or
   @{system_option parallel_proofs} for the Isabelle build tool
@@ -276,8 +281,8 @@ text \<open>
 
   The \<^verbatim>\<open>-m\<close> option specifies additional print modes for the prover process.
   Note that the system option @{system_option_ref jedit_print_mode} allows to
-  do the same persistently (e.g.\ via the \<^emph>\<open>Plugin Options\<close> dialog of
-  Isabelle/jEdit), without requiring command-line invocation.
+  do the same persistently (e.g.\ via the \<^emph>\<open>Options / Isabelle Options\<close>
+  dialog), without requiring command-line invocation.
 
   The \<^verbatim>\<open>-J\<close> and \<^verbatim>\<open>-j\<close> options pass additional low-level options to the JVM or
   jEdit, respectively. The defaults are provided by the Isabelle settings
@@ -316,7 +321,7 @@ text \<open>
 
   The \<^verbatim>\<open>-n\<close> option reports the server name, and the \<^verbatim>\<open>-s\<close> option provides a
   different server name. The default server name is the official distribution
-  name (e.g.\ \<^verbatim>\<open>Isabelle2025-2\<close>). Thus @{tool jedit_client} can connect to the
+  name (e.g.\ \<^verbatim>\<open>Isabelle2026\<close>). Thus @{tool jedit_client} can connect to the
   Isabelle desktop application without further options.
 
   The \<^verbatim>\<open>-p\<close> option allows to override the implicit default of the system
@@ -359,7 +364,7 @@ text \<open>
     indicates that \<^emph>\<open>dark mode\<close> should be used for rendering in
     Isabelle/jEdit, via jEdit options with suffix ``\<^verbatim>\<open>.dark\<close>'' and Isabelle
     options with suffix ``\<^verbatim>\<open>_dark\<close>''. The panels for \<^emph>\<open>Global Options\<close> and
-    \<^emph>\<open>Plugin Options / Isabelle / Rendering\<close> operate on options according to
+    \<^emph>\<open>Options / Isabelle Options / Rendering\<close> operate on options according to
     the current Swing look-and-feel, e.g. on \<^verbatim>\<open>view.fgColor.dark\<close> in dark mode
     vs. \<^verbatim>\<open>view.fgColor\<close> in non-dark mode.
 
@@ -401,12 +406,12 @@ text \<open>
     \<^emph>\<open>List and text field font\<close>: this specifies the primary and secondary font
     for the \<^emph>\<open>Metal\<close> look-and-feel.
 
-    \<^item> \<^emph>\<open>Plugin Options / Isabelle / General / Reset Font Size\<close>: the main text
+    \<^item> \<^emph>\<open>Options / Isabelle Options / General / Reset Font Size\<close>: the main text
     area font size for action @{action_ref "isabelle.reset-font-size"}, e.g.\
     relevant for quick scaling like in common web browsers.
 
-    \<^item> \<^emph>\<open>Plugin Options / Console / General / Font\<close>: the console window font,
-    e.g.\ relevant for Isabelle/Scala command-line.
+    \<^item> \<^emph>\<open>Options / Plugin Options / Console / General / Font\<close>: the console
+    window font, e.g.\ relevant for Isabelle/Scala command-line.
 \<close>
 
 
@@ -502,13 +507,13 @@ text \<open>Technically, the Unicode interpretation of Isabelle symbols is an
   in the text force jEdit to fall back on a different encoding like
   \<^verbatim>\<open>ISO-8859-15\<close>. In that case, verbatim ``\<^verbatim>\<open>\<alpha>\<close>'' will be shown in the text
   buffer instead of its Unicode rendering ``\<open>\<alpha>\<close>''. The jEdit menu operation
-  \<^emph>\<open>File~/ Reload with Encoding~/ UTF-8-Isabelle\<close> helps to resolve such
-  problems (after repairing malformed parts of the text).
+  \<^emph>\<open>File~/ Reload as Plain Text\<close> (\<^verbatim>\<open>F9\<close>) and \<^emph>\<open>File~/ Reload as Unicode
+  Symbols\<close> (\<^verbatim>\<open>S+F9\<close>) help to sort out the underlying text encoding.
 
   If the loaded text already contains Unicode sequences that are in conflict
   with the Isabelle symbol encoding, the fallback-encoding UTF-8 is used and
   Isabelle symbols remain in literal \<^verbatim>\<open>\<symbol>\<close> form. The jEdit menu
-  operation \<^emph>\<open>Utilities~/ Buffer Options~/ Character encoding\<close> allows to
+  operation \<^emph>\<open>Options~/ Buffer Options~/ Character encoding\<close> allows to
   enforce \<^verbatim>\<open>UTF-8-Isabelle\<close>, but this will also change original Unicode text
   into Isabelle symbols when saving the file!
 \<close>
@@ -775,10 +780,9 @@ text \<open>
     quickly; see also option @{system_option_def "jedit_script_indent"} and
     @{system_option_def "jedit_script_indent_limit"}.
 
-  The above options are accessible in the menu \<^emph>\<open>Plugins / Plugin Options /
-  Isabelle / General\<close>. A prerequisite for advanced indentation is \<^emph>\<open>Utilities
-  / Buffer Options / Automatic indentation\<close>: it needs to be set to \<^verbatim>\<open>full\<close>
-  (default).
+  The above options are accessible in the menu \<^emph>\<open>Options / Isabelle Options /
+  General\<close>. A prerequisite for advanced indentation is \<^emph>\<open>Options / Buffer
+  Options / Automatic indentation\<close>: it needs to be set to \<^verbatim>\<open>full\<close> (default).
 \<close>
 
 
@@ -1086,13 +1090,14 @@ text \<open>
   actions (see \secref{sec:auto-tools} and \secref{sec:sledgehammer}).
 
   \<^medskip>
-  Alternatively, the subsequent actions (with keyboard shortcuts) allow to
-  show tooltip messages or navigate error positions:
+  It is also possible to show tooltip messages or navigate error positions via
+  the subsequent actions (with keyboard shortcuts):
 
   \<^medskip>
   \begin{tabular}[t]{l}
   @{action_ref "isabelle.tooltip"} (\<^verbatim>\<open>CS+b\<close>) \\
   @{action_ref "isabelle.message"} (\<^verbatim>\<open>CS+m\<close>) \\
+  @{action_ref "isabelle.line-status"} (\<^verbatim>\<open>CS+l\<close>) \\
   \end{tabular}\quad
   \begin{tabular}[t]{l}
   @{action_ref "isabelle.first-error"} (\<^verbatim>\<open>CS+a\<close>) \\
@@ -1101,6 +1106,20 @@ text \<open>
   @{action_ref "isabelle.prev-error"} (\<^verbatim>\<open>CS+p\<close>) \\
   \end{tabular}
   \<^medskip>
+
+  The jEdit action @{action "isabelle.line-status"} displays the same per-line
+  information as the gutter area, but avoids visual GUI interaction. The
+  headline accounts for errors and warnings; the body text lists all messages
+  in the order priorities. See also \figref{fig:output-line-status}
+
+  \begin{figure}[!htb]
+  \begin{center}
+  \includegraphics[scale=0.333]{output2} \\
+  \includegraphics[scale=0.333]{output3} \\
+  \end{center}
+  \caption{Line status output via keyboard shortcut \<^verbatim>\<open>CS+l\<close>}
+  \label{fig:output-line-status}
+  \end{figure}
 \<close>
 
 
@@ -1283,15 +1302,28 @@ text \<open>
   pressed). Such jumps to other text locations are recorded by the builtin
   navigator, which provides actions to move backwards or forwards, with arrow
   icons in the \<^emph>\<open>Incremental Search Bar\<close> (action @{action_ref
-  "quick-search"}). The following keyboard shortcuts are available:
+  "quick-search"}).
+
+  As an alternative to mouse clicks, the subsequent keyboard actions
+  help to manage hyperlinks:
 
   \<^medskip>
-  \begin{tabular}[t]{l}
-  @{action_ref "navigate-backwards"} (\<^verbatim>\<open>AS+LEFT\<close>) \\
-  @{action_ref "navigate-forwards"} (\<^verbatim>\<open>AS+RIGHT\<close>) \\
-  \end{tabular}\quad
+  \begin{tabular}[t]{ll}
+  @{action_def "isabelle.follow-link"} (\<^verbatim>\<open>AS+DOWN\<close>) \\
+  @{action_def "isabelle.show-links"} (\<^verbatim>\<open>AS+UP\<close>) \\
+  @{action_def "navigate-backwards"} (\<^verbatim>\<open>AS+LEFT\<close>) \\
+  @{action_def "navigate-forwards"} (\<^verbatim>\<open>AS+RIGHT\<close>) \\
+  \end{tabular}
   \<^medskip>
 
+  The action @{action "isabelle.follow-link"} follows the last (most specific)
+  link, as done via mouse hovering. The action @{action "isabelle.show-links"}
+  opens a popup with all possibilities; this allows to select one link via
+  mouse or keyboard (see also \secref{sec:completion}). The actions @{action
+  "navigate-backwards"} and @{action "navigate-forwards"} correspond to the
+  navigator arrows below the menu bar.
+
+  \<^medskip>
   Note that the link target may be a file that is itself not subject to formal
   document processing of the editor session and thus prevents further
   exploration: the chain of hyperlinks may end in Isabelle/ML source files
@@ -1333,8 +1365,11 @@ text \<open>
   highlighted in the text according to the cursor position, see also
   \figref{fig:scope1}. Here the referencing positions are rendered with an
   additional border, in reminiscence to a hyperlink. A mouse click with \<^verbatim>\<open>C\<close>
-  modifier, or the action @{action_def "isabelle.goto-entity"} (shortcut
-  \<^verbatim>\<open>CS+d\<close>) jumps to the original defining position.
+  modifier, or the action @{action_ref "isabelle.follow-link"} (shortcut
+  \<^verbatim>\<open>AS+DOWN\<close>) jumps to the original defining position. Alternatively, the
+  action @{action_def "isabelle.show-links"} (shortcut \<^verbatim>\<open>AS+UP\<close>) opens a popup
+  with the list of currently active hyperlinks, with the possibility to select
+  one via mouse or keyboard (see also \secref{sec:completion}).
 
   \begin{figure}[!htb]
   \begin{center}
@@ -1344,11 +1379,11 @@ text \<open>
   \label{fig:scope1}
   \end{figure}
 
-  The action @{action_def "isabelle.select-entity"} (shortcut \<^verbatim>\<open>CS+ENTER\<close>)
-  supports semantic selection of all occurrences of the formal entity at the
-  caret position, with a defining position in the current editor buffer. This
-  facilitates systematic renaming, using regular jEdit editing of a
-  multi-selection, see also \figref{fig:scope2}.
+  The action @{action_def "isabelle.select-entity"} (shortcut \<^verbatim>\<open>CS+ENTER\<close> or
+  \<^verbatim>\<open>AS+ENTER\<close>) supports semantic selection of all occurrences of the formal
+  entity at the caret position, with a defining position in the current editor
+  buffer. This facilitates systematic renaming, using regular jEdit editing of
+  a multi-selection, see also \figref{fig:scope2}.
 
   \begin{figure}[!htb]
   \begin{center}
@@ -1359,11 +1394,12 @@ text \<open>
   \end{figure}
 
   By default, the visual feedback on scopes is restricted to definitions
-  within the visible text area. The keyboard modifier \<^verbatim>\<open>CS\<close> overrides this:
-  then all defining and referencing positions are shown. This modifier may be
-  configured via option @{system_option jedit_focus_modifier}; the default
-  coincides with the modifier for the above keyboard actions. The empty string
-  means to disable this additional visual feedback.
+  within the visible text area. The keyboard modifiers \<^verbatim>\<open>CS\<close> or \<^verbatim>\<open>AS\<close> override
+  this (when used without mouse buttons): then all defining and referencing
+  positions are shown. These modifier may be configured via option
+  @{system_option jedit_focus_modifier}, as space-separated list. The default
+  coincides with the modifiers for the above keyboard actions. An empty list
+  disables this additional visual feedback.
 \<close>
 
 
@@ -1380,13 +1416,13 @@ text \<open>
   \<^medskip>
   \<^emph>\<open>Explicit completion\<close> is triggered by the action @{action_ref
   "isabelle.complete"}, which is bound to the keyboard shortcut \<^verbatim>\<open>C+b\<close>, and
-  thus overrides the jEdit default for @{action_ref "complete-word"}.
+  thus overrides the classic jEdit action @{action_ref "complete-word"}.
 
   \<^emph>\<open>Implicit completion\<close> hooks into the regular keyboard input stream of the
   editor, with some event filtering and optional delays.
 
   \<^medskip>
-  Completion options may be configured in \<^emph>\<open>Plugin Options~/ Isabelle~/
+  Completion options may be configured in \<^emph>\<open>Options~/ Isabelle Options~/
   General~/ Completion\<close>. These are explained in further detail below, whenever
   relevant. There is also a summary of options in
   \secref{sec:completion-options}.
@@ -1568,9 +1604,10 @@ text \<open>
   \end{tabular}
   \<^medskip>
 
-  Instead of the specific @{action_ref "isabelle.complete-word"}, it is also
-  possible to use the generic @{action_ref "isabelle.complete"} with its
-  default keyboard shortcut \<^verbatim>\<open>C+b\<close>.
+  The action @{action "isabelle.complete-word"} is also available via the
+  regular menu \<^emph>\<open>Edit / Complete word\<close>. An alternative is the the generic
+  action @{action_ref "isabelle.complete"} with its default keyboard shortcut
+  \<^verbatim>\<open>C+b\<close>.
 
   \<^medskip>
   Dictionary lookup uses some educated guesses about lower-case, upper-case,
@@ -1726,8 +1763,8 @@ subsection \<open>Options \label{sec:completion-options}\<close>
 
 text \<open>
   This is a summary of Isabelle/Scala system options that are relevant for
-  completion. They may be configured in \<^emph>\<open>Plugin Options~/ Isabelle~/ General\<close>
-  as usual.
+  completion. They may be configured in \<^emph>\<open>Options~/ Isabelle Options~/
+  General\<close> as usual.
 
   \<^item> @{system_option_def completion_limit} specifies the maximum number of
   items for various semantic completion operations (name-space entries etc.)
@@ -1812,7 +1849,7 @@ text \<open>
 
   \<^medskip>
   The following Isabelle system options control the behavior of automatically
-  tried tools (see also the jEdit dialog window \<^emph>\<open>Plugin Options~/ Isabelle~/
+  tried tools (see also the jEdit dialog window \<^emph>\<open>Options~/ Isabelle Options~/
   General~/ Automatically tried tools\<close>):
 
   \<^item> @{system_option_ref auto_methods} controls automatic use of a combination
@@ -1934,7 +1971,7 @@ text \<open>
   \end{figure}
 
   It is also possible to use text folding according to this structure, by
-  adjusting \<^emph>\<open>Utilities / Buffer Options / Folding mode\<close> of jEdit. The default
+  adjusting \<^emph>\<open>Options / Buffer Options / Folding mode\<close> of jEdit. The default
   mode \<^verbatim>\<open>isabelle\<close> uses the structure of formal definitions, statements, and
   proofs. The alternative mode \<^verbatim>\<open>sidekick\<close> uses the document structure of the
   SideKick parser, as explained above.
@@ -2139,9 +2176,9 @@ text \<open>
     facilities.
 
       \<^enum> The system option @{system_option_ref ML_debugger} as implicit state
-      of the Isabelle process. It may be changed in the menu \<^emph>\<open>Plugins /
-      Plugin Options / Isabelle / General\<close>. ML modules need to be reloaded and
-      recompiled to pick up that option as intended.
+      of the Isabelle process. It may be changed in the menu \<^emph>\<open>Options /
+      Options / Isabelle Options / General\<close>. ML modules need to be reloaded
+      and recompiled to pick up that option as intended.
 
       \<^enum> The configuration option @{attribute_ref ML_debugger}, with an
       attribute of the same name, to update a global or local context (e.g.\
@@ -2238,8 +2275,8 @@ text \<open>
   for the corresponding command keyword, using the technique of mouse hovering
   with \<^verbatim>\<open>CONTROL\<close>~/ \<^verbatim>\<open>COMMAND\<close> modifier (\secref{sec:tooltips-hyperlinks}).
   Actual display of timing depends on the global option @{system_option_ref
-  jedit_timing_threshold}, which can be configured in \<^emph>\<open>Plugin Options~/
-  Isabelle~/ General\<close>.
+  jedit_timing_threshold}, which can be configured in \<^emph>\<open>Options~/ Isabelle
+  Options~/ General\<close>.
 
   \<^medskip>
   The jEdit status line includes a monitor widget for the current heap usage
@@ -2352,7 +2389,7 @@ text \<open>
   \<^item> \<^bold>\<open>Problem:\<close> Antialiased text rendering may show bad performance or bad
   visual quality, notably on Linux/X11.
 
-  \<^bold>\<open>Workaround:\<close> The property \<^verbatim>\<open>view.antiAlias\<close> (via menu item Utilities /
+  \<^bold>\<open>Workaround:\<close> The property \<^verbatim>\<open>view.antiAlias\<close> (via menu item Options /
   Global Options / Text Area / Anti Aliased smooth text) has the main impact
   on text rendering, but some related properties may also change the
   behaviour. The default is \<^verbatim>\<open>view.antiAlias=subpixel HRGB\<close>: it can be much

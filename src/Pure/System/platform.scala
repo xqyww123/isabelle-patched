@@ -10,73 +10,34 @@ package isabelle
 object Platform {
   /* platform family */
 
-  val is_windows: Boolean = isabelle.setup.Environment.is_windows()
-  val is_linux: Boolean = isabelle.setup.Environment.is_linux()
-  val is_macos: Boolean = isabelle.setup.Environment.is_macos()
-  val is_unix: Boolean = is_linux || is_macos
+  def is_windows: Boolean = isabelle.setup.Environment.is_windows()
+  def is_linux: Boolean = isabelle.setup.Environment.is_linux()
+  def is_macos: Boolean = isabelle.setup.Environment.is_macos()
+  def is_unix: Boolean = is_linux || is_macos
 
-  def is_arm: Boolean = cpu_arch.startsWith("arm")
+  def family: Platform_Family = {
+    val arch = Isabelle_System.get_property("os.arch")
+    val is_arm = arch.containsSlice("arm64") || arch.containsSlice("aarch64")
 
-  def family: Family =
-    if (is_linux && is_arm) Family.linux_arm
-    else if (is_linux) Family.linux
-    else if (is_macos) Family.macos
-    else if (is_windows) Family.windows
+    if (is_linux && is_arm) Platform_Family.linux_arm
+    else if (is_linux) Platform_Family.linux
+    else if (is_macos && is_arm) Platform_Family.macos_arm
+    else if (is_macos) Platform_Family.macos
+    else if (is_windows) Platform_Family.windows
     else error("Failed to determine current platform family")
-
-  object Family {
-    val list: List[Family] = List(Family.linux, Family.linux_arm, Family.windows, Family.macos)
-
-    def unapply(name: String): Option[Family] =
-      try { Some(Family.valueOf(name)) }
-      catch { case _: IllegalArgumentException => None }
-
-    def parse(name: String): Family =
-      unapply(name) getOrElse error("Bad platform family: " + quote(name))
-
-    val standard: Family => String =
-      {
-        case Family.linux_arm => "arm64-linux"
-        case Family.linux => "x86_64-linux"
-        case Family.macos => "x86_64-darwin"
-        case Family.windows => "x86_64-cygwin"
-      }
-
-    val native: Family => String =
-      {
-        case Family.macos => "arm64-darwin"
-        case Family.windows => "x86_64-windows"
-        case platform => standard(platform)
-      }
-
-    def from_platform(platform: String): Family =
-      list.find(family => platform == standard(family) || platform == native(family))
-        .getOrElse(error("Bad platform " + quote(platform)))
   }
 
-  enum Family { case linux_arm, linux, macos, windows }
+  def jvm_platform: String = family.native
 
-
-  /* platform identifiers */
-
-  private val X86_64 = """amd64|x86_64""".r
-  private val Arm64 = """arm64|aarch64""".r
-
-  def cpu_arch: String =
-    System.getProperty("os.arch", "") match {
-      case X86_64() => "x86_64"
-      case Arm64() => "arm64"
-      case _ => error("Failed to determine CPU architecture")
+  def check_jvm_platform(): Unit = {
+    val family0 = Platform_Family.parse(Isabelle_Platform.local.ISABELLE_PLATFORM_FAMILY)
+    if (family != family0) {
+      def print(fam: Platform_Family): String = quote(fam.toString) + " (" + fam.native + ")"
+      error("The Java platform is running as " + print(family) +
+        ", but the system is " + print(family0) + ":" +
+        "\nPlease use the correct Isabelle application for " + quote(family0.toString) + "!")
     }
-
-  def os_name: String =
-    family match {
-      case Family.linux_arm => "linux"
-      case Family.macos => "darwin"
-      case _ => family.toString
-    }
-
-  lazy val jvm_platform: String = cpu_arch + "-" + os_name
+  }
 
 
   /* platform info */
@@ -99,15 +60,16 @@ object Platform {
     override def toString: String = platform
     def path: Path = Path.explode(platform)
 
-    val family: Family = Family.from_platform(platform)
+    val family: Platform_Family = Platform_Family.from_platform(platform)
     def family_name: String = family.toString
 
-    def is_linux_arm: Boolean = family == Family.linux_arm
-    def is_linux: Boolean = family == Family.linux
-    def is_macos: Boolean = family == Family.macos
-    def is_windows: Boolean = family == Family.windows
+    def is_linux_arm: Boolean = family == Platform_Family.linux_arm
+    def is_linux: Boolean = family == Platform_Family.linux
+    def is_macos_arm: Boolean = family == Platform_Family.macos_arm
+    def is_macos: Boolean = family == Platform_Family.macos
+    def is_windows: Boolean = family == Platform_Family.windows
 
-    def is(spec: String): Boolean =
+    def test(spec: String): Boolean =
       Info.ALL == spec || platform == spec || family_name == spec
   }
 
@@ -116,7 +78,7 @@ object Platform {
 
   private val Version = """1\.(\d+)\.0_(\d+)""".r
   lazy val jvm_version: String =
-    System.getProperty("java.version") match {
+    Isabelle_System.get_property("java.version") match {
       case Version(a, b) => a + "u" + b
       case a => a
     }
@@ -124,5 +86,7 @@ object Platform {
 
   /* JVM name */
 
-  val jvm_name: String = System.getProperty("java.vm.name", "")
+  val jvm_name: String = Isabelle_System.get_property("java.vm.name")
+
+  def is_scalajs: Boolean = jvm_name == "Scala.js"
 }

@@ -6,8 +6,7 @@ section \<open>Path-Connectedness\<close>
 
 theory Path_Connected
 imports
-  Starlike
-  T1_Spaces
+  Starlike T1_Spaces 
 begin
 
 subsection \<open>Paths and Arcs\<close>
@@ -113,6 +112,9 @@ lemma loop_free_linear_image_eq:
   assumes "linear f" "inj f"
     shows "loop_free(f \<circ> g) = loop_free g"
   using assms inj_on_eq_iff [of f] by (auto simp: loop_free_def)
+
+lemma loop_free_cnj: "loop_free (cnj \<circ> g) = loop_free g"
+  by (simp add: inj_on_def linear_cnj loop_free_linear_image_eq)
 
 lemma simple_path_linear_image_eq:
   fixes f :: "'a::euclidean_space \<Rightarrow> 'b::euclidean_space"
@@ -821,17 +823,6 @@ lemma subpath_translation: "subpath u v ((\<lambda>x. a + x) \<circ> g) = (\<lam
 lemma subpath_image: "subpath u v (f \<circ> g) = f \<circ> subpath u v g"
   by (rule ext) (simp add: subpath_def)
 
-lemma affine_ineq:
-  fixes x :: "'a::linordered_idom"
-  assumes "x \<le> 1" "v \<le> u"
-    shows "v + x * u \<le> u + x * v"
-proof -
-  have "(1-x)*(u-v) \<ge> 0"
-    using assms by auto
-  then show ?thesis
-    by (simp add: algebra_simps)
-qed
-
 lemma sum_le_prod1:
   fixes a::real shows "\<lbrakk>a \<le> 1; b \<le> 1\<rbrakk> \<Longrightarrow> a + b \<le> 1 + a * b"
   by (metis add.commute affine_ineq mult.right_neutral)
@@ -1148,6 +1139,11 @@ lemma simple_path_shiftpath:
   shows "simple_path (shiftpath a g)"
   using assms loop_free_shiftpath path_shiftpath simple_path_def by fastforce
 
+lemma shiftpath_reversepath_loop:
+  assumes "x \<in> {0..1}" "pathstart p = pathfinish p"
+  shows   "shiftpath c (reversepath p) x = reversepath (shiftpath (1-c) p) x"
+  using assms
+  by (auto simp: shiftpath_def reversepath_def algebra_simps pathstart_def pathfinish_def)
 
 subsection \<open>Straight-Line Paths\<close>
 
@@ -3264,6 +3260,49 @@ lemma inside_subset:
   using bounded_subset [of "connected_component_set (- S) _" U] assms
   by (metis (no_types, lifting) ComplI Un_iff connected_component_maximal inside_def mem_Collect_eq subsetI)
 
+lemma inside_translation:
+  fixes a :: "'a :: real_normed_vector"
+  shows "inside ((+) a ` S) = (+) a ` inside S"
+proof (rule set_eqI)
+  fix x :: 'a
+  define y where "y \<equiv> x - a"
+  then have xy: "x = a + y" by simp
+  have homeo: "homeomorphism (- S) ((+) a ` (- S)) ((+) a) ((+) (- a))"
+    using homeomorphism_symD homeomorphism_translation by blast
+  have "connected_component_set (- ((+) a ` S)) x =
+        (+) a ` connected_component_set (- S) y"
+    using connected_component_set_homeomorphism[OF homeo]
+    by (metis ComplD ComplI connected_component_eq_empty imageI image_is_empty translation_Compl
+        xy)
+  with xy show "(x \<in> inside ((+) a ` S)) = (x \<in> (+) a ` inside S)"
+    by (auto simp: inside_def)
+qed
+
+lemma outside_translation:
+  fixes a :: "'a :: real_normed_vector"
+  shows "outside ((+) a ` S) = (+) a ` outside S"
+  unfolding outside_inside inside_translation
+  by (metis image_Un translation_Compl)
+
+lemma inside_cnj_image: "inside (cnj ` S) = cnj ` inside S"
+proof (rule set_eqI)
+  fix x
+  define y where "y \<equiv> cnj x"
+  then have xy: "x = cnj y" by simp
+  have homeo: "homeomorphism (- S) (cnj ` (- S)) (cnj) cnj"
+    by (simp add: homeomorphism_def image_cnj_conv_vimage_cnj)
+  have "connected_component_set (- (cnj ` S)) x = cnj ` connected_component_set (- S) y"
+    using connected_component_set_homeomorphism[OF homeo]
+    by (metis complex_cnj_cnj connected_component_eq_empty image_cnj_conv_vimage_cnj image_is_empty
+        in_image_cnj_iff vimage_Compl y_def)
+  with xy show "(x \<in> inside (cnj ` S)) = (x \<in> cnj ` inside S)"
+    by (auto simp: inside_def bounded_cnj_image)
+qed
+
+lemma outside_cnj_image: "outside (cnj ` S) = cnj ` outside S"
+  unfolding outside_inside inside_translation
+  using image_cnj_conv_vimage_cnj inside_cnj_image by auto
+
 lemma frontier_not_empty:
   fixes S :: "'a :: real_normed_vector set"
   shows "\<lbrakk>S \<noteq> {}; S \<noteq> UNIV\<rbrakk> \<Longrightarrow> frontier S \<noteq> {}"
@@ -3370,6 +3409,477 @@ proof (rule ccontr)
   qed
   then show False
     using \<open>connected (- frontier C)\<close> by blast
+qed
+
+lemma convex_triple_rel_frontier_between:
+  fixes S :: "complex set" and a b c d :: complex and e :: real
+  assumes "between (a,b) c"
+    and d: "d \<bullet> c = e" "d \<bullet> b = e" "d \<bullet> a = e"
+    and ne: "b \<noteq> c" "a \<noteq> c" "a \<noteq> b"
+    and abc: "a \<in> rel_frontier S" "b \<in> rel_frontier S" "c \<in> rel_frontier S"
+    and "convex S"
+    and "d \<noteq> 0"
+  shows "S \<subseteq> {x. d \<bullet> x \<le> e} \<or> S \<subseteq> {x. d \<bullet> x \<ge> e}"
+proof -
+  obtain d' where "d' \<noteq> 0" 
+            and d'_clo: "\<forall>y \<in> closure S. d' \<bullet> c \<le> d' \<bullet> y"
+            and d'_int: "\<forall>y \<in> rel_interior S. d' \<bullet> c < d' \<bullet> y"
+    using supporting_hyperplane_rel_frontier [OF \<open>convex S\<close>] \<open>c \<in> rel_frontier S\<close>
+    by blast
+  define e' where "e' \<equiv> d' \<bullet> c"
+  have "c \<in> open_segment a b"
+    using \<open>between (a,b) c\<close> ne
+    by (auto simp: between_mem_segment open_segment_def)
+  then obtain u where "0 < u" "u < 1" and u: "c = (1 - u) *\<^sub>R a + u *\<^sub>R b"
+    by (meson in_segment(2))
+  obtain ineqs: "d' \<bullet> ((1 - u) *\<^sub>R a + u *\<^sub>R b) \<le> d' \<bullet> a"
+                "d' \<bullet> ((1 - u) *\<^sub>R a + u *\<^sub>R b) \<le> d' \<bullet> b"
+    using abc d'_clo rel_frontier_def u by auto
+  then have "d' \<bullet> a = e'"
+    using \<open>0 < u\<close> \<open>u < 1\<close> 
+    apply (simp add: e'_def u algebra_simps)
+    by (smt (verit) scaleR_eq_iff affine_ineq real_scaleR_def)
+  have "d' \<bullet> b = e'"
+    using \<open>0 < u\<close> \<open>u < 1\<close> 
+    apply (simp add: e'_def u algebra_simps)
+    by (smt (verit, ccfv_SIG) inner_add_right ineqs inner_mult_right
+        mult_le_cancel_left_pos scaleR_conv_of_real segment_bound_lemma)
+  have hyp_eq: "{x. d' \<bullet> x = e'} = {x. d \<bullet> x = e}"
+  proof -
+    have abc_in_d': "{a, b, c} \<subseteq> {x. d' \<bullet> x = e'}"
+      using \<open>d' \<bullet> a = e'\<close> \<open>d' \<bullet> b = e'\<close> e'_def by auto
+    have abc_in_d: "{a, b, c} \<subseteq> {x. d \<bullet> x = e}"
+      using assms by auto
+    have c_in_aff: "c \<in> affine hull {a, b}"
+      by (metis affine_hull_closed_segment assms(1) between_mem_segment hull_inc)
+    then have aff_abc: "aff_dim {a, b, c} = 1"
+      using aff_dim_insert[of c "{a, b}"] aff_dim_2[of a b] \<open>a \<noteq> b\<close>
+      by (simp add: insert_commute hull_inc)
+    have "affine hull {a, b, c} = affine hull {x::complex. d' \<bullet> x = e'}"
+      using aff_dim_hyperplane[OF \<open>d' \<noteq> 0\<close>] aff_dim_eq_full_gen[OF abc_in_d'] aff_abc by auto
+    then have "affine hull {a, b, c} = {x. d' \<bullet> x = e'}"
+      by (simp add: affine_hyperplane)
+    moreover 
+    have "affine hull {a, b, c} = affine hull {x::complex. d \<bullet> x = e}"
+      using aff_dim_hyperplane[OF \<open>d \<noteq> 0\<close>] aff_dim_eq_full_gen[OF abc_in_d] aff_abc by auto
+    then have "affine hull {a, b, c} = {x. d \<bullet> x = e}"
+      by (simp add: affine_hyperplane)
+    ultimately show ?thesis by simp
+  qed
+  have "rel_interior S \<subseteq> {x. d \<bullet> x < e} \<or> rel_interior S \<subseteq> {x. e < d \<bullet> x}"
+  proof -
+    have conn: "connected (rel_interior S)"
+      by (meson \<open>convex S\<close> convex_connected convex_rel_interior)
+    have disj: "{x. d \<bullet> x < e} \<inter> {x. e < d \<bullet> x} \<inter> rel_interior S = {}"
+      by auto
+    have sub: "rel_interior S \<subseteq> {x. d \<bullet> x < e} \<union> {x. e < d \<bullet> x}"
+      by (smt (verit) UnCI d'_int e'_def hyp_eq mem_Collect_eq subsetI)
+    have "{x. d \<bullet> x < e} \<inter> rel_interior S = {} \<or>
+          {x::complex. e < d \<bullet> x} \<inter> rel_interior S = {}"
+      using connectedD[OF conn open_halfspace_lt open_halfspace_gt disj sub] .
+    then show ?thesis using sub by blast
+  qed
+  then show ?thesis
+      using closure_mono convex_closure_rel_interior[OF \<open>convex S\<close>] \<open>d \<noteq> 0\<close>
+      by (metis (no_types, lifting) ext closure_halfspace_gt closure_halfspace_lt 
+          closure_subset order.trans)
+qed
+
+lemma convex_triple_rel_frontier:
+  fixes S :: "complex set" and a b c d :: complex and e :: real
+  assumes "convex S"
+    and "a \<in> rel_frontier S" "b \<in> rel_frontier S" "c \<in> rel_frontier S"
+    and "a \<noteq> b" "a \<noteq> c" "b \<noteq> c"
+    and eqe: "d \<bullet> a = e" "d \<bullet> b = e" "d \<bullet> c = e"
+  shows "S \<subseteq> {x. d \<bullet> x \<le> e} \<or> S \<subseteq> {x. d \<bullet> x \<ge> e}"
+proof (cases "d=0")
+  case False
+  have "aff_dim {a, b, c} \<le> aff_dim {x. d \<bullet> x = e}"
+    by (simp add: aff_dim_subset eqe)
+  also have "\<dots> \<le> 1"
+    using False by (simp add: aff_dim_hyperplane)
+  finally have "collinear {a,b,c}"
+    by (simp add: collinear_aff_dim)
+  then have "between (b,c) a \<or> between (c,a) b \<or> between (a,b) c"
+    by (simp add: collinear_between_cases)      
+  with False convex_triple_rel_frontier_between show ?thesis
+    using assms by blast
+qed auto
+
+subsection \<open>Lipschitz projections\<close>
+
+proposition inverse_lipschitz_convex_spherical_projection_explicit:
+  fixes x y :: "'a::euclidean_space"
+  assumes "convex S" "r>0" "0 \<in> S"
+    and reli: "ball 0 r \<inter> affine hull S \<subseteq> rel_interior S"
+    and S: "S \<subseteq> cball 0 R"
+    and x: "x \<in> rel_frontier S" and y: "y \<in> rel_frontier S"
+  shows "r / R\<^sup>2 * dist x y \<le> dist ((1 / norm x) *\<^sub>R x) ((1 / norm y) *\<^sub>R y)"
+proof (cases "R\<le>0")
+  case True
+  have "0 \<in> cball (0::'a) R" using \<open>0 \<in> S\<close> S by (meson subsetD)
+  then have "0 \<le> R" by simp
+  with True show ?thesis
+    by simp
+next
+  case False
+  have "0 \<in> rel_interior S"
+    using assms(2,3) hull_subset reli by fastforce
+  obtain x_ne: "x \<noteq> 0" and y_ne: "y \<noteq> 0"
+    using \<open>0 \<in> rel_interior S\<close> x y rel_frontier_def by auto
+  have r_le: "\<And>z. z \<in> rel_frontier S \<Longrightarrow> r \<le> norm z"
+    unfolding rel_frontier_def using closure_affine_hull reli
+    by (smt (verit, del_insts) DiffD1 DiffD2 Int_iff in_mono mem_ball_0) 
+  have norm_le: "\<And>z. z \<in> rel_frontier S \<Longrightarrow> norm z \<le> R"
+    unfolding rel_frontier_def using S closed_cball closure_minimal
+    by (metis Diff_subset mem_cball_0 subset_iff)
+  have "r \<le> R" and "0 < R"
+    using r_le[OF x] norm_le[OF x] \<open>r>0\<close> by linarith+
+  show ?thesis 
+  proof (cases "x \<bullet> y \<le> 0 \<or> x=y")
+    case True
+    have "0 \<le> 1 / norm x" and "0 \<le> 1 / norm y" using x_ne y_ne by auto
+    then have key: "min (1 / norm x) (1 / norm y) * dist x y
+               \<le> dist ((1 / norm x) *\<^sub>R x) ((1 / norm y) *\<^sub>R y)"
+      by (metis True dist_scaleR_ge_min dist_self mult_zero_right order_eq_refl)
+    have rR2_le_invR: "r / R\<^sup>2 \<le> 1 / R"
+      using \<open>0 < R\<close> \<open>r \<le> R\<close> by (simp add: divide_simps power2_eq_square)
+    have invR_le_invx: "1 / R \<le> 1 / norm x"
+      using norm_le[OF x] r_le[OF x] \<open>r>0\<close> \<open>0 < R\<close>
+      by (intro frac_le) linarith+
+    have "1 / R \<le> 1 / norm y"
+      using norm_le[OF y] r_le[OF y] \<open>r>0\<close> \<open>0 < R\<close>
+      by (intro frac_le) linarith+
+    then have "r / R\<^sup>2 \<le> min (1 / norm x) (1 / norm y)"
+      using rR2_le_invR invR_le_invx by simp
+    then show ?thesis
+      by (meson key order.trans mult_right_mono zero_le_dist)
+  next
+    case False
+    then have "x \<bullet> y > 0" "x\<noteq>y"
+      by auto
+        \<comment> \<open>Project the origin onto the affine hull of @{term \<open>{x, y}\<close>}\<close>
+    define w where "w = closest_point (affine hull {x, y}) 0"
+    have aff_closed: "closed (affine hull {x, y})" by (rule closed_affine_hull)
+    have aff_ne: "affine hull {x, y} \<noteq> {}" by (simp add: affine_hull_eq_empty)
+    have w_in: "w \<in> affine hull {x, y}"
+      unfolding w_def by (rule closest_point_in_set[OF aff_closed aff_ne])
+    have w_dist: "dist 0 w \<le> dist 0 z" if "z \<in> affine hull {x, y}" for z
+      using closest_point_le that w_def by blast
+    have w_orth: "orthogonal (v - w) w" if "v \<in> affine hull {x, y}" for v
+      using closest_point_affine_orthogonal[OF affine_affine_hull aff_ne]
+      by (metis add_diff_cancel_left' diff_0 diff_minus_eq_add orthogonal_clauses(5) that w_def)
+    have x_in_aff: "x \<in> affine hull {x, y}" by (rule hull_inc) simp
+    have y_in_aff: "y \<in> affine hull {x, y}" by (rule hull_inc) simp
+    have orth_x: "orthogonal (x - w) w" by (rule w_orth[OF x_in_aff])
+    have orth_y: "orthogonal (y - w) w" by (rule w_orth[OF y_in_aff])
+    have norm_w_le_x: "norm w \<le> norm x"
+      using w_dist[OF x_in_aff] by (simp add: dist_norm)
+    have norm_w_le_y: "norm w \<le> norm y"
+      using w_dist[OF y_in_aff] by (simp add: dist_norm)
+        \<comment> \<open>Derive orthogonality of @{term \<open>x - y\<close>} and @{term w}\<close>
+    have orth_xy_w: "orthogonal (x - y) w"
+      using orthogonal_clauses(10)[OF orth_x orth_y] by (simp add: algebra_simps)
+        \<comment> \<open>Collinearity and case analysis\<close>
+    have collinear_wxy: "collinear {w, x, y}"
+      by (meson False collinear_3_affine_hull collinear_between_cases w_in)
+    have betw_cases: "between (x, y) w \<or> between (y, w) x \<or> between (w, x) y"
+      using collinear_wxy[unfolded collinear_between_cases] by blast
+    show ?thesis
+    proof (cases "between (x,y) w")
+      case True
+      have orth_w: "orthogonal w (x - y)"
+        using orth_xy_w by (simp add: orthogonal_commute)
+      have step: "min (1 / norm x) (1 / norm y) * dist x y
+                          \<le> dist ((1 / norm x) *\<^sub>R x) ((1 / norm y) *\<^sub>R y)"
+        by (rule dist_scaleR_ge_min_between) (auto simp: x_ne y_ne intro: True orth_w)
+      have "r / R\<^sup>2 \<le> min (1 / norm x) (1 / norm y)"
+        using \<open>R>0\<close> \<open>r \<le> R\<close> norm_le[OF x] norm_le[OF y] x_ne y_ne
+        by (simp add: divide_simps mult_mono power2_eq_square)
+      then have "r / R\<^sup>2 * dist x y \<le> min (1 / norm x) (1 / norm y) * dist x y"
+        using mult_right_mono[of "r / R\<^sup>2" "min (1 / norm x) (1 / norm y)" "dist x y"]
+        by (simp add: zero_le_dist)
+      then show ?thesis
+        using step by linarith 
+    next
+      case False
+      then have *: "between (y,w) x \<or> between (x,w) y"
+        by (metis betw_cases between_commute)
+          \<comment> \<open>Extract a lemma that works for either orientation\<close>
+      have "r / R\<^sup>2 * dist x y \<le> dist ((1 / norm x) *\<^sub>R x) ((1 / norm y) *\<^sub>R y)"
+        if betx: "between (y, w) x" and orthw: "orthogonal (x - w) w" 
+          and nbetw: "\<not> between (x,y) w"
+          and xfr: "x \<in> rel_frontier S" and yfr: "y \<in> rel_frontier S"
+          and xne: "x \<noteq> 0" and yne: "y \<noteq> 0"
+          and rnx: "r \<le> norm x" and rny: "r \<le> norm y"
+          and nwx: "norm w \<le> norm x" and xR: "norm x \<le> R"
+          and yR: "norm y \<le> R"
+          and dot_pos: "0 < x \<bullet> y" and xy_ne: "x \<noteq> y"
+        for x y :: "'a"
+      proof -
+        obtain "w\<noteq>x" "w\<noteq>y"
+          using nbetw by fastforce
+            \<comment> \<open>Project @{term y} onto the line through @{term \<open>0::'a\<close>} and @{term x}\<close>
+        define x' where "x' = closest_point (affine hull {0, x}) y"
+        have aff_ne': "affine hull {(0::'a), x} \<noteq> {}"
+          by (simp add: affine_hull_eq_empty)
+        have aff_closed': "closed (affine hull {(0::'a), x})"
+          by (rule closed_affine_hull)
+        have x'_orth: "orthogonal (v - x') (y - x')" if "v \<in> affine hull {0, x}" for v
+          by (simp add: closest_point_affine_orthogonal that x'_def)
+        have orth_0: "orthogonal (0 - x') (y - x')"
+          by (rule x'_orth[OF hull_inc]) simp
+        have orth_x: "orthogonal (x - x') (y - x')"
+          by (rule x'_orth[OF hull_inc]) simp
+        have "inverse R \<le> abs (inverse (norm y))"
+          by (simp add: le_imp_inverse_le yR yne)
+        moreover have "r / R * dist x y \<le> dist ((norm y / norm x) *\<^sub>R x) y"
+        proof -
+          have r_le_w: "r \<le> norm w"
+          proof (rule ccontr)
+            assume "\<not> r \<le> norm w"
+            then have "w \<in> ball 0 r" by (simp add: dist_norm)
+            moreover have "w \<in> affine hull S"
+              by (smt (verit, best) affine_affine_hull x y bot.extremum insert_subset
+                  rel_frontier_affine_hull subset_hull subset_iff w_in)
+            ultimately have "w \<in> rel_interior S"
+              using reli by auto
+            moreover have "y \<in> closure S"
+              using yfr rel_frontier_def by auto
+            ultimately have "open_segment w y \<subseteq> rel_interior S"
+              using rel_interior_closure_convex_segment[OF \<open>convex S\<close>] by auto
+            moreover have "x \<in> open_segment w y"
+              using betx \<open>w \<noteq> x\<close> xy_ne
+              by (simp add: between_mem_segment open_segment_def closed_segment_commute)
+            ultimately have "x \<in> rel_interior S" by auto
+            then show False using xfr rel_frontier_def by auto
+          qed
+          have "r * dist x y \<le> dist 0 w * dist x y"
+            using r_le_w by (intro mult_right_mono) auto
+          also have "\<dots> = dist y x' * dist 0 x"
+          proof (intro collinear_orthogonal_dist_product)
+            show "collinear {0, x, x'}"
+              using closest_point_in_set[OF aff_closed' aff_ne'] affine_hull_3_imp_collinear
+              unfolding x'_def by blast
+            show "collinear {w, x, y}"
+              by (simp add: collinear_between_cases betx)
+            show "orthogonal (0 - w) (x - y)"
+              by (smt (verit, ccfv_SIG) \<open>w \<noteq> x\<close> diff_0 between_implies_scaled_diff between_triv2
+                  minus_diff_eq orthogonal_clauses(3) orthogonal_commute orthogonal_scaleR right_minus_eq
+                  scaleR_zero_left betx xy_ne orthw)
+            show "orthogonal (y - x') (0 - x')"
+              using orth_0 by (simp add: orthogonal_commute)
+            show "x' \<noteq> 0"
+              using orth_x orthogonal_def dot_pos by force
+            show "y \<noteq> w"
+              using \<open>w \<noteq> y\<close> by auto
+          qed
+          also have "\<dots> \<le> dist y x' * R"
+            by (simp add: mult_left_mono xR)
+          finally have "r / R * dist x y \<le> dist y x'"
+            by (simp add: \<open>0 < R\<close> mult_imp_div_pos_le)
+          also have "\<dots> \<le> dist ((norm y / norm x) *\<^sub>R x) y"
+            by (simp add: dist_commute closest_point_le collinear_3_imp_in_affine_hull collinear_lemma xne
+                x'_def)
+          finally show ?thesis .
+        qed
+        ultimately have "r / R\<^sup>2 * dist x y \<le> \<bar>inverse (norm y)\<bar> * dist ((norm y / norm x) *\<^sub>R x) y"
+          by (metis abs_inverse abs_norm_cancel divide_divide_eq_left' divide_inverse_commute frac_le
+              power2_eq_square yR yne times_divide_eq_left zero_le_dist zero_less_norm_iff)
+        also have "\<dots> = dist ((1 / norm x) *\<^sub>R x) ((1 / norm y) *\<^sub>R y)"
+        proof -
+          have "(1 / norm x) *\<^sub>R x = inverse (norm y) *\<^sub>R ((norm y / norm x) *\<^sub>R x)"
+            using yne by (simp add: scaleR_scaleR)
+          then have "dist ((1 / norm x) *\<^sub>R x) ((1 / norm y) *\<^sub>R y) =
+                    \<bar>inverse (norm y)\<bar> * dist ((norm y / norm x) *\<^sub>R x) y"
+            by (metis (mono_tags, lifting) dist_norm inverse_eq_divide norm_scaleR
+                scaleR_right_diff_distrib)
+          then show ?thesis by simp
+        qed
+        finally show ?thesis .
+      qed
+      then show ?thesis using * False \<open>0 < x \<bullet> y\<close> x y
+        by (metis between_commute dist_commute dist_self inner_commute less_eq_real_def local.norm_le
+            norm_w_le_x norm_w_le_y orth_x orth_y r_le real_scaleR_def scaleR_zero_right x_ne y_ne)
+    qed
+  qed
+qed
+
+corollary inverse_lipschitz_convex_spherical_projection:
+  fixes S :: "'a::euclidean_space set"
+  assumes "convex S" "bounded S" and 0: "0 \<in> rel_interior S"
+  shows "\<exists>B>0. \<forall>x y. x \<in> rel_frontier S \<longrightarrow> y \<in> rel_frontier S \<longrightarrow>
+         B * dist x y \<le> dist ((1 / norm x) *\<^sub>R x) ((1 / norm y) *\<^sub>R y)"
+proof -
+  obtain R where "R > 0" and R: "\<forall>x\<in>S. norm x \<le> R"
+    using assms(2) bounded_pos by blast
+  then have s_cball: "S \<subseteq> cball 0 R"
+    by (auto simp: mem_cball_0)
+  obtain r where "r > 0" and r: "ball 0 r \<inter> affine hull S \<subseteq> S"
+    using assms(3) by (auto simp: mem_rel_interior_ball)
+  have ball_sub: "ball 0 r \<inter> affine hull S \<subseteq> rel_interior S"
+    by (metis open_ball inf.commute openin_open_Int r rel_interior_maximal)
+  have "0 \<in> S"
+    using 0 rel_interior_subset by blast
+  have "0 < r / R\<^sup>2"
+    using \<open>r > 0\<close> \<open>R > 0\<close> by (auto intro: divide_pos_pos zero_less_power)
+  moreover have "\<forall>x y. x \<in> rel_frontier S \<longrightarrow> y \<in> rel_frontier S \<longrightarrow>
+      r / R\<^sup>2 * dist x y \<le> dist ((1 / norm x) *\<^sub>R x) ((1 / norm y) *\<^sub>R y)"
+    using inverse_lipschitz_convex_spherical_projection_explicit
+      [OF assms(1) \<open>r > 0\<close> \<open>0 \<in> S\<close> ball_sub s_cball]
+    by blast
+  ultimately show ?thesis by blast
+qed
+
+
+proposition lipschitz_convex_spherical_projection_explicit:
+  fixes r :: real and S :: "'a::euclidean_space set"
+  assumes "convex S" "0 < r" "0 \<in> S"
+    and ball_sub: "ball 0 r \<inter> affine hull S \<subseteq> rel_interior S"
+    and x_rf: "x \<in> rel_frontier S" and y_rf: "y \<in> rel_frontier S"
+  shows "dist (x /\<^sub>R norm x) (y /\<^sub>R norm y) \<le> inverse r * dist x y"
+proof -
+  have x_ne: "x \<noteq> 0" and y_ne: "y \<noteq> 0"
+  proof -
+    have "0 \<in> ball 0 r" using \<open>0 < r\<close> by simp
+    moreover have "0 \<in> affine hull S" using \<open>0 \<in> S\<close> by (rule hull_inc)
+    ultimately have "0 \<in> rel_interior S" using ball_sub by auto
+    moreover have "x \<notin> rel_interior S" "y \<notin> rel_interior S"
+      using x_rf y_rf by (auto simp: rel_frontier_def)
+    ultimately show "x \<noteq> 0" "y \<noteq> 0" by auto
+  qed
+  have x_aff: "x \<in> affine hull S" and y_aff: "y \<in> affine hull S"
+    using x_rf y_rf rel_frontier_affine_hull by auto
+  have norm_x: "norm x \<ge> r" and norm_y: "norm y \<ge> r"
+  proof -
+    have x_not_ri: "x \<notin> rel_interior S" and y_not_ri: "y \<notin> rel_interior S"
+      using x_rf y_rf by (auto simp: rel_frontier_def)
+    have "\<not> (norm x < r)"
+    proof
+      assume "norm x < r"
+      then have "x \<in> ball 0 r" by (simp add: mem_ball_0)
+      then have "x \<in> ball 0 r \<inter> affine hull S" using x_aff by auto
+      then have "x \<in> rel_interior S" using ball_sub by auto
+      with x_not_ri show False by contradiction
+    qed
+    then show "norm x \<ge> r" by linarith
+    have "\<not> (norm y < r)"
+    proof
+      assume "norm y < r"
+      then have "y \<in> ball 0 r" by (simp add: mem_ball_0)
+      then have "y \<in> ball 0 r \<inter> affine hull S" using y_aff by auto
+      then have "y \<in> rel_interior S" using ball_sub by auto
+      with y_not_ri show False by contradiction
+    qed
+    then show "norm y \<ge> r" by linarith
+  qed
+  have descale: "min (norm x) (norm y) * dist (x /\<^sub>R norm x) (y /\<^sub>R norm y) \<le> dist x y"
+  proof -
+    have nx: "norm x > 0" and ny: "norm y > 0"
+      using x_ne y_ne by auto
+    let ?u = "x /\<^sub>R norm x" and ?v = "y /\<^sub>R norm y"
+    have nu: "norm ?u = 1" and nv: "norm ?v = 1"
+      using nx ny by simp_all
+    have expand_xy: "(dist x y)\<^sup>2 = (norm x)\<^sup>2 + (norm y)\<^sup>2 - 2 * (norm x) * (norm y) * (?u \<bullet> ?v)"
+    proof -
+      have "x = norm x *\<^sub>R ?u" using nx by simp
+      moreover have "y = norm y *\<^sub>R ?v" using ny by simp
+      ultimately have "(dist x y)\<^sup>2 = (norm (norm x *\<^sub>R ?u - norm y *\<^sub>R ?v))\<^sup>2"
+        by (simp add: dist_norm)
+      also have "\<dots> = (norm x *\<^sub>R ?u - norm y *\<^sub>R ?v) \<bullet> (norm x *\<^sub>R ?u - norm y *\<^sub>R ?v)"
+        by (rule power2_norm_eq_inner)
+      also have "\<dots> = (norm x)\<^sup>2 * (?u \<bullet> ?u) - 2 * norm x * norm y * (?u \<bullet> ?v) + (norm y)\<^sup>2 * (?v \<bullet> ?v)"
+        by (simp add: inner_diff_left inner_diff_right inner_scaleR_left inner_scaleR_right
+                      algebra_simps power2_eq_square inner_commute)
+      also have "\<dots> = (norm x)\<^sup>2 + (norm y)\<^sup>2 - 2 * norm x * norm y * (?u \<bullet> ?v)"
+        using nu nv by (simp add: power2_norm_eq_inner[symmetric])
+      finally show ?thesis .
+    qed
+    have expand_uv: "(dist ?u ?v)\<^sup>2 = 2 - 2 * (?u \<bullet> ?v)"
+    proof -
+      have "(dist ?u ?v)\<^sup>2 = (norm (?u - ?v))\<^sup>2" by (simp add: dist_norm)
+      also have "\<dots> = (?u - ?v) \<bullet> (?u - ?v)" by (rule power2_norm_eq_inner)
+      also have "\<dots> = ?u \<bullet> ?u - 2 * (?u \<bullet> ?v) + ?v \<bullet> ?v"
+        by (simp add: inner_diff_left inner_diff_right algebra_simps inner_commute)
+      also have "\<dots> = 2 - 2 * (?u \<bullet> ?v)"
+        using nu nv by (simp add: power2_norm_eq_inner[symmetric])
+      finally show ?thesis .
+    qed
+    have sq_ineq: "(min (norm x) (norm y) * dist ?u ?v)\<^sup>2 \<le> (dist x y)\<^sup>2"
+    proof -
+      let ?m = "min (norm x) (norm y)"
+      let ?M = "max (norm x) (norm y)"
+      have m_pos: "?m > 0" using nx ny by simp
+      have M_pos: "?M > 0" using nx ny by linarith
+      have m_le_M: "?m \<le> ?M" by simp
+      have uv_bound: "?u \<bullet> ?v \<le> 1"
+        using norm_cauchy_schwarz[of ?u ?v] nu nv by simp
+      have "(?m * dist ?u ?v)\<^sup>2 = ?m\<^sup>2 * (dist ?u ?v)\<^sup>2"
+        by (simp add: power_mult_distrib)
+      also have "\<dots> = ?m\<^sup>2 * (2 - 2 * (?u \<bullet> ?v))"
+        using expand_uv by simp
+      also have "\<dots> \<le> ?m * ?M * (2 - 2 * (?u \<bullet> ?v))"
+      proof -
+        have "?m\<^sup>2 \<le> ?m * ?M"
+          using m_pos m_le_M by (simp add: power2_eq_square mult_left_mono)
+        moreover have "2 - 2 * (?u \<bullet> ?v) \<ge> 0" using uv_bound by linarith
+        ultimately show ?thesis by (intro mult_right_mono) auto
+      qed
+      also have "\<dots> = (norm x) * (norm y) * (2 - 2 * (?u \<bullet> ?v))"
+        by (auto simp: min_def max_def field_simps)
+      also have "\<dots> = 2 * norm x * norm y - 2 * norm x * norm y * (?u \<bullet> ?v)"
+        by algebra
+      also have "\<dots> \<le> (norm x)\<^sup>2 + (norm y)\<^sup>2 - 2 * norm x * norm y * (?u \<bullet> ?v)"
+        by (simp add: sum_squares_bound)
+      also have "\<dots> = (dist x y)\<^sup>2" using expand_xy by simp
+      finally show ?thesis .
+    qed
+    \<comment> \<open>Conclude from squared inequality\<close>
+    have "min (norm x) (norm y) * dist ?u ?v \<ge> 0"
+      using nx ny by (simp add: min_def zero_le_dist)
+    then show ?thesis using sq_ineq
+      by (meson pos2 power_mono_iff zero_le_dist)
+  qed
+  \<comment> \<open>Combine descale with norm bounds\<close>
+  have "min (norm x) (norm y) \<ge> r"
+    using norm_x norm_y by linarith
+  moreover have "dist (x /\<^sub>R norm x) (y /\<^sub>R norm y) \<ge> 0"
+    by (simp add: zero_le_dist)
+  ultimately have "r * dist (x /\<^sub>R norm x) (y /\<^sub>R norm y) \<le> 
+                   min (norm x) (norm y) * dist (x /\<^sub>R norm x) (y /\<^sub>R norm y)"
+    by (simp add: mult_right_mono)
+  also have "\<dots> \<le> dist x y" by (rule descale)
+  finally show ?thesis
+    using \<open>0 < r\<close> by (simp add: field_simps)
+qed
+
+corollary lipschitz_convex_spherical_projection:
+  fixes S :: "'a::euclidean_space set"
+  assumes "convex S" "0 \<in> rel_interior S"
+  shows "\<exists>B. \<forall>x y. x \<in> rel_frontier S \<longrightarrow> y \<in> rel_frontier S \<longrightarrow>
+              dist (x /\<^sub>R norm x) (y /\<^sub>R norm y) \<le> B * dist x y"
+proof -
+  from assms(2) obtain r where "r > 0" and
+    sub: "ball 0 r \<inter> affine hull S \<subseteq> S"
+    using mem_rel_interior_ball by (auto simp: mem_rel_interior_ball)
+  have "0 \<in> S" using assms(2) rel_interior_subset by auto
+  have ball_ri: "ball 0 r \<inter> affine hull S \<subseteq> rel_interior S"
+  proof -
+    have "openin (top_of_set (affine hull S)) (affine hull S \<inter> ball 0 r)"
+      by (intro openin_open_Int open_ball)
+    then have "openin (top_of_set (affine hull S)) (ball 0 r \<inter> affine hull S)"
+      by (simp add: Int_commute)
+    then show ?thesis
+      using sub openin_subset_relative_interior by blast
+  qed
+  show ?thesis
+  proof (intro exI allI impI)
+    fix x y assume "x \<in> rel_frontier S" "y \<in> rel_frontier S"
+    show "dist (x /\<^sub>R norm x) (y /\<^sub>R norm y) \<le> inverse r * dist x y"
+      by (rule lipschitz_convex_spherical_projection_explicit
+            [OF \<open>convex S\<close> \<open>r > 0\<close> \<open>0 \<in> S\<close> ball_ri
+             \<open>x \<in> rel_frontier S\<close> \<open>y \<in> rel_frontier S\<close>])
+  qed
 qed
 
 lemma connected_component_UNIV [simp]:

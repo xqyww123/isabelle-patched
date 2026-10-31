@@ -35,42 +35,51 @@ object Isabelle_Platform {
   }
 
 
-  /* system context for progress/process */
+  /* support for platform-specific execution */
 
-  object Context {
+  object Bash_Context {
     def apply(
-      isabelle_platform: Isabelle_Platform = local,
-      mingw: MinGW = MinGW.none,
+      ssh: SSH.System = SSH.Local,
+      mingw_root: Option[Path] = None,
+      windows: Boolean = true,
       apple: Boolean = true,
       progress: Progress = new Progress
-    ): Context = {
-      val context_platform = isabelle_platform
-      val context_mingw = mingw
-      val context_apple = apple
-      val context_progress = progress
-      new Context {
-        override def isabelle_platform: Isabelle_Platform = context_platform
-        override def mingw: MinGW = context_mingw
-        override def apple: Boolean = context_apple
-        override def progress: Progress = context_progress
-      }
+    ): Bash_Context = {
+      require(mingw_root.isEmpty || windows, "incoherent Windows platform")
+      val isabelle_platform =
+        ssh.ssh_session match {
+          case None => local
+          case Some(session) => remote(session)
+        }
+      val mingw =
+        mingw_root match {
+          case None => MinGW.none
+          case Some(root) => MinGW.init(root = root, ssh = ssh)
+        }
+      new Bash_Context(ssh, isabelle_platform, mingw, windows = windows, apple = apple, progress)
     }
   }
 
-  trait Context {
-    def isabelle_platform: Isabelle_Platform
-    def mingw: MinGW
-    def apple: Boolean
-    def progress: Progress
+  final class Bash_Context private(
+    val ssh: SSH.System,
+    val isabelle_platform: Isabelle_Platform,
+    val mingw: MinGW,
+    val windows: Boolean,
+    val apple: Boolean,
+    val progress: Progress
+  ) {
+    def ISABELLE_PLATFORM: String =
+      isabelle_platform.ISABELLE_PLATFORM(windows = windows, apple = apple)
+    override def toString: String = ISABELLE_PLATFORM
 
-    def ISABELLE_PLATFORM: String = isabelle_platform.ISABELLE_PLATFORM(windows = true, apple = apple)
     def is_linux_arm: Boolean = isabelle_platform.is_linux && isabelle_platform.is_arm
     def is_macos_arm: Boolean = isabelle_platform.is_macos && isabelle_platform.is_arm && apple
     def is_arm: Boolean = is_linux_arm || is_macos_arm
 
     def standard_path(path: Path): String =
-      mingw.standard_path(File.platform_path(path))
+      mingw.standard_path(ssh.platform_path(path))
 
+    // bash without bash_process wrapper
     def bash(script: String,
       cwd: Path = Path.current,
       env: JMap[String, String] = Isabelle_System.Settings.env(),
@@ -78,7 +87,73 @@ object Isabelle_Platform {
       progress.bash(
         if (is_macos_arm) "arch -arch arm64 bash -c " + Bash.string(script)
         else mingw.bash_script(script),
-        cwd = cwd, env = env, echo = progress.verbose)
+        ssh = ssh, cwd = cwd, env = env, echo = progress.verbose)
+    }
+
+    def export_library_path(dir: Path): String = {
+      val x =
+        if (isabelle_platform.is_linux) "LD_LIBRARY_PATH"
+        else if (isabelle_platform.is_macos) "DYLD_LIBRARY_PATH"
+        else if (isabelle_platform.is_windows) "PATH"
+        else error("Bad platform " + ISABELLE_PLATFORM)
+      val y =
+        if (isabelle_platform.is_linux || isabelle_platform.is_macos) "lib"
+        else if (isabelle_platform.is_windows) "bin"
+        else error("Bad platform " + ISABELLE_PLATFORM)
+      val z = standard_path(dir.absolute) + "/" + y
+      "export " + x + "=" + quote(z + ":" + "$" + x)
+    }
+
+    def library_closure(path: Path,
+      env_prefix: String = "",
+      filter: String => Boolean = _ => true
+    ): List[String] = {
+      val exe_path = path.expand
+      val exe_dir = exe_path.dir
+      val exe = exe_path.base
+
+      val lines = {
+        val ldd = if (isabelle_platform.is_macos) "otool -L" else "ldd"
+        val script = env_prefix + ldd + " " + ssh.bash_path(exe)
+        split_lines(bash(script, cwd = exe_dir).check.out)
+      }
+
+      def lib_name(lib: String): String =
+        Library.take_prefix[Char](c => c != '.' && c != '-',
+          Library.take_suffix[Char](_ != '/', lib.toList)._2)._1.mkString
+
+      val libs =
+        if (isabelle_platform.is_macos) {
+          val Pattern = """^\s*(/.+)\s+\(.*\)$""".r
+          for {
+            case Pattern(lib) <- lines
+            if !lib.startsWith("@executable_path/") && filter(lib_name(lib))
+          } yield lib
+        }
+        else {
+          val Pattern = """^.*=>\s*(/.+)\s+\(.*\)$""".r
+          for { case Pattern(lib) <- lines if filter(lib_name(lib)) }
+            yield ssh.standard_path(mingw.platform_path(lib))
+        }
+
+      if (libs.nonEmpty) {
+        libs.foreach(lib => ssh.copy_file(Path.explode(lib), exe_dir))
+
+        if (isabelle_platform.is_linux) {
+          ssh.require_command("patchelf")
+          bash("patchelf --force-rpath --set-rpath '$ORIGIN' " + ssh.bash_path(exe_path)).check
+        }
+        else if (isabelle_platform.is_macos) {
+          val script =
+            ("install_name_tool" ::
+              libs.map(file => "-change " + Bash.string(file) + " " +
+                Bash.string("@executable_path/" + Path.explode(file).file_name) + " " +
+                ssh.bash_path(exe))).mkString(" ")
+          bash(script, cwd = exe_dir).check
+        }
+      }
+
+      libs
     }
   }
 }
@@ -88,6 +163,7 @@ class Isabelle_Platform private(val settings: List[(String, String)]) {
     settings.collectFirst({ case (a, b) if a == name => b }).
       getOrElse(error("Bad platform settings variable: " + quote(name)))
 
+  val ISABELLE_PLATFORM_FAMILY: String = get("ISABELLE_PLATFORM_FAMILY")
   val ISABELLE_PLATFORM64: String = get("ISABELLE_PLATFORM64")
   val ISABELLE_WINDOWS_PLATFORM64: String = get("ISABELLE_WINDOWS_PLATFORM64")
   val ISABELLE_APPLE_PLATFORM64: String = get("ISABELLE_APPLE_PLATFORM64")
@@ -100,11 +176,6 @@ class Isabelle_Platform private(val settings: List[(String, String)]) {
   def is_arm: Boolean =
     ISABELLE_PLATFORM64.startsWith("arm64-") ||
     ISABELLE_APPLE_PLATFORM64.startsWith("arm64-")
-
-  val ISABELLE_PLATFORM_FAMILY: String = {
-    val family0 = get("ISABELLE_PLATFORM_FAMILY")
-    if (family0 == "linux" && is_arm) "linux_arm" else family0
-  }
 
   def is_linux: Boolean = ISABELLE_PLATFORM_FAMILY.startsWith("linux")
   def is_macos: Boolean = ISABELLE_PLATFORM_FAMILY.startsWith("macos")

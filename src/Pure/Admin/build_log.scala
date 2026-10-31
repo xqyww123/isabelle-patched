@@ -7,12 +7,11 @@ Management of build log files and database storage.
 package isabelle
 
 
-import java.io.{File => JFile}
 import java.time.format.{DateTimeFormatter, DateTimeParseException}
-import java.util.Locale
 
 import scala.collection.mutable
 import scala.util.matching.Regex
+import scala.math.Ordering
 
 
 object Build_Log {
@@ -77,9 +76,9 @@ object Build_Log {
   /* file names */
 
   def log_date(date: Date): String =
-    String.format(Locale.ROOT, "%s.%05d",
-      DateTimeFormatter.ofPattern("yyyy-MM-dd").format(date.rep),
-      java.lang.Long.valueOf((date - date.midnight).ms / 1000))
+    Library.format("%s.%05d",
+      DateTimeFormatter.ofPattern("yyyy-MM-dd").nn.format(date.rep),
+      Value.Long.obj((date - date.midnight).ms / 1000))
 
   def log_subdir(date: Date): Path =
     Path.explode("log") + Path.explode(date.rep.getYear.toString)
@@ -104,13 +103,13 @@ object Build_Log {
         case None => name
       }
     }
-    def plain_name(file: JFile): String = plain_name(file.getName)
+    def plain_name(path: Path): String = plain_name(path.file_name)
 
     def apply(name: String, lines: List[String], cache: XML.Cache = XML.Cache.none): Log_File =
       new Log_File(plain_name(name), lines.map(s => cache.string(Library.trim_line(s))), cache)
 
-    def read(file: JFile, cache: XML.Cache = XML.Cache.none): Log_File = {
-      val name = file.getName
+    def read(file: Path, cache: XML.Cache = XML.Cache.none): Log_File = {
+      val name = file.file_name
       val text =
         if (File.is_gz(name)) File.read_gzip(file)
         else if (File.is_xz(name)) Bytes.read(file).uncompress_xz(cache = cache.compress).text
@@ -127,11 +126,11 @@ object Build_Log {
 
     val log_suffixes: List[String] = List(".log", ".log.gz", ".log.xz")
 
-    def is_log(file: JFile,
+    def is_log(path: Path,
       prefixes: List[String] = log_prefixes,
       suffixes: List[String] = log_suffixes
     ): Boolean = {
-      val name = file.getName
+      val name = path.file_name
 
       prefixes.exists(name.startsWith) &&
       suffixes.exists(name.endsWith) &&
@@ -140,7 +139,7 @@ object Build_Log {
       name != "main.log"
     }
 
-    def find_files(starts: List[JFile]): List[JFile] =
+    def find_files(starts: List[Path]): List[Path] =
       starts.flatMap(start => File.find_files(start, pred = is_log(_), follow_links = true))
         .sortBy(plain_name)
 
@@ -151,10 +150,10 @@ object Build_Log {
       val fmts =
         Date.Formatter.variants(
           List("EEE MMM d HH:mm:ss O yyyy", "EEE MMM d HH:mm:ss VV yyyy"),
-          List(Locale.ENGLISH, Locale.GERMAN)) :::
+          List(Library.locale_english, Library.locale_german)) :::
         List(
-          DateTimeFormatter.RFC_1123_DATE_TIME,
-          Date.Formatter.pattern("EEE MMM d HH:mm:ss yyyy").withZone(Date.timezone_berlin))
+          DateTimeFormatter.RFC_1123_DATE_TIME.nn,
+          Date.Formatter.pattern("EEE MMM d HH:mm:ss yyyy").nn.withZone(Date.timezone_berlin).nn)
 
       def tune_timezone(s: String): String =
         s match {
@@ -207,7 +206,7 @@ object Build_Log {
     object Strict_Date {
       def unapply(s: String): Some[Date] =
         try { Some(Log_File.Date_Format.parse(s)) }
-        catch { case exn: DateTimeParseException => log_file.err(exn.getMessage) }
+        catch { case exn: DateTimeParseException => log_file.err(Exn.message(exn)) }
     }
 
 
@@ -261,12 +260,13 @@ object Build_Log {
       Build_Log.parse_build_info(log_file, ml_statistics)
 
     def parse_session_info(
+        process_timing: Timing = Timing.zero,
         command_timings: Boolean = false,
         theory_timings: Boolean = false,
         ml_statistics: Boolean = false,
         task_statistics: Boolean = false): Session_Info =
       Build_Log.parse_session_info(
-        log_file, command_timings, theory_timings, ml_statistics, task_statistics)
+        log_file, process_timing, command_timings, theory_timings, ml_statistics, task_statistics)
   }
 
 
@@ -483,7 +483,7 @@ object Build_Log {
 
     object Theory_Timing {
       def unapply(line: String): Option[(String, (String, Timing))] =
-        Protocol.Theory_Timing_Marker.unapply(line.replace('~', '-')).map(log_file.parse_props)
+        Protocol.Theory_Timing_Marker.unapply(line.replacing("~" -> "-")).map(log_file.parse_props)
         match {
           case Some((SESSION_NAME, session) :: props) =>
             for (theory <- Markup.Name.unapply(props))
@@ -618,8 +618,26 @@ object Build_Log {
 
   /** session info: produced by isabelle build as session database **/
 
+  object Session_Timing {
+    def make(
+      ml_threads: Int = 0,
+      ml_timing: Timing = Timing.zero,
+      process_timing: Timing = Timing.zero
+    ): Session_Timing =
+      Session_Timing(
+        Markup.Session_Timing.Threads.make(ml_threads) :::
+        Markup.Timing_Properties.make(ml_timing) :::
+        Markup.Process_Timing_Properties.make(process_timing))
+  }
+
+  sealed case class Session_Timing(props: Properties.T) {
+    def ml_threads: Int = Markup.Session_Timing.Threads.unapply(props) getOrElse 1
+    def ml_timing: Timing = Markup.Timing_Properties.get(props)
+    def process_timing: Timing = Markup.Process_Timing_Properties.get(props)
+  }
+
   sealed case class Session_Info(
-    session_timing: Properties.T,
+    session_timing: Session_Timing,
     command_timings: List[Properties.T],
     theory_timings: List[Properties.T],
     ml_statistics: List[Properties.T],
@@ -628,17 +646,32 @@ object Build_Log {
   ) {
     def error(s: String): Session_Info =
       copy(errors = errors ::: List(s))
+
+    def sort_theories(session_theories: List[Resources.Thy]): Session_Info = {
+      val index =
+        Map.from(
+          for ((thy, i) <- session_theories.iterator.zipWithIndex)
+            yield thy.name.theory -> i)
+      copy(theory_timings = theory_timings.sortBy(props => index(Markup.Name.get(props))))
+    }
   }
 
   private def parse_session_info(
     log_file: Log_File,
+    process_timing: Timing,
     command_timings: Boolean,
     theory_timings: Boolean,
     ml_statistics: Boolean,
     task_statistics: Boolean
   ): Session_Info = {
+    val session_timing_props =
+      log_file.find_props(Protocol.Session_Timing_Marker) getOrElse Nil
     Session_Info(
-      session_timing = log_file.find_props(Protocol.Session_Timing_Marker) getOrElse Nil,
+      session_timing =
+        Session_Timing.make(
+          ml_threads = Markup.Session_Timing.Threads.get(session_timing_props),
+          ml_timing = Markup.Timing_Properties.get(session_timing_props),
+          process_timing = process_timing),
       command_timings =
         if (command_timings) log_file.filter_props(Protocol.Command_Timing_Marker) else Nil,
       theory_timings =
@@ -1145,7 +1178,7 @@ object Build_Log {
       }
     }
 
-    def write_info(db: SQL.Database, files: List[JFile],
+    def write_info(db: SQL.Database, files: List[Path],
       ml_statistics: Boolean = false,
       progress: Progress = new Progress,
       errors: Multi_Map[String, String] = Multi_Map.empty
@@ -1165,7 +1198,7 @@ object Build_Log {
         private val known =
           Synchronized(private_data.read_domain(db, table, restriction = files_domain, cache = cache))
 
-        def required(file: JFile): Boolean = !(known.value)(Log_File.plain_name(file))
+        def required(path: Path): Boolean = !(known.value)(Log_File.plain_name(path))
         def required(log_file: Log_File): Boolean = !(known.value)(log_file.name)
 
         def update_db(db: SQL.Database, log_file: Log_File): Unit
@@ -1208,7 +1241,7 @@ object Build_Log {
         }
 
       val consumer =
-        Consumer_Thread.fork[Log_File]("build_log_database")(
+        Consumer_Thread.fork[Log_File]("build_log_database",
           limit = 1,
           consume = { log_file =>
             val t0 = progress.start.time
@@ -1306,7 +1339,7 @@ object Build_Log {
             val known = res.bool(Column.known)
             val isabelle_version = res.string(Prop.isabelle_version)
             val afp_version = if (afp) proper_string(res.string(Prop.afp_version)) else None
-            val pull_date = res.date(Column.pull_date(afp))
+            val pull_date = res.the_date(Column.pull_date(afp))
             Entry(known, isabelle_version, afp_version, pull_date)
           })
       }
@@ -1343,7 +1376,7 @@ object Build_Log {
   ): Unit = {
     val store = Build_Log.store(options)
 
-    val log_files = Log_File.find_files(logs.map(_.file))
+    val log_files = Log_File.find_files(logs)
 
     using(store.open_database()) { db =>
       if (vacuum) db.vacuum()

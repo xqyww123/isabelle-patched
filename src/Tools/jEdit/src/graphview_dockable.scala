@@ -6,6 +6,7 @@ Stateless dockable window for graphview.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -41,7 +42,7 @@ object Graphview_Dockable {
 
   class Handler extends Active.Handler {
     override def handle(
-      view: View,
+      editor_context: JEdit_Editor.Context,
       text: String,
       elem: XML.Elem,
       doc_view: Document_View,
@@ -56,7 +57,7 @@ object Graphview_Dockable {
               }
             GUI_Thread.later {
               set_implicit(snapshot, graph)
-              view.getDockableWindowManager.floatDockableWindow("isabelle-graphview")
+              editor_context.view.getDockableWindowManager.floatDockableWindow("isabelle-graphview")
             }
           }
           true
@@ -82,7 +83,7 @@ class Graphview_Dockable(view: View, position: String) extends Dockable(view, po
     graph_result match {
       case Exn.Res(graph) =>
         val graphview = new isabelle.graphview.Graphview(graph) {
-          def options: Options = PIDE.options.value
+          def options: Options = PIDE.options
 
           override def make_tooltip(parent: JComponent, x: Int, y: Int, tip: XML.Elem): String = {
             Pretty_Tooltip.invoke(() =>
@@ -90,7 +91,8 @@ class Graphview_Dockable(view: View, position: String) extends Dockable(view, po
                 val model = File_Model.init(PIDE.session)
                 val rendering = new JEdit_Rendering(snapshot, model, options)
                 val loc = new Point(x, y)
-                Pretty_Tooltip(view, parent, loc, rendering, Command.Results.empty, List(tip))
+                Pretty_Tooltip(view, parent, loc, rendering, Command.Results.empty, List(tip),
+                  focus = true)
               })
             null
           }
@@ -118,7 +120,7 @@ class Graphview_Dockable(view: View, position: String) extends Dockable(view, po
             if (editor_style) view.getTextArea.getPainter.getLineHighlightColor
             else super.highlight_color
 
-          override def error_color = PIDE.options.color_value("error_color")
+          override def error_color = Color_Value.option(PIDE.options, "error_color")
 
           editor_style = true
         }
@@ -140,7 +142,7 @@ class Graphview_Dockable(view: View, position: String) extends Dockable(view, po
   /* main */
 
   private val main =
-    Session.Consumer[Session.Global_Options](getClass.getName) {
+    Session.Consumer[Session.Global_Options](this.class_name) {
       case _: Session.Global_Options =>
         GUI_Thread.later {
           graphview match {

@@ -348,17 +348,6 @@ lemma islimpt_approachable_le: "x islimpt S \<longleftrightarrow> (\<forall>\<ep
   using approachable_lt_le2 [where f="\<lambda>y. dist y x" and P="\<lambda>y. y \<notin> S \<or> y = x" and Q="\<lambda>x. True"]
   by auto
 
-lemma limpt_of_limpts: "x islimpt {y. y islimpt S} \<Longrightarrow> x islimpt S"
-  for x :: "'a::metric_space"
-  by (metis islimpt_def islimpt_eq_acc_point mem_Collect_eq)
-
-lemma closed_limpts:  "closed {x::'a::metric_space. x islimpt S}"
-  using closed_limpt limpt_of_limpts by blast
-
-lemma limpt_of_closure: "x islimpt closure S \<longleftrightarrow> x islimpt S"
-  for x :: "'a::metric_space"
-  by (auto simp: closure_def islimpt_Un dest: limpt_of_limpts)
-
 lemma islimpt_eq_infinite_ball: "x islimpt S \<longleftrightarrow> (\<forall>\<epsilon>>0. infinite(S \<inter> ball x \<epsilon>))"
   unfolding islimpt_eq_acc_point
   by (metis open_ball Int_commute Int_mono finite_subset open_contains_ball_eq subset_eq)
@@ -472,7 +461,7 @@ section \<open>Limits\<close>
 proposition Lim: "(f \<longlongrightarrow> l) net \<longleftrightarrow> trivial_limit net \<or> (\<forall>\<epsilon>>0. eventually (\<lambda>x. dist (f x) l < \<epsilon>) net)"
   by (auto simp: tendsto_iff trivial_limit_eq)
 
-text \<open>Show that they yield usual definitions in the various cases.\<close>
+text \<open>Show that they yield the usual $\varepsilon$--$\delta$ definitions in the various cases.\<close>
 
 proposition Lim_within_le: "(f \<longlongrightarrow> l)(at a within S) \<longleftrightarrow>
     (\<forall>\<epsilon>>0. \<exists>\<delta>>0. \<forall>x\<in>S. 0 < dist x a \<and> dist x a \<le> \<delta> \<longrightarrow> dist (f x) l < \<epsilon>)"
@@ -496,6 +485,41 @@ lemma Lim_transform_within_set:
   shows "\<lbrakk>(f \<longlongrightarrow> l) (at a within S); eventually (\<lambda>x. x \<in> S \<longleftrightarrow> x \<in> T) (at a)\<rbrakk>
          \<Longrightarrow> (f \<longlongrightarrow> l) (at a within T)"
   by (simp add: eventually_at Lim_within) (smt (verit, best))
+
+text \<open>$\varepsilon$--$\delta$ characterizations of one-sided limits\<close>
+
+lemma tendsto_at_left_x_epsilon_def:
+  fixes f :: "real \<Rightarrow> real" and L x :: real
+  shows
+    "(f \<longlongrightarrow> L) (at_left x) \<longleftrightarrow>
+     (\<forall>\<epsilon>>0. \<exists>\<delta>>0. \<forall>y. (y < x \<and> x - y < \<delta>) \<longrightarrow> \<bar>f y - L\<bar> < \<epsilon>)"
+proof -
+  have "(f \<longlongrightarrow> L) (at_left x) \<longleftrightarrow> (\<forall>\<epsilon>>0. eventually (\<lambda>y. \<bar>f y - L\<bar> < \<epsilon>) (at_left x))"
+    by (simp only: tendsto_iff dist_real_def)
+  also have "\<dots> \<longleftrightarrow> (\<forall>\<epsilon>>0. \<exists>b<x. \<forall>y<x. b < y \<longrightarrow> \<bar>f y - L\<bar> < \<epsilon>)"
+    by (subst eventually_at_left[where y = "x - (\<bar>x\<bar> + 1)"], simp, meson)
+  also have "\<dots> \<longleftrightarrow> (\<forall>\<epsilon>>0. \<exists>d>0. \<forall>y. y < x \<and> x - y < d \<longrightarrow> \<bar>f y - L\<bar> < \<epsilon>)"
+    by(safe, metis diff_gt_0_iff_gt diff_strict_left_mono not_less_iff_gr_or_eq,
+             metis (no_types) add.commute diff_less_eq less_add_same_cancel1)
+  finally show ?thesis.
+qed
+
+lemma tendsto_at_right_x_epsilon_def:
+  fixes f :: "real \<Rightarrow> real" and L x :: real
+  shows
+    "(f \<longlongrightarrow> L) (at_right x) \<longleftrightarrow>
+     (\<forall>\<epsilon>>0. \<exists>\<delta>>0. \<forall>y. (x < y \<and> y - x < \<delta>) \<longrightarrow> \<bar>f y - L\<bar> < \<epsilon>)"
+proof -
+  have "(f \<longlongrightarrow> L) (at_right x) =
+        (\<forall>\<epsilon>>0. eventually (\<lambda>x. \<bar>f x - L\<bar> < \<epsilon>) (at_right x))"
+    by (simp only: tendsto_iff dist_real_def)
+  also have "\<dots> \<longleftrightarrow> (\<forall>\<epsilon>>0. \<exists>\<delta>>x. \<forall>y>x. y < \<delta> \<longrightarrow> \<bar>f y - L\<bar> < \<epsilon>)"
+    by(subst eventually_at_right[where y = "\<bar>x\<bar> + 1"], simp_all)
+  also have "\<dots> \<longleftrightarrow> (\<forall>\<epsilon>>0. \<exists>\<delta>>0. \<forall>y. (x < y \<and> y - x < \<delta>) \<longrightarrow> \<bar>f y - L\<bar> < \<epsilon>)"
+    by (auto, metis diff_add_cancel diff_gt_0_iff_gt diff_less_eq,
+        metis add.commute diff_less_eq less_add_same_cancel1)
+  finally show ?thesis.
+qed
 
 text \<open>Another limit point characterization.\<close>
 
@@ -660,6 +684,41 @@ lemma continuous_transform_within:
   using assms
   unfolding continuous_within by (force intro: Lim_transform_within)
 
+lemma continuous_within_comparison:
+  fixes f :: \<open>'a::metric_space \<Rightarrow> 'b::metric_space\<close>
+    and g :: \<open>'a::metric_space \<Rightarrow> 'c::metric_space\<close>
+  assumes \<open>continuous (at a within S) g\<close>
+    and \<open>\<And>x. x \<in> S \<Longrightarrow> dist (f a) (f x) \<le> dist (g a) (g x)\<close>
+  shows \<open>continuous (at a within S) f\<close>
+  unfolding continuous_within_eps_delta
+proof (intro allI impI)
+  fix \<epsilon> :: real assume \<open>\<epsilon> > 0\<close>
+  with assms(1)[unfolded continuous_within_eps_delta]
+  obtain \<delta> where \<open>\<delta> > 0\<close> and \<delta>: \<open>\<And>x'. x' \<in> S \<Longrightarrow> dist x' a < \<delta> \<Longrightarrow> dist (g x') (g a) < \<epsilon>\<close>
+    by auto
+  show \<open>\<exists>\<delta>>0. \<forall>x'\<in>S. dist x' a < \<delta> \<longrightarrow> dist (f x') (f a) < \<epsilon>\<close>
+  proof (intro exI conjI ballI impI)
+    show \<open>\<delta> > 0\<close> by fact
+  next
+    fix x' assume \<open>x' \<in> S\<close> \<open>dist x' a < \<delta>\<close>
+    have \<open>dist (f a) (f x') \<le> dist (g a) (g x')\<close> using assms(2) \<open>x' \<in> S\<close> by simp
+    also have \<open>dist (g a) (g x') = dist (g x') (g a)\<close> by (simp add: dist_commute)
+    also have \<open>\<dots> < \<epsilon>\<close> using \<delta> \<open>x' \<in> S\<close> \<open>dist x' a < \<delta>\<close> by simp
+    finally show \<open>dist (f x') (f a) < \<epsilon>\<close> by (simp add: dist_commute)
+  qed
+qed
+
+lemma continuous_within_ivl_split:
+  fixes c :: \<open>'a::linorder_topology\<close>
+  assumes \<open>c \<in> {a..b}\<close>
+  shows \<open>continuous (at c within {a..b}) f \<longleftrightarrow>
+         continuous (at c within {a..c}) f \<and> continuous (at c within {c..b}) f\<close>
+proof -
+  from assms have \<open>a \<le> c\<close> \<open>c \<le> b\<close> by auto
+  then have \<open>{a..b} = {a..c} \<union> {c..b}\<close> by (rule ivl_disj_un_two_touch(4) [symmetric])
+  then show ?thesis
+    by (simp add: continuous_within Lim_within_Un)
+qed
 
 section \<open>Closure and Limit Characterization\<close>
 
@@ -880,6 +939,8 @@ proof -
   then show ?thesis unfolding bounded_any_center [where a="(x, y)"] by auto
 qed
 
+lemma bounded_cnj_image: "bounded (cnj ` S) = bounded S"
+  by (auto simp: bounded_iff)
 
 section \<open>Compactness\<close>
 
@@ -1160,7 +1221,7 @@ proof -
     with c \<open>\<epsilon> > 0\<close> have "0 < \<epsilon> * (1 - c) / \<delta>"
       by simp
     with c obtain N where N: "c ^ N < \<epsilon> * (1 - c) / \<delta>"
-      using real_arch_pow_inv[of "\<epsilon> * (1 - c) / \<delta>" c] by auto
+      using arch_pow_inv[of "\<epsilon> * (1 - c) / \<delta>" c] by auto
     have *: "dist (z m) (z n) < \<epsilon>" if "m > n" and as: "m \<ge> N" "n \<ge> N" for m n :: nat
     proof -
       have *: "c ^ n \<le> c ^ N"
@@ -1280,6 +1341,14 @@ lemma diameter_le:
   using assms
   by (auto simp: dist_norm diameter_def intro: cSUP_least)
 
+lemma diameter_image_cnj: "diameter (cnj ` S) = diameter S"
+proof -
+  have "(\<lambda>(x,y). dist x y) ` (cnj ` S \<times> cnj ` S) = (\<lambda>(x,y). dist x y) ` (S \<times> S)"
+    by (force simp: image_iff)
+  then show ?thesis
+    by (simp add: diameter_def)
+qed
+
 lemma diameter_bounded_bound:
   fixes S :: "'a :: metric_space set"
   assumes S: "bounded S" "x \<in> S" "y \<in> S"
@@ -1287,19 +1356,29 @@ lemma diameter_bounded_bound:
 proof -
   from S obtain z \<delta> where z: "\<And>x. x \<in> S \<Longrightarrow> dist z x \<le> \<delta>"
     unfolding bounded_def by auto
-  have "bdd_above (case_prod dist ` (S\<times>S))"
-  proof (intro bdd_aboveI, safe)
-    fix a b
-    assume "a \<in> S" "b \<in> S"
-    with z[of a] z[of b] dist_triangle[of a b z]
-    show "dist a b \<le> 2 * \<delta>"
-      by (simp add: dist_commute)
-  qed
+  have "dist a b \<le> 2 * \<delta>" if "a \<in> S" "b \<in> S" for a b
+    by (smt (verit) dist_triangle3 that z)
+  then have "bdd_above (case_prod dist ` (S\<times>S))"
+    by (force simp: bdd_above.I2)
   moreover have "(x,y) \<in> S\<times>S" using S by auto
   ultimately have "dist x y \<le> (SUP (x,y)\<in>S\<times>S. dist x y)"
     by (rule cSUP_upper2) simp
   with \<open>x \<in> S\<close> show ?thesis
     by (auto simp: diameter_def)
+qed
+
+lemma diameter_eq_0:
+  fixes S :: "'a::metric_space set"
+  assumes "bounded S"
+  shows "diameter S = 0 \<longleftrightarrow> S = {} \<or> (\<exists>a. S = {a})"
+proof
+  assume "diameter S = 0"
+  then show "S = {} \<or> (\<exists>a. S = {a})"
+    using assms diameter_bounded_bound by fastforce
+next
+  assume "S = {} \<or> (\<exists>a. S = {a})"
+  then show "diameter S = 0"
+    using diameter_empty diameter_singleton by auto
 qed
 
 lemma diameter_lower_bounded:
@@ -1402,6 +1481,15 @@ proof (rule order_antisym)
     show "diameter S \<le> diameter (closure S)"
       by (simp add: assms bounded_closure closure_subset diameter_subset)
 qed
+
+lemma diameter_translation:
+  fixes a :: "'a::real_normed_vector"
+  shows "diameter ((+) a ` S) = diameter S"
+proof (cases "S = {}")
+  case False
+  then show ?thesis
+    by (simp add: diameter_def image_comp split_def flip: image_paired_Times)
+qed (simp add: diameter_def)
 
 proposition Lebesgue_number_lemma:
   assumes "compact S" "\<C> \<noteq> {}" "S \<subseteq> \<Union>\<C>" and ope: "\<And>B. B \<in> \<C> \<Longrightarrow> open B"
@@ -3293,5 +3381,5 @@ proof -
       by (simp add: Cauchy_def)
   qed            
 qed
-  
+
 end

@@ -201,7 +201,7 @@ struct
 fun possibility_tac ctxt =
    (REPEAT 
     (ALLGOALS (simp_tac (ctxt
-          delsimps [@{thm used_Says}, @{thm used_Notes}, @{thm used_Gets}] 
+          |> Simplifier.del_simps @{thms used_Says used_Notes used_Gets}
           |> Simplifier.set_unsafe_solver safe_solver))
      THEN
      REPEAT_FIRST (eq_assume_tac ORELSE' 
@@ -217,10 +217,11 @@ fun basic_possibility_tac ctxt =
 
 
 val analz_image_freshK_ss =
-  simpset_of
-   (\<^context> |> Simplifier.del_simps @{thms image_insert image_Un}
-      |> Simplifier.del_simps @{thms imp_disjL}    (*reduces blow-up*)
-      |> Simplifier.add_simps @{thms analz_image_freshK_simps})
+  \<^context>
+  |> Simplifier.del_simps @{thms image_insert image_Un}
+  |> Simplifier.del_simps @{thms imp_disjL}    (*reduces blow-up*)
+  |> Simplifier.add_simps @{thms analz_image_freshK_simps}
+  |> Simplifier.simpset_of
 
 end
 \<close>

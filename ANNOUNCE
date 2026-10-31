@@ -1,50 +1,43 @@
-Subject: Announcing Isabelle2025-1
+Subject: Announcing Isabelle2026
 To: isabelle-users@cl.cam.ac.uk
 
-Isabelle2025-2 is now available.
+Isabelle2026 is now available.
 
-This version supersedes Isabelle2025-1, which in turn introduces many changes
-over Isabelle2025: see the NEWS file for further details. Here are notable
-details:
+This version introduces many changes over Isabelle2025-2: see the
+NEWS file for further details. Here are notable details:
 
-* PIDE: load markup from background session image (e.g. theory "HOL.Nat").
+* Support for inlined theory options and conditional developments.
 
-* Isabelle/jEdit: support for command-line system options ("-o").
+* Improved support for Apple Silicon, without Intel emulation.
 
-* Isabelle/jEdit: support for dark mode and screen readers.
+* Improved control over prover output in batch-builds.
 
-* Isabelle/jEdit: built-in navigator, without requiring plugins.
+* Many Isabelle/jEdit improvements, notably for Accessibility (NVDA).
 
-* Isabelle/jEdit: more reactive mouse handling, notably on macOS.
-
-* Isabelle/jEdit: updated FlatLaf GUI L&F with scalable SVG icons.
-
-* Isabelle/jEdit: improved appearance on Linux (GUI scaling) and macOS (L&F).
-
-* Isabelle/VSCode: more robust session build process on console.
-
-* Isabelle/VSCode: GUI panels for Documentation, Symbols, Sledgehammer.
-
-* Isabelle/VSCode: update of underlying VSCodium distribution.
-
-* HOL: various improvements of theory libraries.
+* Many Isabelle/VSCode improvements, notably HTML-based GUI via Scala.js.
 
 * HOL: various improvements to code generation.
 
+* HOL: various improvements of theory libraries, notably HOL-Analysis.
+
+* HOL: additional library material, notably HOL-New_Algebra.
+
 * HOL: updates and improvements of Sledgehammer and external provers.
 
-* HOL: generation of running time functions for HOL functions.
+* HOL: various improvements of SMT support, with cvc5 proof reconstruction.
 
-* System: ML settings may depend on command-line system options ("-o").
+* ML: 64_32 mode now supports 32 GiB heap instead of 16 GiB.
 
-* System: command-line tool to process theories within adhoc session.
+* ML: sanity checks for string literals vs. formal names.
 
-* System: more detailed build progress.
+* ML: minor improvements of kernel integrity.
 
-* System: more robust build cluster management.
+* System: improved logging of Isabelle/Scala and Isabelle/ML.
+
+* System: support for Scala.js with many Isabelle/Scala modules.
 
 
-You may get Isabelle2025-2 from the following mirror sites:
+You may get Isabelle2026 from the following mirror sites:
 
   Cambridge (UK)       https://www.cl.cam.ac.uk/research/hvg/Isabelle
   Munich (Germany)     https://isabelle.in.tum.de

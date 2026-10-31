@@ -48,7 +48,7 @@ Usage: isabelle update_then [FILES|DIRS...]
   
         for {
           spec <- specs
-          file <- File.find_files(Path.explode(spec).file, file => File.is_thy(file.getName))
-        } update_then(File.path(file))
+          path <- File.find_files(Path.explode(spec), pred = File.is_thy)
+        } update_then(path)
       })
 }

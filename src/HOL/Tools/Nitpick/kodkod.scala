@@ -6,6 +6,8 @@ Scala interface for Kodkod.
 
 package isabelle.nitpick
 
+import scala.language.unsafeNulls
+
 import isabelle._
 
 import java.util.concurrent.{TimeUnit, LinkedBlockingQueue, ThreadPoolExecutor}
@@ -38,7 +40,8 @@ object Kodkod {
     max_solutions: Int = Int.MaxValue,
     cleanup_inst: Boolean = false,
     timeout: Time = Time.zero,
-    max_threads: Int = 0
+    max_threads: Int = 0,
+    log: Logger = Logger.console
   ): Result = {
     /* executor */
 
@@ -100,7 +103,7 @@ object Kodkod {
       val timeout_request =
         if (timeout.is_zero) None
         else {
-          Some(Event_Timer.request(Time.now() + timeout) {
+          Some(Event_Timer.request(log, Time.now() + timeout) {
             context.error("Ran out of time")
             context.return_code(Process_Result.RC.failure)
             executor_kill()
@@ -123,8 +126,7 @@ object Kodkod {
     catch {
       case _: Exit =>
       case exn: Throwable =>
-        val message = exn.getMessage
-        context.error(if (message.isEmpty) exn.toString else "Error: " + message)
+        context.error(Exn.message(exn))
         context.return_code(1)
     }
 

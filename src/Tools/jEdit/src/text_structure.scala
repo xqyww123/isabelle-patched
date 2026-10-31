@@ -6,6 +6,7 @@ Text structure based on Isabelle/Isar outer syntax.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -20,7 +21,7 @@ object Text_Structure {
   /* token navigator */
 
   class Navigator(syntax: Outer_Syntax, buffer: JEditBuffer, comments: Boolean) {
-    val limit: Int = PIDE.options.value.int("jedit_structure_limit") max 0
+    val limit: Int = PIDE.options.int("jedit_structure_limit") max 0
 
     def iterator(line: Int, lim: Int = limit): Iterator[Text.Info[Token]] = {
       val it = Token_Markup.line_token_iterator(syntax, buffer, line, line + lim)
@@ -37,8 +38,8 @@ object Text_Structure {
   /* indentation */
 
   object Indent_Rule extends IndentRule {
-    private val keyword_open = Keyword.theory_goal ++ Keyword.proof_open
-    private val keyword_close = Keyword.proof_close
+    private val keyword_open = Keyword.theory_goal_kinds ++ Keyword.proof_open_kinds
+    private val keyword_close = Keyword.proof_close_kinds
 
     def apply(
       buffer: JEditBuffer,
@@ -87,7 +88,7 @@ object Text_Structure {
 
           val script_indent: Text.Info[Token] => Int = {
             val opt_rendering: Option[JEdit_Rendering] =
-              if (PIDE.options.value.bool("jedit_indent_script"))
+              if (PIDE.options.bool("jedit_indent_script"))
                 GUI_Thread.now {
                   (for {
                     text_area <- JEdit_Lib.jedit_text_areas(buffer)
@@ -95,10 +96,10 @@ object Text_Structure {
                   } yield rendering).nextOption()
                 }
               else None
-            val limit = PIDE.options.value.int("jedit_indent_script_limit")
+            val limit = PIDE.options.int("jedit_indent_script_limit")
             (info: Text.Info[Token]) =>
               opt_rendering match {
-                case Some(rendering) if keywords.is_command(info.info, Keyword.prf_script) =>
+                case Some(rendering) if keywords.is_command(info.info, Keyword.prf_script_kinds) =>
                   (rendering.indentation(info.range) min limit) max 0
                 case _ => 0
               }
@@ -110,14 +111,14 @@ object Text_Structure {
             else 0
 
           def indent_offset(tok: Token): Int =
-            if (keywords.is_command(tok, Keyword.proof_enclose)) indent_size
+            if (keywords.is_command(tok, Keyword.proof_enclose_kinds)) indent_size
             else 0
 
           def indent_structure: Int =
             nav.reverse_iterator(current_line - 1).scanLeft((0, false))(
               { case ((ind, _), Text.Info(range, tok)) =>
                   val ind1 = ind + indent_indent(tok)
-                  if (tok.is_begin_or_command && !keywords.is_command(tok, Keyword.prf_script)) {
+                  if (tok.is_begin_or_command && !keywords.is_command(tok, Keyword.prf_script_kinds)) {
                     val line = buffer.getLineOfOffset(range.start)
                     line_head(line) match {
                       case Some(info) if info.info == tok =>
@@ -150,10 +151,10 @@ object Text_Structure {
                   val tok = info.info
                   if (tok.is_begin ||
                       keywords.is_before_command(tok) ||
-                      keywords.is_command(tok, Keyword.theory)) 0
-                  else if (keywords.is_command(tok, Keyword.proof_enclose))
+                      keywords.is_command(tok, Keyword.theory_kinds)) 0
+                  else if (keywords.is_command(tok, Keyword.proof_enclose_kinds))
                     indent_structure + script_indent(info) - indent_offset(tok)
-                  else if (keywords.is_command(tok, Keyword.proof))
+                  else if (keywords.is_command(tok, Keyword.proof_kinds))
                     (indent_structure + script_indent(info) - indent_offset(tok)) max indent_size
                   else if (tok.is_command) indent_structure - indent_offset(tok)
                   else {
@@ -256,45 +257,45 @@ object Text_Structure {
 
           nav.iterator(caret_line, 1).find(info => info.range.touches(caret))
           match {
-            case Some(Text.Info(range1, tok)) if keywords.is_command(tok, Keyword.theory_goal) =>
+            case Some(Text.Info(range1, tok)) if keywords.is_command(tok, Keyword.theory_goal_kinds) =>
               find_block(
-                keywords.is_command(_, Keyword.proof_goal),
-                keywords.is_command(_, Keyword.qed),
-                keywords.is_command(_, Keyword.qed_global),
+                keywords.is_command(_, Keyword.proof_goal_kinds),
+                keywords.is_command(_, Keyword.qed_kinds),
+                keywords.is_command(_, Keyword.qed_global_kinds),
                 t =>
-                  keywords.is_command(t, Keyword.diag) ||
-                  keywords.is_command(t, Keyword.proof),
+                  keywords.is_command(t, Keyword.diag_kinds) ||
+                  keywords.is_command(t, Keyword.proof_kinds),
                 caret_iterator())
 
-            case Some(Text.Info(range1, tok)) if keywords.is_command(tok, Keyword.proof_goal) =>
+            case Some(Text.Info(range1, tok)) if keywords.is_command(tok, Keyword.proof_goal_kinds) =>
               find_block(
-                keywords.is_command(_, Keyword.proof_goal),
-                keywords.is_command(_, Keyword.qed),
+                keywords.is_command(_, Keyword.proof_goal_kinds),
+                keywords.is_command(_, Keyword.qed_kinds),
                 _ => false,
                 t =>
-                  keywords.is_command(t, Keyword.diag) ||
-                  keywords.is_command(t, Keyword.proof),
+                  keywords.is_command(t, Keyword.diag_kinds) ||
+                  keywords.is_command(t, Keyword.proof_kinds),
                 caret_iterator())
 
-            case Some(Text.Info(range1, tok)) if keywords.is_command(tok, Keyword.qed_global) =>
-              reverse_caret_iterator().find(info => keywords.is_command(info.info, Keyword.theory))
+            case Some(Text.Info(range1, tok)) if keywords.is_command(tok, Keyword.qed_global_kinds) =>
+              reverse_caret_iterator().find(info => keywords.is_command(info.info, Keyword.theory_kinds))
               match {
                 case Some(Text.Info(range2, tok))
-                if keywords.is_command(tok, Keyword.theory_goal) => Some((range1, range2))
+                if keywords.is_command(tok, Keyword.theory_goal_kinds) => Some((range1, range2))
                 case _ => None
               }
 
-            case Some(Text.Info(range1, tok)) if keywords.is_command(tok, Keyword.qed) =>
+            case Some(Text.Info(range1, tok)) if keywords.is_command(tok, Keyword.qed_kinds) =>
               find_block(
-                keywords.is_command(_, Keyword.qed),
+                keywords.is_command(_, Keyword.qed_kinds),
                 t =>
-                  keywords.is_command(t, Keyword.proof_goal) ||
-                  keywords.is_command(t, Keyword.theory_goal),
+                  keywords.is_command(t, Keyword.proof_goal_kinds) ||
+                  keywords.is_command(t, Keyword.theory_goal_kinds),
                 _ => false,
                 t =>
-                  keywords.is_command(t, Keyword.diag) ||
-                  keywords.is_command(t, Keyword.proof) ||
-                  keywords.is_command(t, Keyword.theory_goal),
+                  keywords.is_command(t, Keyword.diag_kinds) ||
+                  keywords.is_command(t, Keyword.proof_kinds) ||
+                  keywords.is_command(t, Keyword.theory_goal_kinds),
                 reverse_caret_iterator())
 
             case Some(Text.Info(range1, tok)) if tok.is_begin =>
@@ -310,7 +311,7 @@ object Text_Structure {
                     find(info => info.info.is_command || info.info.is_begin)
                   match {
                     case Some(Text.Info(range3, tok)) =>
-                      if (keywords.is_command(tok, Keyword.theory_block)) Some((range1, range3))
+                      if (keywords.is_command(tok, Keyword.theory_block_kinds)) Some((range1, range3))
                       else Some((range1, range2))
                     case None => None
                   }

@@ -1,5 +1,6 @@
 theory Hotel_Example
-imports Main "HOL-Library.Predicate_Compile_Quickcheck"
+  imports Main "HOL-Library.Predicate_Compile_Quickcheck"
+  options [condition = "$ISABELLE_GHC"]
 begin
 
 datatype guest = Guest0 | Guest1
@@ -73,8 +74,8 @@ where
   Enter g r (k,k') \<Rightarrow> (k,k') \<in> cards s g & (roomk s r \<in> {k, k'}) |
   Exit g r \<Rightarrow> g \<in> isin s r))"
 
-definition no_Check_in :: "event list \<Rightarrow> room \<Rightarrow> bool" where(*>*)
-[code del]: "no_Check_in s r \<equiv> \<not>(\<exists>g c. Check_in g r c \<in> set s)"
+definition no_Check_in :: "event list \<Rightarrow> room \<Rightarrow> bool" where
+[code drop]: "no_Check_in s r \<equiv> \<not>(\<exists>g c. Check_in g r c \<in> set s)"
 
 definition feels_safe :: "event list \<Rightarrow> room \<Rightarrow> bool"
 where

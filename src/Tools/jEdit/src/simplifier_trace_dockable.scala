@@ -6,6 +6,7 @@ Dockable window with interactive simplifier trace.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -31,7 +32,7 @@ class Simplifier_Trace_Dockable(view: View, position: String) extends Dockable(v
   private var do_update = true
 
 
-  private val output: Output_Area = new Output_Area(view)
+  private val output: Output_Area = new Output_Area(editor_context)
 
   output.setup(dockable)
   set_content(output.text_pane)
@@ -66,10 +67,10 @@ class Simplifier_Trace_Dockable(view: View, position: String) extends Dockable(v
 
   private def handle_update(follow: Boolean): Unit = {
     val (new_snapshot, new_command, new_results, new_id) =
-      PIDE.editor.current_node_snapshot(view) match {
+      JEdit_Editor.current_node_snapshot(editor_context) match {
         case Some(snapshot) =>
           if (follow && !snapshot.is_outdated) {
-            PIDE.editor.current_command(view, snapshot) match {
+            JEdit_Editor.current_command(editor_context, snapshot) match {
               case Some(cmd) =>
                 (snapshot, cmd, snapshot.command_results(cmd), cmd.id)
               case None =>
@@ -91,7 +92,8 @@ class Simplifier_Trace_Dockable(view: View, position: String) extends Dockable(v
   /* main */
 
   private val main =
-    Session.Consumer[Any](getClass.getName) {
+    Session.Consumer[Session.Global_Options | Session.Commands_Changed |
+        Session.Caret_Focus.type | Simplifier_Trace.Event.type](this.class_name) {
       case _: Session.Global_Options =>
         GUI_Thread.later { output.handle_resize() }
 

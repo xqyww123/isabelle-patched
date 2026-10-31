@@ -7,6 +7,7 @@ https://solr.apache.org as backend.
 
 package isabelle.find_facts
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -529,7 +530,7 @@ object Find_Facts {
       def get_content(range: Text.Range): String =
         Symbol.decode(Line.normalize(range.substring(content)))
 
-      val document = Line.Document(content.replace('\r', '\u001a'))
+      val document = Line.Document(content.replacing("\r" -> "\u001a"))
       val num_lines = document.lines.length
       def content_range(start: Line.Position, stop: Line.Position): Text.Range =
         Text.Range(document.offset(start).get, document.offset(stop).get)
@@ -540,7 +541,10 @@ object Find_Facts {
           .filter(entity => entity.file == snapshot.node_name.node)
           .groupBy(entity => index.decode(entity.range).start))
 
-      val rendering = new Rendering(snapshot, options, session)
+      val rendering =
+        new Rendering(snapshot, options, session) {
+          override def gui_style: GUI.Style = GUI.Style_Symbol_Decoded
+        }
       val comment_ranges = rendering.comments(Text.Range.full).map(markup => ("", markup.range))
 
       for ((command, range) <- command_ranges ::: comment_ranges) yield {
@@ -608,7 +612,7 @@ object Find_Facts {
     sessions: List[String],
     ssh: SSH.System = SSH.Local,
     isabelle_home: Path = Path.current,
-    options: List[Options.Spec] = Nil,
+    options: Options.Update = Nil,
     dirs: List[Path] = Nil,
     browser_info: Boolean = true,
     no_build: Boolean = false,
@@ -743,15 +747,16 @@ object Find_Facts {
           Build.build(options, selection = Sessions.Selection(sessions = sessions), dirs = dirs,
             afp_root = afp_root, no_build = test, progress = if (test) new Progress else progress)
 
-        progress.interrupt_handler {
-          if (!build(test = true).ok) {
+        val test_results = build(test = true)
+        val results =
+          if (test_results.ok) test_results
+          else {
             progress.echo("Build started ...")
-            val rc = build().rc
-            if (rc != Process_Result.RC.ok) {
-              Output.error_message("Build failed")
-              sys.exit(rc)
-            }
+            build()
           }
+        if (!results.ok) {
+          Output.error_message("Build failed")
+          sys.exit(results.rc)
         }
       }
 
@@ -1003,7 +1008,7 @@ object Find_Facts {
       File.read(default_web_dir + web_html)
     }
 
-    val digest = web_project(web_sources_dir).sources_shasum.digest
+    val digest = SHA1.digest(web_project(web_sources_dir).sources_shasum)
     val html =
       if (digest != Elm.Project.get_digest(web_assets_dir + web_html)) rebuild()
       else File.read(web_assets_dir + web_html)
@@ -1062,7 +1067,7 @@ object Find_Facts {
         loop()
       }
 
-      Isabelle_Thread.interrupt_handler(_ => server.stop()) { loop() }
+      Isabelle_Thread.interrupt_handle(server.stop()) { loop() }
     }
   }
 

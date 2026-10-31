@@ -15,9 +15,7 @@ object Mirabelle {
   def action_names(): List[String] = {
     val Pattern = """Mirabelle action: "(\w+)".*""".r
     (for {
-      file <-
-        File.find_files(Path.explode("~~/src/HOL/Tools/Mirabelle").file,
-          pred = file => File.is_ML(file.getName))
+      file <- File.find_files(Path.explode("~~/src/HOL/Tools/Mirabelle"), pred = File.is_ML)
       line <- split_lines(File.read(file))
       name <- line match { case Pattern(a) => Some(a) case _ => None }
     } yield name).sorted
@@ -73,17 +71,19 @@ object Mirabelle {
                     "Mirabelle export " + quote(args.compound_name) + " (in " + session_name + ")",
                     verbose = true)
                   val yxml = YXML.parse_body(msg.chunk, cache = build_results0.cache)
-                  val lines = Pretty.string_of(yxml).trim()
+                  val lines = Library.trim_string(Pretty.string_of(yxml))
                   val prefix =
                     Export.explode_name(args.name) match {
                       case List("mirabelle", action, "initialize") => action + " initialize "
                       case List("mirabelle", action, "finalize") => action + " finalize   "
                       case List("mirabelle", action, "goal", goal_name, line, offset, cpu_ms) =>
-                        action + " goal." + String.format("%-9s", goal_name) + " " + String.format("%5sms", cpu_ms) + " " +
+                        action + " goal." + Library.format("%-9s", goal_name) + " " +
+                          Library.format("%5sms", cpu_ms) + " " +
                           args.theory_name + " " + line + ":" + offset + "  "
                       case _ => ""
                     }
-                  val body = (if (lines == "") prefix else Library.prefix_lines(prefix, lines)) + "\n"
+                  val body =
+                    (if (lines == "") prefix else Library.prefix_lines(prefix, lines)) + "\n"
                   val log_file = output_dir + Path.basic("mirabelle.log")
                   File.append(log_file, body)
                 case _ =>
@@ -105,7 +105,7 @@ object Mirabelle {
   val isabelle_tool = Isabelle_Tool("mirabelle", "testing tool for automated proof tools",
     Scala_Project.here,
     { args =>
-      var options = Options.init(specs = Options.Spec.ISABELLE_BUILD_OPTIONS)
+      var options = Options.init(update = Options.Spec.ISABELLE_BUILD_OPTIONS)
       val mirabelle_dry_run = options.check_name("mirabelle_dry_run")
       val mirabelle_max_calls = options.check_name("mirabelle_max_calls")
       val mirabelle_randomize = options.check_name("mirabelle_randomize")
@@ -114,6 +114,7 @@ object Mirabelle {
       val mirabelle_output_dir = options.check_name("mirabelle_output_dir")
       val mirabelle_parallel_group_size = options.check_name("mirabelle_parallel_group_size")
       val mirabelle_subgoals = options.check_name("mirabelle_subgoals")
+      val mirabelle_print_command = options.check_name("mirabelle_print_command")
 
       var actions: List[String] = Nil
       var base_sessions: List[String] = Nil
@@ -137,23 +138,33 @@ Usage: isabelle mirabelle [OPTIONS] [SESSIONS ...]
     -B NAME      include session NAME and all descendants
     -D DIR       include session directory and select its sessions
     -N           cyclic shuffling of NUMA CPU nodes (performance tuning)
-    -O DIR       """ + mirabelle_output_dir.description + " (default: " + mirabelle_output_dir.default_value + """)
-    -S SUBGOAL   """ + mirabelle_subgoals.description + " (default: " + mirabelle_subgoals.default_value + """)
+    -O DIR       """ + mirabelle_output_dir.description +
+        " (default: " + mirabelle_output_dir.default_value + """)
+    -S SUBGOAL   """ + mirabelle_subgoals.description +
+        " (default: " + mirabelle_subgoals.default_value + """)
     -T THEORY    theory restriction: NAME or NAME[FIRST_LINE:LAST_LINE]
     -X NAME      exclude sessions from group NAME and all descendants
     -a           select all sessions
+    -c           """ + mirabelle_print_command.description +
+        " (default " + mirabelle_print_command.default_value + """)
     -d DIR       include session directory
     -g NAME      select session group NAME
     -j INT       maximum number of parallel jobs (default 1)
-    -m INT       """ + mirabelle_max_calls.description + " (default " + mirabelle_max_calls.default_value + """)
+    -m INT       """ + mirabelle_max_calls.description +
+        " (default " + mirabelle_max_calls.default_value + """)
     -o OPTION    override Isabelle system OPTION (via NAME=VAL or NAME)
-    -p INT       """ + mirabelle_parallel_group_size.description + " (default " + mirabelle_parallel_group_size.default_value + """)
-    -r INT       """ + mirabelle_randomize.description + " (default " + mirabelle_randomize.default_value + """)
-    -s INT       """ + mirabelle_stride.description + " (default " + mirabelle_stride.default_value + """)
-    -t SECONDS   """ + mirabelle_timeout.description + " (default " + mirabelle_timeout.default_value + """)
+    -p INT       """ + mirabelle_parallel_group_size.description +
+        " (default " + mirabelle_parallel_group_size.default_value + """)
+    -r INT       """ + mirabelle_randomize.description +
+        " (default " + mirabelle_randomize.default_value + """)
+    -s INT       """ + mirabelle_stride.description +
+        " (default " + mirabelle_stride.default_value + """)
+    -t SECONDS   """ + mirabelle_timeout.description +
+        " (default " + mirabelle_timeout.default_value + """)
     -v           verbose
     -x NAME      exclude session NAME and all descendants
-    -y           """ + mirabelle_dry_run.description + " (default " + mirabelle_dry_run.default_value + """)
+    -y           """ + mirabelle_dry_run.description +
+        " (default " + mirabelle_dry_run.default_value + """)
 
   Apply the given ACTIONs at all theories and proof steps of the
   specified sessions.
@@ -166,7 +177,8 @@ Usage: isabelle mirabelle [OPTIONS] [SESSIONS ...]
 
   Available actions are:""" + action_names().mkString("\n    ", "\n    ", "") + """
 
-  For the ACTION "sledgehammer", the usual sledgehammer as well as the following mirabelle-specific OPTIONs are available:""" +
+  For the ACTION "sledgehammer", the usual sledgehammer as well as the following
+  mirabelle-specific OPTIONs are available:""" +
         sledgehammer_options().mkString("\n    ", "\n    ", "\n"),
         "A:" -> (arg => actions = actions ::: List(arg)),
         "B:" -> (arg => base_sessions = base_sessions ::: List(arg)),
@@ -177,6 +189,7 @@ Usage: isabelle mirabelle [OPTIONS] [SESSIONS ...]
         "T:" -> (arg => theories = theories ::: List(arg)),
         "X:" -> (arg => exclude_session_groups = exclude_session_groups ::: List(arg)),
         "a" -> (_ => all_sessions = true),
+        "c" -> (_ => options = options + "mirabelle_print_command=true"),
         "d:" -> (arg => dirs = dirs ::: List(Path.explode(arg))),
         "g:" -> (arg => session_groups = session_groups ::: List(arg)),
         "j:" -> (arg => max_jobs = Some(Value.Nat.parse(arg))),
@@ -200,22 +213,20 @@ Usage: isabelle mirabelle [OPTIONS] [SESSIONS ...]
       progress.echo("Started at " + Build_Log.print_date(start_date), verbose = true)
 
       val results =
-        progress.interrupt_handler {
-          mirabelle(options, actions, output_dir.absolute,
-            theories = theories,
-            selection = Sessions.Selection(
-              all_sessions = all_sessions,
-              base_sessions = base_sessions,
-              exclude_session_groups = exclude_session_groups,
-              exclude_sessions = exclude_sessions,
-              session_groups = session_groups,
-              sessions = sessions),
-            progress = progress,
-            dirs = dirs,
-            select_dirs = select_dirs,
-            numa_shuffling = Host.numa_check(progress, numa_shuffling),
-            max_jobs = max_jobs)
-        }
+        mirabelle(options, actions, output_dir.absolute,
+          theories = theories,
+          selection = Sessions.Selection(
+            all_sessions = all_sessions,
+            base_sessions = base_sessions,
+            exclude_session_groups = exclude_session_groups,
+            exclude_sessions = exclude_sessions,
+            session_groups = session_groups,
+            sessions = sessions),
+          progress = progress,
+          dirs = dirs,
+          select_dirs = select_dirs,
+          numa_shuffling = Host.numa_check(progress, numa_shuffling),
+          max_jobs = max_jobs)
 
       val end_date = Date.now()
       val elapsed_time = end_date - start_date

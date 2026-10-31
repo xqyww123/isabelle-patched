@@ -6,6 +6,7 @@ Trace window with tree-style view of the simplifier trace.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -96,7 +97,7 @@ private object Simplifier_Trace_Window {
             else if (head.markup == Markup.SIMP_TRACE_IGNORE) {
               parent.parent match {
                 case None =>
-                  Output.error_message(
+                  GUI.log.error_message(
                     "Simplifier_Trace_Window: malformed ignore message with parent " + head.parent)
                 case Some(tree) =>
                   tree.children -= head.parent
@@ -110,7 +111,7 @@ private object Simplifier_Trace_Window {
             }
 
           case None =>
-            Output.error_message("Simplifier_Trace_Window: unknown parent " + head.parent)
+            GUI.log.error_message("Simplifier_Trace_Window: unknown parent " + head.parent)
         }
     }
 
@@ -155,7 +156,7 @@ class Simplifier_Trace_Window(
   /* resize */
 
   private val delay_resize =
-    Delay.first(PIDE.session.update_delay, gui = true) { handle_resize() }
+    GUI.Delay.first(PIDE.session.update_delay) { handle_resize() }
 
   peer.addComponentListener(new ComponentAdapter {
     override def componentResized(e: ComponentEvent): Unit = delay_resize.invoke()

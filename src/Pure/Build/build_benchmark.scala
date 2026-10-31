@@ -56,30 +56,41 @@ object Build_Benchmark {
         val sessions = Build_Process.Sessions.empty.init(build_context, database_server, progress)
         val session = sessions(benchmark_session_name)
 
-        val hierachy = session.ancestors.map(store.output_session(_, store_heap = true))
-        for (db <- database_server) ML_Heap.restore(db, hierachy, cache = store.cache.compress)
+        val hierarchy = session.ancestors.map(store.output_session(_, store_heap = true))
+        for (heap_db <- database_server) {
+          ML_Heap.restore(heap_db, hierarchy, cache = store.cache.compress)
+        }
 
         val local_options = options + "build_database_server=false" + "build_database=false"
 
         benchmark_requirements(local_options, progress)
-        for (db <- database_server) ML_Heap.restore(db, hierachy, cache = store.cache.compress)
-
-        def get_shasum(name: String): SHA1.Shasum =
-          store.check_output(database_server, name,
-            sources_shasum = sessions(name).sources_shasum,
-            input_shasum = store.make_shasum(sessions(name).ancestors.map(get_shasum)),
-            build_thorough = build_context.sessions_structure(name).build_thorough)._2
+        for (heap_db <- database_server) {
+          ML_Heap.restore(heap_db, hierarchy, cache = store.cache.compress)
+        }
 
         val deps = Sessions.deps(full_sessions.selection(selection)).check_errors
-        val background = deps.background(benchmark_session_name)
+        val session_conditions = deps.eval_conditions(benchmark_session_name)
+        val parent_background = deps.parent_background(benchmark_session_name)
+        val current_background = deps.background(benchmark_session_name)
+
+        def get_shasum(name: String): Shasum =
+          store.check_output(name,
+            session_conditions.value,
+            opened_db = database_server,
+            sources_shasum = sessions(name).sources_shasum,
+            input_shasum = store.make_shasum(sessions(name).ancestors.map(get_shasum))
+          ).output_shasum
+
         val input_shasum = get_shasum(benchmark_session_name)
         val node_info = Host.Node_Info(hostname, None, Nil)
 
         val local_build_context = build_context.copy(store = Store(local_options))
 
         val result =
-          Build_Job.start_session(local_build_context, session, progress, new Logger, server,
-            background, session.sources_shasum, input_shasum, node_info, false).join
+          Build_Job.start_session(local_build_context, session, session_conditions, progress,
+            Logger.none, server, parent_background = parent_background,
+            current_background = current_background, session.sources_shasum, input_shasum,
+            node_info, false).join
 
         val timing =
           if (result.process_result.ok) result.process_result.timing
@@ -87,7 +98,7 @@ object Build_Benchmark {
 
         val score = Time.seconds(1000).ms.toDouble / (1 + timing.elapsed.ms)
         progress.echo(
-          "Finished benchmark in " + timing.message + ". Score: " + String.format("%.2f", score))
+          "Finished benchmark in " + timing.message + ". Score: " + Library.format("%.2f", score))
 
         Host.write_info(db, Host.Info.init(hostname = hostname, score = Some(score)))
       }

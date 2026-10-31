@@ -4,6 +4,595 @@ Isabelle NEWS -- history of user-relevant changes
 (Note: Isabelle/jEdit shows a tree-view of the NEWS file in Sidekick.)
 
 
+New in Isabelle2026 (October 2026)
+----------------------------------
+
+*** General ***
+
+* The 'theory' header syntax allows for inlined 'options' that are only
+used for the subsequent theory body --- neither for the theory imports
+nor for other theories importing the current theory. This is analogous
+to session options within a ROOT file, but the scope of options is
+different, and inlined theory options may be edited within a running
+PIDE session.
+
+* The meaning of system option "condition" has been changed as follows.
+If the condition is false, the theory remains formally intact, based on
+the header with imports; the theory body commands are ignored. Likewise,
+document preparation presents only the document commands up to 'theory',
+and ignores everything until the final 'end'. Thus theory imports work
+uniformly, but the respective contents may be empty depending on
+conditions. This allows to construct variants of specifications,
+depending on parameters that are changed by external means (e.g.
+Isabelle system options): with suitable naming conventions and proof
+tool setup, later theories may work uniformly on either variant.
+
+* The syntax of system option "condition" has been extended as follows:
+  - "true" and "false" refer to literal Boolean values.
+  - "$NAME" refers to a process environment variable. INCOMPATIBILITY,
+    was plain NAME before.
+  - "name" refers to a system option; to be enabled, the value needs to
+    be true (bool), non-empty (string), or > 0 (int, real).
+  - "name()" refers to a predicate defined in Isabelle/Scala (via
+    'services' in etc/build.props and suitable instances of the service
+    class isabelle.Thy_Conditions.Predicates).
+
+* The system option "condition_proofs" is analogous to "condition", but
+skips proof checking only. Thus [condition_proofs = false] is like the
+historical option [skip_proofs = true], but "condition_proofs" may
+depend on the process environment, session options, Isabelle/Scala
+predicates.
+
+* The Isabelle application bundle has been split into "macos"
+(x86_64-darwin, Intel) and "macos_arm" (arm64-darwin, Apple Silicon).
+The correct version needs to be used for the actual system platform:
+emulated Java via Rosetta 2 is explicitly excluded. Isabelle add-on
+tools usually work on arm64-darwin.
+
+* Formal entities record more position information, from the history of
+locale interpretations etc. This results in multiple PIDE markup, which
+can be displayed to end-users as hyperlinks with multiple choices.
+
+* Output of results (statements of definitions, theorems etc.) no longer
+depends on interactive mode (within the PIDE editor), but works in
+batch-builds as well. The system option "show_results" and the context
+option of the same name serve as a guard to actual output, without any
+special cases. The default show_results=true, but show_results=false may
+be used in situations where output is too bulky to be printed, e.g. in
+the theory as "context notes [[show_results = false]] begin ... end".
+
+* More robust printing of terms with bound variables that are marked as
+"internal", e.g. from vacuous abstraction like "\<forall>_\<in>A. b" or "\<lambda>(_, _). b"
+--- increase chances that the printed term can be parsed again.
+
+
+*** Pure ***
+
+* Code generation: non-overloaded function specifications for a class
+parameter are now permitted and effectively turn this class parameter
+into an ordinary function in generated code; this allows to dissociate a
+class parameter from its origin class in generated code. It is still
+possible to specify code equations for instances of that class
+parameter.
+
+* Code generation: transitional legacy attribute [code del] has been
+discontinued. Minor INCOMPATIBILITY.
+
+
+*** Isabelle/jEdit Prover IDE ***
+
+* Support for screen reader technology via Java Accessibility has been
+greatly improved, but is limited to NVDA on Windows (see
+https://www.nvaccess.org).
+
+* The menu bar of jEdit has been adapted to the requirements of
+Isabelle/jEdit, with special focus on accessibility: menus need to be
+clearly structured and provide reasonable access paths, usually with
+shortcuts. The following menus and items are particularly notable:
+
+  - Utilities / Plugin Manager: moved here from Plugins menu
+  - Utilities / Macros: moved here from main menu bar
+  - Plugins: only lists submenus from plugins
+  - Isabelle: moved here from Plugins / Isabelle
+  - Options: new menu with Buffer, Global, Plugin, Isabelle Options.
+  - Help: new item for Isabelle Documentation.
+
+* The menu action "Edit / Complete word" now refers to
+"isabelle.complete-words" instead of "complete-word" from classic jEdit.
+Minor INCOMPATIBILITY.
+
+* Support for additional look-and-feels: "FlatLaf IntelliJ" and "FlatLaf
+Darcula".
+
+* The FlatLaf look-and-feel has been patched slightly, to recover the
+regular Java/Swing behavior of the F10 key on all platforms, notably
+Windows. F10 should focus the menu bar and open the first menu, which
+can be reversed via the ESCAPE key. Consequently, the NVDA Screen Reader
+will display the menu title on the Braille display properly ---
+otherwise no action was indicated. Minor INCOMPATIBILITY with native
+Windows GUI behavior of F10, which FlatLaf attempted to imitate here.
+
+* The jEdit action "sidekick-tree" is more accessible via shortcut F8.
+
+* The jEdit actions "isabelle.recode-plain" (shortcut F9) and
+"isabelle.recode-symbols" (shortcut S+F9) change the representation of
+Isabelle symbols within the text buffer. This corresponds to reload a
+buffer with the encodings "UTF-8" and "UTF-8-Isabelle", respectively,
+but it is more careful about caret position, selection ranges, and
+navigator history positions. These actions also appear as menu items
+"File / Recode Plain Text" and "File / Recode Unicode Symbols". This
+helps to see the true text behind the superficial Unicode rendering,
+which is usually enabled by default. WARNING: this resets the undo
+history.
+
+* The built-in navigator has become more robust, thanks to careful
+interaction with GUI vs. IO events in jEdit.
+
+* The built-in navigator provides a separate history for each editor
+view, instead of just one global history. INCOMPATIBILITY.
+
+* The jEdit action "focus-buffer-switcher" provides the alias
+"focus-buffer-switcher2" for further keyboard shortcuts, notably
+CS+SPACE: this increases chances to have it work on Windows with German
+keyboard.
+
+* The jEdit action "find-prev" is accessible via keyboard shortcuts S+F3
+or "C+e g", using proper "find-prev.shortcut" instead of undefined
+"find-previous.shortcut" before.
+
+* The jEdit action "isabelle.goto-entity" with keyboard shortcut CS+d
+has been removed. INCOMPATIBILITY, use the more general
+"isabelle.follow-link" with keyboard shortcut (see below).
+
+* The jEdit action "isabelle.follow-link" (keyboard shortcut AS+DOWN)
+follows the hyperlink under the current caret, using the same notion of
+link as C-hover-click via mouse.
+
+* The jEdit action "isabelle.show-links" (keyboard shortcut AS+UP) opens
+a popup with the list of hyperlinks under the current caret, using the
+same notion of link as C-hover-click via mouse, but showing all
+possibilities.
+
+* The jEdit action "isabelle.line-status" (keyboard shortcut CS+l) shows
+the visual information of the gutter area in text form: line number,
+number of errors + warnings, followed by the actual messages.
+
+* The mouse action C-hover-click is strictly limited to the "C" modifier
+(command on macOS, control on Linux/Windows). This allows to use mouse
+dragging e.g. with CS modifiers for rectangular selection, regardless of
+hyperlink markup: jEdit will ignore the extra modifier, but
+Isabelle/jEdit won't.
+
+* The keyboard shortcut "F1" now refers to jEdit action
+"isabelle-documentation" to activate the Documentation panel of
+Isabelle/jEdit. That is more useful than the original jEdit help, which
+is also available as PDF from the Documentation panel.
+
+* The jEdit action "focus-textarea" is now mapped to the keyboard
+shortcut "S+F1", for improved accessibility. Together with "F1" for
+"isabelle-documentation", this allows to explore Isabelle examples
+quickly via keyboard only.
+
+* Popups from explicit actions (notably "isabelle.show-links",
+"isabelle.complete", etc.) now always get focus, and allow to select
+both with ENTER and TAB. This improves overall accessibility. Minor
+INCOMPATIBILITY.
+
+* Tooltip messages render formal entities with additional PIDE markup,
+to distinguish multiple def-positions due to locale interpretations
+etc.
+
+* Console/Scala: more robust Scala_Console.Progress with local output
+and interrupt handling (using thread interrupt, e.g. via "Stop" button).
+For example:
+
+  val progress = new Scala_Console.Progress(verbose = true)
+  Build.build_logic(PIDE.options, "FOL", progress = progress)
+
+
+*** Isabelle/VSCode Prover IDE ***
+
+* Output areas now do proper Isabelle pretty-printing according to
+window/panel size and font metrics, and highlight messages, and contain
+controls for some active markup (sendback and dialog).
+
+* Support for hyperlinks from \<^doc>\<open>...\<close>, e.g. \<^doc>\<open>system\<close>.
+
+* History text fields now allow proper keyboard navigation.
+
+* Various improvements for Isabelle add-on panels, and more uniform
+styling. GUI state now persists between context switches, where
+appropriate.
+
+* Update to recent VSCode 1.135 / VSCodium 1.135.06055 (August 2026),
+Electron 42.8.1, Chromium 148.0.7778.280, Node.js 24.18.1, with pre-
+installed mathematic.vscode-pdf 0.2.5. Name and logos of the IDE are
+changed to distinguish "Isabelle VSCode" (or "Isacode" for short) from
+other VSCode / VSCodium applications.
+
+
+*** Document preparation ***
+
+* Meta-comments (*<*)...(*>*) need to be properly nested: this was never
+checked in the past. INCOMPATIBILITY.
+
+
+*** HOL ***
+
+* Sledgehammer:
+  - Update of bundled provers:
+      . spass-3.8ds -- include arm64-darwin
+      . zipperposition-2.1 -- include arm64-darwin
+      . vampire-4.8 -- include arm64-darwin
+      . veriT 2026.05
+      . cvc5 1.3.4
+  - Sledgehammer can now suggest cvc5 as proof backend:
+    "by (smt (cvc5, ...))"
+  - Tuned output of proof search to use "using" for local facts in
+    conjunction with "metis", "meson", and "smt".
+  - Tuned output of proof reconstruction to detect more duplicate
+    proofs.
+
+* Metis: Updated the Metis prover underlying the "metis" proof method to
+version 2.4 (release 20260920). The new version allocates less memory
+and fixes one implementation defect. Minor INCOMPATIBILITY.
+
+* SMT:
+  - Added option "smt_unique_dest_file" to add some pseudo-unique suffix
+    to the problem/proof files generated with through the options
+    "smt_problem_dest_dir" and "smt_proof_dest_dir"; this allows saving
+    the files of multiple SMT calls in one directory.
+  - Added option "smt_integer_induction" and "smt_structural_induction".
+  - Update the reconstruction to the latest version of Alethe proof
+    standard.
+  - Reconstruction is now possible using the SMT solver cvc5. Remark
+    that the reconstruction works best if you have Reals imported, even
+    if you are using only integers.
+  - Like veriT, cvc5 has strategies to improve the performance of
+    reconstruction.
+  - Added options "smt_native_datatypes" and "smt_native_codatatypes" to
+    emit native SMT-LIB (co)datatype declarations. Both options are
+    honoured only by solvers that support the declaration.
+  - Datatype declarations now use the SMT-LIB 2.6 syntax, except for z3,
+    which keeps the pre-2.6 syntax.
+  - The solvers "vampire_smt_dt" and "vampire_smt_nodt" have been
+    replaced by "vampire_smt", controlled by "smt_native_datatypes".
+    INCOMPATIBILITY.
+  - Removed option "cvc_extensions"; use "smt_native_datatypes" and
+    "smt_native_codatatypes" instead. INCOMPATIBILITY.
+
+* Mirabelle: Added option -c to "isabelle mirabelle" to log the source
+text of each command acted upon, e.g. "source: by (metis foo bar)".
+
+* Constants "open" and "uniformity" are not handled as class parameters
+any longer in generated code: there are hardly any instances with a
+reasonable implementation, but a lot of implementations would require
+these as (effectively unused) dictionary parameters. Minor
+INCOMPATIBILITY.
+
+* Constants "Inf", "Sup", "Lcd", "Gcd" are not handled as class
+parameters any longer in generated code but implemented using their
+counterparts on finite sets. Minor INCOMPATIBILITY.
+
+* Set difference may now be written using the Isabelle symbol "\<setminus>" (which
+is not a backlash). The generic minus operation "-" is still available
+as before, and used by default.
+
+* New relation "has_log_derivative", which simplifies talking about
+logarithmic derivatives.
+
+* Theory "HOL.Finite_Set"
+  - Added lemmas.
+      card_Domain_le
+      card_le_card_if_mem_imp_ex_mem
+      card_Range_le
+
+* Theory "HOL.Map":
+  - Added lemmas.
+      card_dom_eq_card_range
+      inj_on_the_image_dom
+      ran_conv_dom
+
+* Theory HOL.List: constant "enumerate" in theory renamed to more
+specific "indexed_from". Corresponding theorems renamed:
+  enumerate_eq_zip ~> indexed_from_eq_zip
+  enumerate_simps ~> indexed_from_simps
+  length_enumerate ~> length_indexed_from
+  map_fst_enumerate ~> map_fst_indexed_from
+  map_snd_enumerate ~> map_snd_indexed_from
+  in_set_enumerate_eq ~> in_set_indexed_from_eq
+  nth_enumerate_eq ~> nth_indexed_from_eq
+  enumerate_replicate_eq ~> indexed_from_replicate_eq
+  enumerate_Suc_eq ~> indexed_from_Suc_eq
+  distinct_enumerate ~> distinct_indexed_from
+  enumerate_append_eq ~> indexed_from_append_eq
+  enumerate_map_upt ~> indexed_from_map_upt
+  sorted_enumerate ~> sorted_indexed_from
+  in_enumerate_iff_nth_default_eq ~> in_indexed_from_iff_nth_default_eq
+
+* Theory "HOL.Real": Generalised real_arch_pow and real_arch_pow_inv
+from type "real" to any archimedian fields, renaming them arch_pow_inv
+and arch_pow. Minor INCOMPATIBILITY.
+
+* Theory "HOL-Library.Multiset":
+  - Removed lemmas. Minor INCOMPATIBILITY.
+      add_mset_add_single (use add_single_right_eq_add_mset[symmetric]
+      instead)
+  - Added lemmas.
+      add_single_left_eq_add_mset
+      add_single_right_eq_add_mset
+
+* Theory "HOL-Library.Finite_Map"
+  - Removed function set_of_map. Use Map.graph instead. INCOMPATIBILITY.
+  - Removed lemma set_of_map_alt_def. Use Map.Map.graph_eq_to_snd_dom
+    instead. Minor INCOMPATIBILITY.
+  - Removed lemma set_of_map_finite. Use Map.finite_graph_iff_finite_dom
+    instead. Minor INCOMPATIBILITY.
+  - Strengthened (and renamed) lemmas. Minor INCOMPATIBILITY.
+      set_of_map_inj ~> Map.inj_on_graph
+  - Added lemmas.
+      fmsubset_antisym
+      fmsubset_refl[simp]
+      fmsubset_trans[trans]
+      map_restrict_set_conv_restrict_map
+
+INCOMPATIBILITY.
+
+* Session "HOL-New_Algebra": a new library for abstract algebra, based
+on Clemens Ballarin's locale approach and intended to replace
+HOL-Algebra. To prevent clashes, HOL-Number_Theory.Residues no longer
+relies on algebra, so HOL-Number_Theory no longer imports HOL-Algebra.
+Proofs that had referenced the internals of HOL-Number_Theory.Residues
+should now import the new theory "HOL-Algebra.Residues_Algebra".
+INCOMPATIBILITY.
+
+* Session "HOL-Analysis": much new material including Bounded_Variation,
+Rectifiable_Paths and Absolute_Continuity. Change_Of_Vars has been
+generalised to Euclidean spaces. Stronger versions of the FTC, now for
+countable rather than finite sets. Minor INCOMPATIBILITY
+
+* Session "HOL-Analysis": theory "Determinant_Linear_Function" provides
+"finite_dimensional_vector_space.det", i.e. the notion of the
+determinant of a linear function from a finite-dimensional vector space
+into itself, generalising (but not replacing) the earlier
+"Determinants.det", which operates on matrices. The related "abs_det"
+gives the absolute value of the determinant of a multiset of vectors.
+The interpretation for Euclidean spaces, "eucl.det", is now the default
+meaning of "det", and the previous "Determinants.det" is available with
+the abbreviation "matrix_det". INCOMPATIBILITY
+
+* Session "HOL-Analysis": Theory "Infinite_Product" treats products
+indexed by arbitrary sets, generalising the existing treatment of
+the product of a sequence.
+
+
+*** ML ***
+
+* Minor improvements of overall inference kernel integrity and
+corresponding derived rules, concerning rare boundary cases:
+
+  - Thm.abstract_rule now properly handles situations where the
+    abstracted variable does not occur in the body (potentially bad
+    theory certificate or bad maxidx). This problem stems from
+    Isabelle89 (bad theory certificate) and Isabelle91 (bad maxidx ---
+    due to introduction of schematic type variables at that time).
+
+  - Extra checks for unification of variables with the same indexname
+    and different type were introduced in Isabelle2005, but accidentally
+    lost in Isabelle2015. Thus very unusual inferences may produce bad
+    results. After re-introducing the check, only Metis had to be
+    adapted in one of its workarounds for odd situations, which stem
+    from its non-Isabelle heritage.
+
+  - Proper treatment of initially bound variables in primitive
+    definitions of consts (due to Primitive_Defs.dest_def used in
+    Theory.add_def). The problem stems from Isabelle2008, and allowed to
+    get e.g. "!!x. c == x" accepted as definitional axiom, by using
+    internal primitives instead of regular user-interfaces like
+    Specification.definition (or better Local_Theory.define).
+
+  - Proper treatment of "internal" free variables in the "generalize"
+    family of functions, via the now explicit
+    Term_Subst.generalize_index (this is only relevant for term
+    variables, not type variables). Thm.generalize was OK, but the
+    additional shortcut Thm.generalize_cterm from Isabelle2018 could
+    produce a malformed result (bad maxidx), and its main application
+    Thm.instantiate_frees would leave variables uninstantiated.
+
+  - Thm.of_class could be abused in conjunction with
+    Soft_Type_System.setup, to install a "purge" operation that
+    manipulates the Logic.mk_of_class proposition. The original
+    implementation stems from 1994, but the experimental/unused
+    Soft_Type_System from Isabelle2020 made that an unchecked
+    side-entry.
+
+* ML antiquotation @{unchecked_name a} inlines a syntactically
+wellformed long name as string literal, without any formal checking in
+the logical context. This may be used as last resort, when Isabelle/ML
+sources need to make forward-references to term consts or type
+constructors that are introduced later on.
+
+* ML string literals that look like a formal entity (qualified name) are
+highlighted as "legacy feature", with an offer to replace it via
+suitable ML antiquotations: @{const_name}, @{type_name},
+@{unchecked_name}. It is also possible to use @{verbatim} for strings
+that are not intended as a name of any kind. The check may be disabled
+locally like this:
+
+  context notes [[ML_check_strings = false]]
+  begin
+  end
+
+* Both SHA1 and SHA256 are supported via Isabelle/Scala, with minor
+changes of the supported operations: Minor INCOMPATIBILITY. SHA1.fake
+has been replaced by SHA1.parse (including proper checks). Structure
+Message_Digest provides general operations. The native SHA1
+implementation in ML has been discontinued, which may impact
+performance.
+
+* Operations Resources.provide_parse_file etc. have been removed:
+provided files are no longer managed inside the theory context (only in
+Isabelle/Scala). Minor INCOMPATIBILITY: use Resources.parse_file etc. to
+access files from Isar commands, without updating the theory context.
+
+* Options.update_default allows to update the thread-local default for
+system options, without affecting the underlying ML process default.
+
+* Structure Thy_Info has been dismantled: most of its operations moved
+to structure Thy_Presentation and structure Build. Some historic
+operations habe been removed, notable Thy_Info.use_thy_legacy. Rare
+INCOMPATIBILITY: theories need to be loaded into a formal PIDE session,
+e.g. via "isabelle build" or "isabelle process_theories".
+
+* More operations for structure Time, notably Time.seconds and
+Time.sleep.
+
+* Structures Posix, OS.Process and OS.IO are no longer exposed to
+Isabelle/ML user-space. Minor INCOMPATIBILITY: use regular Isabelle/ML
+operations, notably Time.sleep instead of OS.Process.sleep.
+
+* Config options simp_depth_limit, simp_trace_depth_limit, simp_debug,
+simp_trace now qualified in Isabelle/ML. Minor INCOMPATIBILITY.
+
+* Operations mk_rrules, eq_rrule, cert_simproc, transform_simproc,
+trim_context_simproc, mk_solver, empty_ss, merge_ss, empty_simpset,
+clear_simpset, simpset_map, map_theory_simpset, fold_rule,
+fold_goals_tac, norm_hhf, norm_hhf_protect from structure "Simplifier"
+are now qualified. Minor INCOMPATIBILITY.
+
+* Operation map_ss from structure "Simplifier" renamed to
+Simplifier.map_simpset, following the convention that "ss" refers to a
+"frozen" simpset only. Minor INCOMPATIBILITY.
+
+* Datatype proc_kind from structure "Simplifier" is now qualified. Rare
+INCOMPATIBILITY.
+
+* Discontinued alias "Raw_Simplifier.rewrite"; use
+"Simplifier.rewrite_wrt" instead. Rare INCOMPATIBILITY.
+
+* Discontinued infix "addsimps" and "delsimps"; use explicit
+"Simplifier.add_simp(s)" and "Simplifier.del_simp(s)" instead. Minor
+INCOMPATIBILITY. For existing applications that involve a lot of such
+declarations, consider including the infix declarations from
+Isabelle2025-2 in src/Tools/misc_legacy.ML to ease transition.
+
+* Discontinued infixes "addsimprocs" and "delsimprocs"; use explicit
+"Simplifier.add_proc" and "Simplifier.del_proc" instead. Minor
+INCOMPATIBILITY.
+
+* Poly/ML 5.9.2 has been patched to support larger heap size in the
+special x86_64_32/arm64_32 mode with 32-bit values: the limit is now 32
+GiB, instead of 16 GiB before. The cost is a factor of 1.2 .. 1.5 more
+memory requirement (due to alignment of values), and a slowdown factor
+0.9 .. 0.95 for average sessions. For very large sessions, the gain is a
+speedup factor 1.9 .. 1.2, due to reduced GC time. It also avoids the
+need for bulky x86_64/arm64 mode with 64-bit values and excessive GC
+time.
+
+
+*** System ***
+
+* System option "system_log" is enabled by default, so output from
+Output.system_message etc. appears on the PIDE session log: for
+command-line tools like "isabelle dump", "isabelle build", and
+derivatives, this is the console. Potential INCOMPATIBILITY: e.g. use
+"isabelle build -o system_log='' ..." to disable it explicitly.
+
+* System option "build_everything" is the conventional guard for
+theories that are somehow optional, and normally not processed (e.g.
+benchmarks). For example, see ~~/src/Benchmarks which now requires
+and explicit options to actually build the content:
+
+  isabelle build -o build_everything -D '~~/src/Benchmarks'
+
+* Both SHA1 and SHA256 are supported in Isabelle/Scala. SHA1 is still
+used routinely, but will be eventually phased out. Result is of type
+Message_Digest.T, with slightly different toString method. Subtle
+INCOMPATIBILITY: use "rep" instead (as in Isabelle/ML).
+
+* Isabelle/Scala now uses more static type-checking by default, notably
+Explicit Nulls (as explained in
+https://docs.scala-lang.org/scala3/reference/experimental/explicit-nulls.html).
+Notable INCOMPATIBILITY: need to be careful about type T vs. T | Null.
+The following operations may help to get rid of the Null part:
+
+  proper_value: A | Null => Option[A]
+  _.nn: A | Null => A
+
+The "nn" (non-null) operation is written postfix, like regular method
+application. This partial operation will throw NullPointerException on
+null. Excessive use of "nn" may indicate a Java-centric programming
+style: it is better to use null-free operations from the libraries of
+Scala and Isabelle/Scala. As last resort, it also possible to opt-out
+from Explicit Nulls for Scala modules as follows:
+
+  import scala.language.unsafeNulls
+
+Note: This extension of Scala3 is not yet a "safe" type-system. Even
+with type-checking of Explicit Nulls enabled, the Java/VM can produce
+null values by other means, e.g. during object initialization.
+
+* Various Isabelle/Scala programming interfaces now demand a Logger
+argument. Suitable values are Logger.none or Logger.console -- the
+latter ensures that spurious system errors are actually reported.
+
+* The Isabelle component for the MLton compiler now covers all platform
+variants for Linux and macOS (x86_64 and arm64), but still not Windows.
+ISABELLE_MLTON_OPTIONS are empty by default, but may be overridden in
+$ISABELLE_HOME_USER/etc/settings; new ISABELLE_MLTON_NATIVE_OPTIONS
+enable "-codegen native" on x86_64, but not on arm64. Mlton requires a C
+compiler with libgmp, as before.
+
+* The command-line tool "isabelle build_log" works again. It was broken
+in Isabelle2025-1 and Isabelle2025-2.
+
+* The command-line tool "isabelle dump" now refers to system option
+"system_log", just like "isabelle build".
+
+* The command-line tool "isabelle home" provides a convenient shortcut
+for "isabelle getenv" to display notable values from the Isabelle
+settings environment: ISABELLE_HOME etc.
+
+* The command-line tool "isabelle server" uses console stderr as default
+log output, unless option -L is given.
+
+* The command-line tool "isabelle version" supports option "-n", which
+is like "-i", but does not output a newline. This is useful to write the
+result into a file, e.g. "etc/ISABELLE_VERSION".
+
+* Isabelle/Scala operations Build.build(), Build.build_logic() etc.
+already include progress.interrupt_handler for the main loop. It is no
+longer required as a separate wrapper for command-line tools etc.
+
+* Isabelle/Scala operation Progress.interrupt_handler is now more
+specific for different instances of class Progress, with mixins
+Progress.Local_Interrupts (for thread interrupts) and
+Progress.Global_Interrupts (for thread interrupts and process signals).
+The latter is included in class Console_Progress, which is typically
+used for a single command-line tool that is directly connected to the
+system shell and its signals (e.g. CTRL-C). The default (new Progress)
+does not change interrupt handling at all. Subtle INCOMPATIBILITY in
+very rare situations.
+
+* The Java Access Bridge on JDK/x86_64-windows has been patched
+slightly, for more robust detection of text lines via the regular API
+for javax.accessibility.AccessibleExtendedTable.LINE instead of historic
+workarounds.
+
+* Integration of Scala.js, to allow running Isabelle/Scala sources
+within JavaScript engines. This imposes additional side-conditions on
+relevant modules: All reachable methods must be linked to JavaScript,
+which is not possible for many Java libraries (e.g., java.io) or JNI
+calls.
+
+* Directory src/Tools/Scalajs_Demo provides a demonstration on how to
+compile an Isabelle/Scala component via Scala.js and run it on an
+Isabelle JavaScript environment.
+
+* Update to OpenJDK 25: the current long-term support version of Java.
+
+
+
 New in Isabelle2025-2 (January 2026)
 ------------------------------------
 

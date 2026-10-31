@@ -107,7 +107,7 @@ object Component_JEdit {
     progress: Progress = new Progress
   ): Unit = {
     Isabelle_System.require_command("ant", test = "-version")
-    Isabelle_System.require_command("patch")
+    Isabelle_System.require_patch()
 
     val component_dir = Components.Directory(component_path).create(progress = progress)
 
@@ -171,11 +171,10 @@ isabelle_java java -Duser.home=""" + File.bash_platform_path(tmp_dir) +
 
       progress.echo("Patching jEdit sources ...")
       for {
-        file <- File.find_files(Path.explode("~~/src/Tools/jEdit/patches").file).sortBy(_.getName)
-        name = file.getName
-        if !File.is_backup(name)
+        path <- File.find_files(Path.explode("~~/src/Tools/jEdit/patches")).sortBy(_.file_name)
+        if !File.is_backup(path)
       } {
-        val patch = File.read(File.path(file))
+        val patch = File.read(path)
         Isabelle_System.apply_patch(source_dir, patch, strip = 2, progress = progress)
       }
 
@@ -191,12 +190,9 @@ isabelle_java java -Duser.home=""" + File.bash_platform_path(tmp_dir) +
           theme + Path.explode("32x32/apps/isabelle.gif"))
       }
 
-      for {
-        svg_file <- File.find_files(tango_path.file, pred = file => File.is_svg(file.getName))
-        rel_path <- File.relative_path(tango_path, File.path(svg_file))
-      } {
-        val dir = Isabelle_System.make_directory(jedit_tango_path + rel_path.dir)
-        Isabelle_System.copy_file(File.path(svg_file), dir + rel_path.base)
+      for (path <- File.find_files(tango_path, pred = File.is_svg, relative = true)) {
+        val dir = Isabelle_System.make_directory(jedit_tango_path + path.dir)
+        Isabelle_System.copy_file(tango_path + path, dir + path.base)
       }
 
       Isabelle_System.extract(idea_path + Path.explode("jar/idea-icons.jar"), jedit_tango_path)
@@ -210,16 +206,16 @@ isabelle_java java -Duser.home=""" + File.bash_platform_path(tmp_dir) +
 
       val java_sources =
         (for {
-          file <- File.find_files(source_org_dir.file, file => File.is_java(file.getName))
-          package_name <- Scala_Project.package_name(File.path(file))
+          path <- File.find_files(source_org_dir, pred = File.is_java)
+          package_name <- Scala_Project.package_name(path)
           if !exclude_package(package_name)
-        } yield File.path(component_path.java_path.relativize(file.toPath).toFile).implode).sorted
+        } yield File.the_relative_path(component_path, path).implode).sorted
 
       File.write(component_dir.build_props,
         "module = " + jedit_patched + "/jedit.jar\n" +
         "no_build = true\n" +
         "requirements = env:JEDIT_JARS\n" +
-        ("sources =" :: java_sources.sorted.map("  " + _)).mkString("", " \\\n", "\n"))
+        ("sources =" :: java_sources.map("  " + _)).mkString("", " \\\n", "\n"))
     }
 
 
@@ -248,7 +244,8 @@ isabelle_java java -Duser.home=""" + File.bash_platform_path(tmp_dir) +
 
     val keep_encodings = List("ISO-8859-1", "ISO-8859-15", "US-ASCII", "UTF-8", "windows-1252")
     val drop_encodings =
-      Charset.availableCharsets().keySet().asScala.toList.sorted.filterNot(keep_encodings.contains)
+      Charset.availableCharsets().nn.keySet().nn.asScala.toList
+        .sorted.filterNot(keep_encodings.contains)
 
     File.write(source_dir + Path.explode("properties/jEdit.props"),
 """#jEdit properties
@@ -289,81 +286,15 @@ insert-newline-indent.shortcut=
 insert-newline.shortcut=
 isabelle-debugger.dock-position=floating
 isabelle-documentation.dock-position=left
-isabelle-export-browser.label=Browse theory exports
 isabelle-output.dock-position=bottom
 isabelle-output.height=174
 isabelle-output.width=412
 isabelle-query.dock-position=bottom
-isabelle-session-browser.label=Browse session information
 isabelle-simplifier-trace.dock-position=floating
 isabelle-sledgehammer.dock-position=bottom
 isabelle-state.dock-position=right
 isabelle-symbols.dock-position=bottom
 isabelle-theories.dock-position=right
-isabelle.antiquoted_cartouche.label=Make antiquoted cartouche
-isabelle.complete-word.label=Complete word
-isabelle.complete.label=Complete Isabelle text
-isabelle.complete.shortcut2=C+b
-isabelle.control-bold.label=Control bold
-isabelle.control-bold.shortcut=C+e RIGHT
-isabelle.control-emph.label=Control emphasized
-isabelle.control-emph.shortcut=C+e LEFT
-isabelle.control-reset.label=Control reset
-isabelle.control-reset.shortcut=C+e BACK_SPACE
-isabelle.control-sub.label=Control subscript
-isabelle.control-sub.shortcut=C+e DOWN
-isabelle.control-sup.label=Control superscript
-isabelle.control-sup.shortcut=C+e UP
-isabelle.decrease-font-size.label=Decrease font size
-isabelle.decrease-font-size.shortcut2=C+SUBTRACT
-isabelle.decrease-font-size.shortcut=C+MINUS
-isabelle.decrease-font-size2.label=Decrease font size (clone)
-isabelle.draft.label=Show draft in browser
-isabelle.exclude-word-permanently.label=Exclude word permanently
-isabelle.exclude-word.label=Exclude word
-isabelle.first-error.label=Go to first error
-isabelle.first-error.shortcut=CS+a
-isabelle.goto-entity.label=Go to definition of formal entity at caret
-isabelle.goto-entity.shortcut=CS+d
-isabelle.include-word-permanently.label=Include word permanently
-isabelle.include-word.label=Include word
-isabelle.increase-font-size.label=Increase font size
-isabelle.increase-font-size.shortcut2=C+ADD
-isabelle.increase-font-size.shortcut=C+PLUS
-isabelle.increase-font-size2.label=Increase font size (clone)
-isabelle.increase-font-size2.shortcut=C+EQUALS
-isabelle.java-monitor.label=Java/VM monitor
-isabelle.last-error.label=Go to last error
-isabelle.last-error.shortcut=CS+z
-isabelle.message.label=Show message
-isabelle.message.shortcut=CS+m
-isabelle.newline.label=Newline with indentation of Isabelle keywords
-isabelle.newline.shortcut=ENTER
-isabelle.next-error.label=Go to next error
-isabelle.next-error.shortcut=CS+n
-isabelle.options.label=Isabelle options
-isabelle.prev-error.label=Go to previous error
-isabelle.prev-error.shortcut=CS+p
-isabelle.preview.label=Show preview in browser
-isabelle.reset-continuous-checking.label=Reset continuous checking
-isabelle.reset-font-size.label=Reset font size
-isabelle.reset-node-required.label=Reset node required
-isabelle.reset-words.label=Reset non-permanent words
-isabelle.select-entity.label=Select all occurences of formal entity at caret
-isabelle.select-entity.shortcut=CS+ENTER
-isabelle.select-structure.label=Select structure around selection or caret
-isabelle.select-structure.shortcut=C+7
-isabelle.set-continuous-checking.label=Set continuous checking
-isabelle.set-node-required.label=Set node required
-isabelle.toggle-breakpoint.label=Toggle Breakpoint
-isabelle.toggle-continuous-checking.label=Toggle continuous checking
-isabelle.toggle-continuous-checking.shortcut=C+e ENTER
-isabelle.toggle-node-required.label=Toggle node required
-isabelle.toggle-node-required.shortcut=C+e SPACE
-isabelle.tooltip.label=Show tooltip
-isabelle.tooltip.shortcut=CS+b
-isabelle.update-state.label=Update state output
-isabelle.update-state.shortcut=S+ENTER
 lang.usedefaultlocale=false
 largefilemode=full
 line-end.shortcut=END
@@ -375,10 +306,6 @@ metal.primary.font=Isabelle DejaVu Sans
 metal.primary.fontsize=12
 metal.secondary.font=Isabelle DejaVu Sans
 metal.secondary.fontsize=12
-navigate-backwards.label=Navigate backwards
-navigate-backwards.shortcut=AS+LEFT
-navigate-forwards.label=Navigate forwards
-navigate-forwards.shortcut=AS+RIGHT
 navigate-toolbar=navigate-backwards navigate-forwards
 new-file-in-mode.shortcut=
 next-bracket.shortcut2=C+e C+9

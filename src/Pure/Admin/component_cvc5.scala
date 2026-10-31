@@ -14,7 +14,6 @@ object Component_CVC5 {
   /* platform information */
 
   sealed case class Download_Platform(platform_name: String, download_name: String) {
-    def is_arm: Boolean = platform_name.startsWith("arm64-")
     def is_windows: Boolean = platform_name.endsWith("-windows")
   }
 
@@ -30,7 +29,7 @@ object Component_CVC5 {
   /* build cvc5 */
 
   val default_url = "https://github.com/cvc5/cvc5/releases/download"
-  val default_version = "1.2.0"
+  val default_version = "1.3.4"
 
   def build_cvc5(
     base_url: String = default_url,

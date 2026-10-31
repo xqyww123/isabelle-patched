@@ -6,6 +6,7 @@ Dockable window for Sledgehammer.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -26,7 +27,7 @@ class Sledgehammer_Dockable(view: View, position: String) extends Dockable(view,
 
   /* output text area */
 
-  private val output: Output_Area = new Output_Area(view)
+  private val output: Output_Area = new Output_Area(editor_context)
 
   override def detach_operation: Option[() => Unit] = output.pretty_text_area.detach_operation
 
@@ -50,7 +51,7 @@ class Sledgehammer_Dockable(view: View, position: String) extends Dockable(view,
   }
 
   private val sledgehammer =
-    new Query_Operation(PIDE.editor, view, "sledgehammer", consume_status,
+    new Query_Operation(JEdit_Editor, editor_context, "sledgehammer", consume_status,
       output.pretty_text_area.update_output)
 
 
@@ -66,10 +67,10 @@ class Sledgehammer_Dockable(view: View, position: String) extends Dockable(view,
   private val provers_tooltip =
     GUI.tooltip_lines(
       "Automatic provers as space-separated list, e.g.\n" +
-        PIDE.options.value.check_name("sledgehammer_provers").default_value)
+        Options.defaults.string("sledgehammer_provers"))
   private val provers = new HistoryTextField("isabelle-sledgehammer-provers") {
     override def processKeyEvent(evt: KeyEvent): Unit = {
-      if (evt.getID == KeyEvent.KEY_PRESSED && evt.getKeyCode == KeyEvent.VK_ENTER) hammer()
+      if (evt.getID == KeyEvent.KEY_PRESSED && GUI.plain_enter(evt)) hammer()
       super.processKeyEvent(evt)
     }
     setToolTipText(provers_tooltip)
@@ -124,7 +125,7 @@ class Sledgehammer_Dockable(view: View, position: String) extends Dockable(view,
   /* main */
 
   private val main =
-    Session.Consumer[Session.Global_Options](getClass.getName) {
+    Session.Consumer[Session.Global_Options](this.class_name) {
       case _: Session.Global_Options =>
         GUI_Thread.later { update_provers(); output.handle_resize() }
     }

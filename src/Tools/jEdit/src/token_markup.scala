@@ -6,6 +6,7 @@ Outer syntax token markup.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -38,9 +39,9 @@ object Token_Markup {
       else after(buffer, line - 1)
 
     def after(buffer: JEditBuffer, line: Int): Line_Context = {
-      val line_mgr = JEdit_Lib.buffer_line_manager(buffer)
+      val line_manager = JEdit_Lib.buffer_line_manager(buffer)
       def context =
-        line_mgr.getLineContext(line) match {
+        line_manager.getLineContext(line) match {
           case c: Line_Context => Some(c)
           case _ => None
         }
@@ -270,7 +271,7 @@ object Token_Markup {
               (styled_tokens, new Line_Context(line_context.mode, Some(ctxt1), structure1))
 
             case _ =>
-              val styled_token = (JEditToken.NULL, line.subSequence(0, line.count).toString)
+              val styled_token = (JEditToken.NULL, Library.make_string(line, 0, line.count))
               (List(styled_token), new Line_Context(line_context.mode, None, structure))
           }
 
@@ -287,7 +288,13 @@ object Token_Markup {
                   case None => style
                   case Some(ext) => ext(style)
                 }
-              handler.handleToken(line, style1, offset + i, Character.charCount(c), context1)
+              try {
+                handler.handleToken(line, style1, offset + i, Character.charCount(c), context1)
+              }
+              catch {
+                case _: ArrayIndexOutOfBoundsException =>
+                  handler.handleToken(line, style, offset + i, Character.charCount(c), context1)
+              }
             }
           }
           else handler.handleToken(line, style, offset, length, context1)

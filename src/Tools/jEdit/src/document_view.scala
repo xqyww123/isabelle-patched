@@ -7,6 +7,7 @@ Document view connected to jEdit text area.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -55,7 +56,7 @@ object Document_View {
   def rendering(doc_view: Document_View): JEdit_Rendering = {
     val model = doc_view.model
     val snapshot = Document_Model.snapshot(model)
-    val options = PIDE.options.value
+    val options = PIDE.options
     new JEdit_Rendering(snapshot, model, options)
   }
 
@@ -67,10 +68,11 @@ class Document_View(val model: Buffer_Model, val text_area: JEditTextArea) {
 
   private val session = model.session
 
+  val editor_context: JEdit_Editor.Static_Context = JEdit_Editor.Context(text_area)
+
   val rich_text_area: Rich_Text_Area =
-    new Rich_Text_Area(text_area.getView, text_area,
-      () => Document_View.rendering(doc_view), () => (), () => None,
-      () => delay_caret_update.invoke(), caret_visible = true, enable_hovering = false)
+    new Rich_Text_Area(editor_context, () => Document_View.rendering(doc_view),
+      caret_update = () => delay_caret_update.invoke(), caret_visible = true)
 
 
   /* perspective */
@@ -81,7 +83,7 @@ class Document_View(val model: Buffer_Model, val text_area: JEditTextArea) {
     val active_command = {
       val view = text_area.getView
       if (view != null && view.getTextArea == text_area) {
-        PIDE.editor.current_command(view, snapshot) match {
+        JEdit_Editor.current_command(editor_context, snapshot) match {
           case Some(command) =>
             snapshot.node.command_start(command) match {
               case Some(start) => List(snapshot.convert(command.core_range + start))
@@ -93,7 +95,7 @@ class Document_View(val model: Buffer_Model, val text_area: JEditTextArea) {
       else Nil
     }
 
-    val buffer_range = JEdit_Lib.buffer_range(model.buffer)
+    val buffer_range = editor_context.buffer_range
     val visible_lines =
       (for {
         i <- (0 until text_area.getVisibleLines).iterator
@@ -120,7 +122,7 @@ class Document_View(val model: Buffer_Model, val text_area: JEditTextArea) {
       line_height: Int
     ): Unit = {
       // no robust_body
-      PIDE.editor.invoke_generated()
+      JEdit_Editor.invoke_generated()
     }
   }
 
@@ -204,7 +206,7 @@ class Document_View(val model: Buffer_Model, val text_area: JEditTextArea) {
   private val key_listener =
     JEdit_Lib.key_listener(
       key_pressed = { (evt: KeyEvent) =>
-        if (evt.getKeyCode == KeyEvent.VK_ESCAPE && Isabelle.dismissed_popups(text_area.getView)) {
+        if (GUI.plain_enter(evt) && Isabelle.dismissed_popups(text_area.getView)) {
           evt.consume()
         }
       }
@@ -214,7 +216,7 @@ class Document_View(val model: Buffer_Model, val text_area: JEditTextArea) {
   /* caret handling */
 
   private val delay_caret_update =
-    Delay.last(PIDE.session.input_delay, gui = true) {
+    GUI.Delay.last(PIDE.session.input_delay) {
       session.caret_focus.post(Session.Caret_Focus)
       JEdit_Lib.invalidate_screen(text_area)
     }
@@ -233,7 +235,7 @@ class Document_View(val model: Buffer_Model, val text_area: JEditTextArea) {
   /* main */
 
   private val main =
-    Session.Consumer[Any](getClass.getName) {
+    Session.Consumer[Session.Raw_Edits | Session.Commands_Changed](this.class_name) {
       case _: Session.Raw_Edits =>
         text_overview.foreach(_.invoke())
 

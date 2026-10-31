@@ -61,7 +61,7 @@ object Scan {
             else finished = true
           }
           if (count < min_count) Failure("bad input", in)
-          else Success(in.source.subSequence(start, i).toString, in.drop(i - start))
+          else Success(Library.make_string(in.source, start, i), in.drop(i - start))
         }
       }.named("repeated")
 
@@ -88,7 +88,7 @@ object Scan {
 
     private def quoted_body(quote: Symbol.Symbol): Parser[String] = {
       rep(many1(sym => sym != quote && sym != "\\") | "\\" + quote | "\\\\" |
-        ("""\\\d\d\d""".r ^? { case x if x.substring(1, 4).toInt <= 255 => x })) ^^ (_.mkString)
+        ("""\\\d\d\d""".r ^? { case x if x.slice(1, 4).toInt <= 255 => x })) ^^ (_.mkString)
     }
 
     def quoted(quote: Symbol.Symbol): Parser[String] = {
@@ -97,7 +97,7 @@ object Scan {
 
     def quoted_content(quote: Symbol.Symbol, source: String): String = {
       require(parseAll(quoted(quote), source).successful, "no quoted text")
-      val body = source.substring(1, source.length - 1)
+      val body = source.slice(1, source.length - 1)
       if (body.exists(_ == '\\')) {
         val content =
           rep(many1(sym => sym != quote && sym != "\\") |
@@ -106,6 +106,10 @@ object Scan {
       }
       else body
     }
+
+    def perhaps_quoted_content(quote: Symbol.Symbol, source: String): String =
+      try { quoted_content(quote, source) }
+      catch { case ERROR(_) => source }
 
     def quoted_line(quote: Symbol.Symbol, ctxt: Line_Context): Parser[(String, Line_Context)] = {
       ctxt match {
@@ -147,7 +151,7 @@ object Scan {
           else finished = true
         }
         if (i == start) Failure("bad input", in)
-        else Success((in.source.subSequence(start, i).toString, d), in.drop(i - start))
+        else Success((Library.make_string(in.source, start, i), d), in.drop(i - start))
       }
     }.named("cartouche_depth")
 
@@ -179,6 +183,14 @@ object Scan {
         Library.try_unsuffix(Symbol.close, source1) getOrElse err()
     }
 
+    def perhaps_cartouche_content(source: String): String =
+      try { cartouche_content(source) }
+      catch { case ERROR(_) => source }
+
+    def embedded_content(source: String): String =
+      try { quoted_content("\"", source) }
+      catch { case ERROR(_) => perhaps_cartouche_content(source) }
+
 
     /* nested comments */
 
@@ -204,7 +216,7 @@ object Scan {
           else if (d == 0 || !try_parse(comment_text)) finished = true
         }
         if (in.offset < rest.offset)
-          Success((in.source.subSequence(in.offset, rest.offset).toString, d), rest)
+          Success((Library.make_string(in.source, in.offset, rest.offset), d), rest)
         else Failure("comment expected", in)
       }
     }.named("comment_depth")
@@ -231,7 +243,7 @@ object Scan {
 
     def comment_content(source: String): String = {
       require(parseAll(comment, source).successful, "no comment")
-      source.substring(2, source.length - 2)
+      source.slice(2, source.length - 2)
     }
 
 
@@ -426,9 +438,9 @@ object Scan {
     make_byte_reader(new FileInputStream(file), file.length.toInt)
 
   def byte_reader(url: Url): Byte_Reader = {
-    val connection = url.open_connection()
-    val stream = connection.getInputStream
-    val stream_length = connection.getContentLength
+    val connection = url.open_connection().nn
+    val stream = connection.getInputStream.nn
+    val stream_length = connection.getContentLength.nn
     make_byte_reader(stream, stream_length)
   }
 

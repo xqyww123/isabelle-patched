@@ -7,9 +7,6 @@ Isabelle system components.
 package isabelle
 
 
-import scala.jdk.CollectionConverters._
-
-
 object Components {
   /* archive name */
 
@@ -46,13 +43,15 @@ object Components {
     def paths(args: String*): List[Path] = args.toList.map(Path.explode)
     Platforms(
       Map(
-        Platform.Family.linux_arm.toString ->
+        Platform_Family.linux_arm.toString ->
           paths("arm64-linux", "arm64_32-linux"),
-        Platform.Family.linux.toString ->
+        Platform_Family.linux.toString ->
           paths("x86_64-linux", "x86_64_32-linux"),
-        Platform.Family.macos.toString ->
-          paths("arm64-darwin", "arm64_32-darwin", "x86_64-darwin", "x86_64_32-darwin"),
-        Platform.Family.windows.toString ->
+        Platform_Family.macos_arm.toString ->
+          paths("arm64-darwin", "arm64_32-darwin"),
+        Platform_Family.macos.toString ->
+          paths("x86_64-darwin", "x86_64_32-darwin"),
+        Platform_Family.windows.toString ->
           paths("x86_64-cygwin", "x86_64-windows", "x86_64_32-windows", "x86-windows"),
         "obsolete" -> paths("x86-linux", "x86-cygwin")
       ))
@@ -93,7 +92,7 @@ object Components {
 
   def clean_base(
     base_dir: Path,
-    platforms: List[Platform.Family] = Platform.Family.list,
+    platforms: List[Platform_Family] = Platform_Family.list,
     ssh: SSH.System = SSH.Local,
     progress: Progress = new Progress
   ): Unit = {
@@ -109,7 +108,7 @@ object Components {
     name: String,
     target_dir: Option[Path] = None,
     copy_dir: Option[Path] = None,
-    clean_platforms: Option[List[Platform.Family]] = None,
+    clean_platforms: Option[List[Platform_Family]] = None,
     clean_archives: Boolean = false,
     component_repository: String = Components.static_component_repository,
     ssh: SSH.System = SSH.Local,
@@ -211,7 +210,7 @@ object Components {
     }
 
     def write_platforms(
-      lines: List[String] = Platform.Family.list.map(family => family.toString + " = ")
+      lines: List[String] = Platform_Family.list.map(family => family.toString + " = ")
     ): Directory = {
       File.write(platform_props, terminate_lines(lines))
       this
@@ -222,7 +221,7 @@ object Components {
       val props =
         if (props_path.is_file) {
           try {
-            for (case (a, b) <- File.read_props(props_path).asScala.toList)
+            for ((a, b) <- File.read_properties(props_path))
               yield {
                 if (!default_platforms.defined(a)) error("Bad platform family " + quote(a))
                 val ps = Word.explode(b).map(Path.explode)
@@ -237,7 +236,7 @@ object Components {
     }
 
     def clean(
-      preserve: List[Platform.Family] = Platform.Family.list,
+      preserve: List[Platform_Family] = Platform_Family.list,
       progress: Progress = new Progress
     ): Unit = {
       val platforms = get_platforms()
@@ -271,22 +270,22 @@ object Components {
 
   /* component repository content */
 
-  val components_sha1: Path = Path.explode("~~/Admin/components/components.sha1")
+  val components_shasum: Path = Path.explode("~~/Admin/components/components.shasum")
 
-  sealed case class SHA1_Entry(digest: SHA1.Digest, name: String) {
-    override def toString: String = SHA1.shasum(digest, name).toString
+  sealed case class Shasum_Entry(digest: Message_Digest.T, name: String) {
+    override def toString: String = Shasum.make(digest, name).toString
   }
 
-  def read_components_sha1(lines: List[String] = Nil): List[SHA1_Entry] =
-    (proper_list(lines) getOrElse split_lines(File.read(components_sha1))).flatMap(line =>
+  def read_components_shasum(lines: List[String] = Nil): List[Shasum_Entry] =
+    (proper_list(lines) getOrElse split_lines(File.read(components_shasum))).flatMap(line =>
       Word.explode(line) match {
         case Nil => None
-        case List(sha1, name) => Some(SHA1_Entry(SHA1.fake_digest(sha1), name))
-        case _ => error("Bad components.sha1 entry: " + quote(line))
+        case List(digest, name) => Some(Shasum_Entry(Message_Digest.parse(digest), name))
+        case _ => error("Bad components.shasum entry: " + quote(line))
       })
 
-  def write_components_sha1(entries: List[SHA1_Entry]): Unit =
-    File.write(components_sha1, entries.sortBy(_.name).mkString)
+  def write_components_shasum(entries: List[Shasum_Entry]): Unit =
+    File.write(components_shasum, entries.sortBy(_.name).mkString)
 
 
   /** manage user components **/
@@ -328,8 +327,8 @@ object Components {
           if (arg.startsWith("+")) true
           else if (arg.startsWith("-")) false
           else error("Bad argument: " + quote(arg))
-        val path = Path.explode(arg.substring(1))
-        update_components(add, path, progress = new Console_Progress)
+        val path = Path.explode(arg.drop(1))
+        update_components(add, path, progress = new Console_Progress())
       }
     }
   }
@@ -343,7 +342,7 @@ object Components {
     progress: Progress = new Progress,
     publish: Boolean = false,
     force: Boolean = false,
-    update_components_sha1: Boolean = false
+    update_components_shasum: Boolean = false
   ): Unit = {
     val archives: List[Path] =
       for (path <- components) yield {
@@ -368,7 +367,7 @@ object Components {
         }
       }
 
-    if ((publish && archives.nonEmpty) || update_components_sha1) {
+    if ((publish && archives.nonEmpty) || update_components_shasum) {
       val server = options.string("isabelle_components_server")
       if (server.isEmpty) error("Undefined option isabelle_components_server")
 
@@ -415,8 +414,8 @@ object Components {
           }
         }
 
-        // remote SHA1 digests
-        if (update_components_sha1) {
+        // remote message digests
+        if (update_components_shasum) {
           val lines =
             for {
               entry <- ssh.read_dir(components_dir)
@@ -428,25 +427,25 @@ object Components {
               ssh.execute("cd " + ssh.bash_path(components_dir) +
                 "; sha1sum " + Bash.string(entry)).check.out
             }
-          write_components_sha1(read_components_sha1(lines))
+          write_components_shasum(read_components_shasum(lines))
         }
       }
     }
 
-    // local SHA1 digests
+    // local message digests
     {
       val new_entries =
         for (archive <- archives)
         yield {
           val name = archive.file_name
           progress.echo("Digesting local " + name)
-          SHA1_Entry(SHA1.digest(archive), name)
+          Shasum_Entry(SHA1.digest(archive), name)
         }
       val new_names = new_entries.map(_.name).toSet
 
-      write_components_sha1(
+      write_components_shasum(
         new_entries :::
-        read_components_sha1().filterNot(entry => new_names.contains(entry.name)))
+        read_components_shasum().filterNot(entry => new_names.contains(entry.name)))
     }
   }
 
@@ -461,7 +460,7 @@ object Components {
       Scala_Project.here,
       { args =>
         var publish = false
-        var update_components_sha1 = false
+        var update_components_shasum = false
         var force = false
         var options = Options.init()
 
@@ -475,7 +474,7 @@ Usage: isabelle components_build [OPTIONS] ARCHIVES... DIRS...
     -P           publish on SSH server (see options below)
     -f           force: overwrite existing component archives and directories
     -o OPTION    override Isabelle system OPTION (via NAME=VAL or NAME)
-    -u           update all SHA1 keys in Isabelle repository Admin/components
+    -u           update all shasums in Isabelle repository Admin/components
 
   Build and publish Isabelle components as .tar.gz archives on SSH server,
   depending on system options:
@@ -484,14 +483,14 @@ Usage: isabelle components_build [OPTIONS] ARCHIVES... DIRS...
           "P" -> (_ => publish = true),
           "f" -> (_ => force = true),
           "o:" -> (arg => options = options + arg),
-          "u" -> (_ => update_components_sha1 = true))
+          "u" -> (_ => update_components_shasum = true))
 
         val more_args = getopts(args)
-        if (more_args.isEmpty && !update_components_sha1) getopts.usage()
+        if (more_args.isEmpty && !update_components_shasum) getopts.usage()
 
-        val progress = new Console_Progress
+        val progress = new Console_Progress()
 
         components_build(options, more_args.map(Path.explode), progress = progress,
-          publish = publish, force = force, update_components_sha1 = update_components_sha1)
+          publish = publish, force = force, update_components_shasum = update_components_shasum)
       })
 }

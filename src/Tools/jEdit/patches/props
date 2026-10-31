@@ -1,6 +1,6 @@
-diff -ru jedit5.7.0/jEdit/org/jedit/localization/jedit_en.props jedit5.7.0-patched/jEdit/org/jedit/localization/jedit_en.props
+diff -Nru jedit5.7.0/jEdit/org/jedit/localization/jedit_en.props jedit5.7.0-patched/jEdit/org/jedit/localization/jedit_en.props
 --- jedit5.7.0/jEdit/org/jedit/localization/jedit_en.props	2024-08-03 19:53:22.000000000 +0200
-+++ jedit5.7.0-patched/jEdit/org/jedit/localization/jedit_en.props	2025-04-22 22:08:19.298392180 +0200
++++ jedit5.7.0-patched/jEdit/org/jedit/localization/jedit_en.props	2026-03-16 18:36:09.068757725 +0100
 @@ -70,7 +70,7 @@
  #}}}
  
@@ -10,7 +10,92 @@ diff -ru jedit5.7.0/jEdit/org/jedit/localization/jedit_en.props jedit5.7.0-patch
  view.search.close-tooltip=Hide search bar (ESCAPE)
  
  view.action.prompt=Action:
-@@ -1282,8 +1282,7 @@
+@@ -97,25 +97,25 @@
+ new-file-in-mode.dialog.title=New File
+ new-file-in-mode.dialog.message=With Edit Mode:
+ open-file.label=$Open...
+-reload.label=$Reload
+-reload-all.label=Reloa$d All
++reload.label=Reload
++reload-all.label=$Reload All
+ close-buffer.label=$Close
+ close-buffer.tooltip=Close buffer in EditPane's BufferSet only
+-global-close-buffer.label=Close (global)
++global-close-buffer.label=$Close (global)
+ global-close-buffer.tooltip=Close buffer in all Views
+ closeall-except-active.tooltip=Close others in EditPane's BufferSet
+-closeall-except-active.label=Close O$thers
+-closeall-bufferset.label=Clos$e All
++closeall-except-active.label=$Close Others
++closeall-bufferset.label=$Close All
+ closeall-bufferset.tooltip=Clear Editpane's BufferSet
+ bufferset-toggle-exclusive.label=Toggle E$xclusive BufferSets
+ bufferset-toggle-exclusive.tooltip=When a buffer is visited, close it in other non-intersecting buffersets
+-close-all.label=Close All (global)
++close-all.label=$Close All (global)
+ close-all.tooltip=Close all buffers in all Views
+ save.label=$Save
+-save-as.label=S$ave As...
+-save-a-copy-as.label=Save a Cop$y As...
++save-as.label=$Save As...
++save-a-copy-as.label=$Save a Copy As...
+ save-a-copy-as.tooltip=Does not change the current buffer's path
+-save-all.label=Save A$ll...
++save-all.label=$Save All...
+ print.label=$Print...
+ print-preview.label=Print Pre$view...
+ page-setup.label=Pa$ge Setup...
+@@ -335,20 +335,19 @@
+ #{{{ Utilities menu
+ 
+ utils.label=$Utilities
+-vfs.browser.label=$File System Browser
++plugin-manager.label=$Plugin Manager...
++vfs.browser.label=$File System Browser...
+ action-bar.label=$Action Bar
+-last-action.label=Re$peat Last Action
+-buffer-options.label=$Buffer Options...
+-global-options.label=$Global Options...
++last-action.label=Repeat $Last Action
+ combined-options.label=$Options...
+ 
+ #{{{ Recent Directories menu
+-recent-directories.label=$Recent Directories
++recent-directories.label=Recent $Directories
+ no-recent-dirs.label=No Recent Directories
+ #}}}
+ 
+ #{{{ Favorites menu
+-favorites.label=Fa$vorites
++favorites.label=F$avorites
+ add-buffer-to-favorites.label=Add Buffer to Favorites
+ add-dir-to-favorites.label=Add Directory to Favorites
+ edit-favorites.label=Edit Favorites
+@@ -406,15 +405,20 @@
+ 
+ #{{{ Plugins menu
+ plugins.label=$Plugins
+-plugin-manager.label=Plugin $Manager...
+-plugin-options.label=Plugin $Options...
+ no-plugins.label=No Plugins Installed
+ #}}}
+ 
++#{{{ Options menu
++options-menu.label=$Options
++buffer-options.label=$Buffer Options...
++global-options.label=$Global Options...
++plugin-options.label=$Plugin Options...
++#}}}
++
+ #{{{ Help menu
+ help-menu.label=$Help
+ about.label=$About jEdit...
+-help.label=jEdit $Help
++help.label=Original jEdit $Help
+ tip-of-the-day.label=$Tip of the Day
+ userFeedback.label=Make a suggestion...
+ #}}}
+@@ -1282,8 +1286,7 @@
  	The most likely reason is that the JAR file is corrupt; try\n\
  	reinstalling it. See Utilities->Troubleshooting->Activity Log\n\
  	for a full stack trace.
@@ -20,7 +105,7 @@ diff -ru jedit5.7.0/jEdit/org/jedit/localization/jedit_en.props jedit5.7.0-patch
  plugin-error.already-loaded=Two copies installed. Please remove one of the \
  	two copies.
  plugin-error.dep-jdk=Requires Java {0} or later, but you only have version {1}.
-@@ -1610,7 +1609,7 @@
+@@ -1610,7 +1613,7 @@
  options.gutter.optionalComponents=Optional gutter components
  options.gutter.lineNumbers=Line numbers
  options.gutter.minLineNumberDigits=Minimal number of digits to reserve for line numbers:
@@ -29,3 +114,20 @@ diff -ru jedit5.7.0/jEdit/org/jedit/localization/jedit_en.props jedit5.7.0-patch
  options.gutter.selectionAreaBgColor=Selection area background color:
  options.gutter.selectionAreaWidth=Selection area width (in pixels):
  options.gutter.font=Gutter font:
+@@ -2112,14 +2115,14 @@
+ #}}}
+ 
+ #{{{ Plugins menu
+-vfs.browser.plugins.label=$Plugins
++vfs.browser.plugins.label=Plu$gins
+ vfs.browser.plugins.plugin-manager.label=Plugin Manager...
+ vfs.browser.plugins.plugin-options.label=Plugin Options...
+ vfs.browser.plugins.no-plugins.label=No Plugins
+ #}}}
+ 
+ #{{{ Favorites menu
+-vfs.browser.favorites.label=Fa$vorites
++vfs.browser.favorites.label=F$avorites
+ vfs.browser.favorites.add-to-favorites.label=Add to Favorites
+ vfs.browser.favorites.edit-favorites.label=Edit Favorites
+ vfs.browser.favorites.no-favorites.label=No Favorites

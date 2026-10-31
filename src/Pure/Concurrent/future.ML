@@ -427,7 +427,8 @@ fun assign_result group result res =
           (case Single_Assignment.peek result of
             SOME (Exn.Exn e) => Exn.reraise (if Exn.is_interrupt_proper e then e else exn)
           | _ => Exn.reraise exn)
-      | _ => ());
+      | Exn.Exn exn => Exn.reraise exn
+      | Exn.Res () => ());
     val ok =
       (case the (Single_Assignment.peek result) of
         Exn.Exn exn =>
@@ -442,6 +443,7 @@ fun future_job group atts (e: unit -> 'a) =
   let
     val result = Single_Assignment.var "future" : 'a result;
     val pos = Position.thread_data ();
+    val options_update = Options.inherit_thread_update ();
     val context = Context.get_generic_context ();
     fun job ok =
       let
@@ -449,7 +451,9 @@ fun future_job group atts (e: unit -> 'a) =
           if ok then
             Exn.capture_body (fn () =>
               Thread_Attributes.with_attributes atts (fn _ =>
-                (Position.setmp_thread_data pos o Context.setmp_generic_context context) e ()))
+                (Position.setmp_thread_data pos o
+                  options_update o
+                  Context.setmp_generic_context context) e ()))
           else Isabelle_Thread.interrupt_exn;
       in assign_result group result (identify_result pos res) end;
   in (result, job) end;
@@ -597,7 +601,7 @@ fun enabled () =
 val relevant = (fn [] => false | [_] => false | _ => enabled ());
 
 fun proofs_enabled n =
-  ! Multithreading.parallel_proofs >= n andalso is_some (worker_task ()) andalso enabled ();
+  Interactive.parallel_proofs () >= n andalso is_some (worker_task ()) andalso enabled ();
 
 fun proofs_enabled_timing t =
   proofs_enabled 1 andalso Time.toReal t >= Options.default_real "parallel_subproofs_threshold";

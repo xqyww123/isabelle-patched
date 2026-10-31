@@ -64,29 +64,44 @@ fun assign (Var {name, state}) x =
 
 (* synchronized access *)
 
-fun timed_access (Var {name, state}) time_limit f =
+fun timed_access (Var {name, state}) until body =
   (case ! state of
     Immutable _ => immutable_fail name
   | Mutable {lock, cond, ...} =>
       Multithreading.synchronized name lock (fn () =>
         let
-          fun try_change () =
-            (case ! state of
-              Immutable _ => immutable_fail name
-            | Mutable {content = x, ...} =>
-                (case f x of
-                  NONE =>
-                    (case Multithreading.sync_wait (time_limit x) cond lock of
-                      Exn.Res true => try_change ()
-                    | Exn.Res false => NONE
-                    | Exn.Exn exn => Exn.reraise exn)
-                | SOME (y, x') =>
-                    Thread_Attributes.uninterruptible_body (fn _ =>
-                      (state := Mutable {lock = lock, cond = cond, content = x'};
-                        Thread.ConditionVar.broadcast cond; SOME y))));
-        in try_change () end));
+          fun check x =
+            body x |> Option.map (fn (y, x') =>
+              Thread_Attributes.uninterruptible_body (fn _ =>
+               (state := Mutable {lock = lock, cond = cond, content = x'};
+                Thread.ConditionVar.broadcast cond;
+                y)));
+          fun min_limit x a =
+            let val b = until x in
+              if is_none b then a
+              else if is_none a then b
+              else if the a <= the b then a
+              else b
+            end;
+          fun wait limit = ignore (Exn.release (Multithreading.sync_wait limit cond lock));
+          fun loop limit0 =
+            let
+              val x =
+                (case ! state of
+                  Immutable _ => immutable_fail name
+                | Mutable {content, ...} => content);
+            in
+              (case check x of
+                NONE =>
+                  let
+                    val limit = min_limit x limit0;
+                    val waiting = (case limit of NONE => true | SOME t => Time.now () < t);
+                  in if waiting then (wait limit; loop limit) else NONE end
+              | some => some)
+            end;
+        in loop NONE end));
 
-fun guarded_access var f = the (timed_access var (fn _ => NONE) f);
+fun guarded_access var body = the (timed_access var (fn _ => NONE) body);
 
 
 (* unconditional change *)

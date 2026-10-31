@@ -46,7 +46,7 @@ object Phabricator {
     val release = Linux.Release()
     if (release.is_ubuntu_22_04) packages_ubuntu_22_04
     else if (release.is_ubuntu_24_04) packages_ubuntu_24_04
-    else error("Bad Linux version: expected Ubuntu 20.04 or 22.04 or 24.04 LTS")
+    else error("Bad Linux version: expected Ubuntu 22.04 or 24.04 LTS")
   }
 
 
@@ -291,7 +291,7 @@ Usage: isabelle phabricator [OPTIONS] COMMAND [ARGS...]
         val more_args = getopts(args)
         if (more_args.isEmpty && !list) getopts.usage()
 
-        val progress = new Console_Progress
+        val progress = new Console_Progress()
 
         if (list) {
           for (config <- read_config()) {
@@ -486,7 +486,7 @@ local_infile = 0
     val mysql_root_user = mysql_conf("""^user\s*=\s*(\S*)\s*$""".r, "superuser name")
     val mysql_root_password = mysql_conf("""^password\s*=\s*(\S*)\s*$""".r, "superuser password")
 
-    val mysql_name = phabricator_name(name = name).replace("-", "_")
+    val mysql_name = phabricator_name(name = name).replacing("-" -> "_")
     val mysql_user_string = SQL.string(mysql_name) + "@'localhost'"
     val mysql_password = Linux.generate_password()
 
@@ -496,7 +496,7 @@ local_infile = 0
         """DROP USER IF EXISTS """ + mysql_user_string + "; " +
         """CREATE USER """ + mysql_user_string +
         """ IDENTIFIED BY """ + SQL.string(mysql_password) + """ PASSWORD EXPIRE NEVER; """ +
-        """GRANT ALL ON `""" + (mysql_name + "_%").replace("_", "\\_") +
+        """GRANT ALL ON `""" + (mysql_name + "_%").replacing("_" -> "\\_") +
         """`.* TO """ + mysql_user_string + "; " +
         """GRANT PROCESS ON *.* TO """ + mysql_user_string + ";")).check
 
@@ -660,7 +660,7 @@ Usage: isabelle phabricator_setup [OPTIONS]
         val more_args = getopts(args)
         if (more_args.nonEmpty) getopts.usage()
 
-        val progress = new Console_Progress
+        val progress = new Console_Progress()
 
         phabricator_setup(options, name = name, root = root, repo = repo, webserver = webserver,
           package_update = package_update, mercurial_source = mercurial_source, progress = progress)
@@ -753,7 +753,7 @@ Usage: isabelle phabricator_setup_mail [OPTIONS]
         val more_args = getopts(args)
         if (more_args.nonEmpty) getopts.usage()
 
-        val progress = new Console_Progress
+        val progress = new Console_Progress()
 
         phabricator_setup_mail(name = name, config_file = config_file,
           test_user = test_user, progress = progress)
@@ -919,7 +919,7 @@ Usage: isabelle phabricator_setup_ssh [OPTIONS]
         val more_args = getopts(args)
         if (more_args.nonEmpty) getopts.usage()
 
-        val progress = new Console_Progress
+        val progress = new Console_Progress()
 
         phabricator_setup_ssh(
           server_port = server_port, system_port = system_port, progress = progress)

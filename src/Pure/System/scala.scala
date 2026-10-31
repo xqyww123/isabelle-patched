@@ -11,12 +11,24 @@ import java.io.{File => JFile, PrintStream, ByteArrayOutputStream, OutputStream}
 
 import scala.collection.mutable
 
+import dotty.tools.dotc.core.Constants.Constant
+import dotty.tools.dotc.core.Contexts.{Context, ContextBase}
 import dotty.tools.dotc.CompilationUnit
 import dotty.tools.repl
 import dotty.tools.repl.ReplDriver
 
 
 object Scala {
+  /** syntax **/
+
+  def print_string(s: String): String = {
+    val baseCtx = new ContextBase
+    given Context = baseCtx.initialCtx
+    baseCtx.settings.color.update("never")
+    Constant(s).show
+  }
+
+
   /** registered functions **/
 
   abstract class Fun(val name: String, val thread: Boolean = false) {
@@ -50,12 +62,6 @@ object Scala {
     override def invoke(session: Session, args: List[Bytes]): List[Bytes] =
       List(apply(Library.the_single(args)))
     def apply(arg: Bytes): Bytes
-  }
-
-  val encode_fun: XML.Encode.T[Fun] = { fun =>
-    import XML.Encode._
-    pair(string, pair(pair(bool, bool), properties))(
-      fun.name, ((fun.single, fun.bytes), fun.position))
   }
 
   class Functions(val functions: Fun*) extends Isabelle_System.Service
@@ -217,7 +223,7 @@ object Scala {
       known.value.collectFirst(which)
   }
 
-  class Interpreter(context: Compiler.Context, out: OutputStream = Console.out) {
+  class Interpreter(context: Compiler.Context) {
     interpreter =>
 
     private val running = Synchronized[Option[Thread]](None)
@@ -227,10 +233,10 @@ object Scala {
     private var state = context.init_state
 
     private lazy val thread: Consumer_Thread[Interpreter.Request] =
-      Consumer_Thread.fork("Scala.Interpreter") {
+      Consumer_Thread.fork("Scala.Interpreter", {
         case Interpreter.Execute(command) =>
           try {
-            running.change(_ => Some(Thread.currentThread()))
+            running.change(_ => Some(Isabelle_Thread.current))
             state = command(context, state)
           }
           finally {
@@ -241,7 +247,7 @@ object Scala {
         case Interpreter.Shutdown =>
           Interpreter.del(interpreter)
           false
-      }
+      })
 
     def shutdown(): Unit = {
       thread.send(Interpreter.Shutdown)
@@ -277,7 +283,7 @@ object Scala {
     functions.find(fun => fun.name == name) match {
       case Some(fun) =>
         Exn.capture { fun.invoke(session, args) } match {
-          case Exn.Res(null) => (Tag.NULL, Nil)
+          case Exn.Res(res) if res.asInstanceOf[Any] == null => (Tag.NULL, Nil)
           case Exn.Res(res) => (Tag.OK, res)
           case Exn.Exn(Exn.Interrupt()) => (Tag.INTERRUPT, Nil)
           case Exn.Exn(ERROR(msg)) => (Tag.ERROR, List(Bytes(msg)))
@@ -290,11 +296,11 @@ object Scala {
   /* protocol handler */
 
   class Handler extends Session.Protocol_Handler {
-    private var session: Session = null
+    private var session: Option[Session] = None
     private var futures = Map.empty[String, Future[Unit]]
 
     override def init(session: Session): Unit =
-      synchronized { this.session = session }
+      synchronized { this.session = Some(session) }
 
     override def exit(exit_state: Document.State): Unit = synchronized {
       for ((id, future) <- futures) cancel(id, future)
@@ -304,7 +310,7 @@ object Scala {
     private def result(id: String, tag: Scala.Tag, res: List[Bytes]): Unit =
       synchronized {
         if (futures.isDefinedAt(id)) {
-          session.protocol_command_raw(
+          session.get.protocol_command_raw(
             "Scala.result", Bytes(id) :: Bytes(tag.ordinal.toString) :: res)
           futures -= id
         }
@@ -319,7 +325,7 @@ object Scala {
       msg.properties match {
         case Markup.Invoke_Scala(name, id) =>
           def body(): Unit = {
-            val (tag, res) = Scala.function_body(session, name, msg.chunks)
+            val (tag, res) = Scala.function_body(session.get, name, msg.chunks)
             result(id, tag, res)
           }
           val future =
@@ -353,6 +359,8 @@ object Scala {
 }
 
 class Scala_Functions extends Scala.Functions(
+  SHA1.Scala_Fun,
+  SHA256.Scala_Fun,
   Scala.Echo,
   Scala.Sleep,
   Scala.Toplevel,

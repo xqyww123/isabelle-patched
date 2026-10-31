@@ -87,9 +87,14 @@
 	    isabelle.jedit.Isabelle.toggle_full_screen(view);
 	  </CODE>
 	</ACTION>
-	<ACTION NAME="isabelle.goto-entity">
+	<ACTION NAME="isabelle.show-links">
 	  <CODE>
-	    isabelle.jedit.Isabelle.goto_entity(view);
+	    isabelle.jedit.Isabelle.show_links(textArea);
+	  </CODE>
+	</ACTION>
+	<ACTION NAME="isabelle.follow-link">
+	  <CODE>
+	    isabelle.jedit.Isabelle.follow_link(textArea);
 	  </CODE>
 	</ACTION>
 	<ACTION NAME="isabelle.select-entity">
@@ -104,42 +109,47 @@
 	</ACTION>
 	<ACTION NAME="isabelle.complete">
 	  <CODE>
-	    isabelle.jedit.Isabelle.complete(view, false);
+	    isabelle.jedit.Isabelle.completion(textArea, false);
 	  </CODE>
 	</ACTION>
 	<ACTION NAME="isabelle.tooltip">
 	  <CODE>
-	    isabelle.jedit.Isabelle.show_tooltip(view, true);
+	    isabelle.jedit.Isabelle.show_tooltip(textArea, true);
 	  </CODE>
 	</ACTION>
 	<ACTION NAME="isabelle.message">
 	  <CODE>
-	    isabelle.jedit.Isabelle.show_tooltip(view, false);
+	    isabelle.jedit.Isabelle.show_tooltip(textArea, false);
+	  </CODE>
+	</ACTION>
+	<ACTION NAME="isabelle.line-status">
+	  <CODE>
+	    isabelle.jedit.Isabelle.show_line_status(textArea);
 	  </CODE>
 	</ACTION>
 	<ACTION NAME="isabelle.first-error">
 	  <CODE>
-	    isabelle.jedit.Isabelle.goto_first_error(view);
+	    isabelle.jedit.Isabelle.goto_first_error(textArea);
 	  </CODE>
 	</ACTION>
 	<ACTION NAME="isabelle.last-error">
 	  <CODE>
-	    isabelle.jedit.Isabelle.goto_last_error(view);
+	    isabelle.jedit.Isabelle.goto_last_error(textArea);
 	  </CODE>
 	</ACTION>
 	<ACTION NAME="isabelle.prev-error">
 	  <CODE>
-	    isabelle.jedit.Isabelle.goto_prev_error(view);
+	    isabelle.jedit.Isabelle.goto_prev_error(textArea);
 	  </CODE>
 	</ACTION>
 	<ACTION NAME="isabelle.next-error">
 	  <CODE>
-	    isabelle.jedit.Isabelle.goto_next_error(view);
+	    isabelle.jedit.Isabelle.goto_next_error(textArea);
 	  </CODE>
 	</ACTION>
 	<ACTION NAME="isabelle.complete-word">
 	  <CODE>
-	    isabelle.jedit.Isabelle.complete(view, true);
+	    isabelle.jedit.Isabelle.complete(textArea, true);
 	  </CODE>
 	</ACTION>
 	<ACTION NAME="isabelle.control-sub">
@@ -219,12 +229,12 @@
 	</ACTION>
 	<ACTION NAME="isabelle.preview">
 	  <CODE>
-	    isabelle.jedit.Document_Model.open_preview(view, false);
+	    isabelle.jedit.Isabelle.open_preview(view, false);
 	  </CODE>
 	</ACTION>
 	<ACTION NAME="isabelle.draft">
 	  <CODE>
-	    isabelle.jedit.Document_Model.open_preview(view, true);
+	    isabelle.jedit.Isabelle.open_preview(view, true);
 	  </CODE>
 	</ACTION>
 	<ACTION NAME="isabelle-export-browser">
@@ -247,4 +257,19 @@
 	    isabelle.jedit.Isabelle.java_monitor(view);
 	  </CODE>
 	</ACTION>
+	<ACTION NAME="isabelle.recode-plain">
+	  <CODE>
+	    isabelle.jedit.Isabelle.recode_plain(buffer);
+	  </CODE>
+	</ACTION>
+	<ACTION NAME="isabelle.recode-symbols">
+	  <CODE>
+	    isabelle.jedit.Isabelle.recode_symbols(buffer);
+	  </CODE>
+	</ACTION>
+  <ACTION NAME="focus-buffer-switcher2">
+    <CODE>
+      editPane.focusBufferSwitcher();
+    </CODE>
+  </ACTION>
 </ACTIONS>

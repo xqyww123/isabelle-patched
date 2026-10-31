@@ -6,6 +6,7 @@ Specific spell-checker support for Isabelle/jEdit.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -82,7 +83,7 @@ object JEdit_Spell_Checker {
     GUI_Thread.require {}
 
     val option_name = "spell_checker_dictionary"
-    val opt = PIDE.options.value.check_name(option_name)
+    val opt = PIDE.options.check_name(option_name)
 
     new GUI.Selector(Spell_Checker.dictionaries.map(GUI.Selector.item)) with JEdit_Options.Entry {
       name = option_name

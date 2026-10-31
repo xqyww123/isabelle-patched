@@ -6,6 +6,7 @@ Build the Isabelle/VSCode extension as component.
 
 package isabelle.vscode
 
+import scala.jdk.CollectionConverters._
 
 import isabelle._
 
@@ -35,9 +36,9 @@ object Component_VSCode {
       } yield k).toList
 
     val keywords1 =
-      major_keywords(k => k != Keyword.THY_END && k != Keyword.PRF_ASM && k != Keyword.PRF_ASM_GOAL)
-    val keywords2 = minor_keywords ::: major_keywords(Set(Keyword.THY_END))
-    val keywords3 = major_keywords(Set(Keyword.PRF_ASM, Keyword.PRF_ASM_GOAL))
+      major_keywords(k => !Keyword.theory_end_kinds(k) && !Keyword.proof_asm_goal_kinds(k))
+    val keywords2 = minor_keywords ::: major_keywords(Keyword.theory_end_kinds)
+    val keywords3 = major_keywords(Keyword.proof_asm_goal_kinds)
 
     def grouped_names(as: List[String]): String =
       JSON.Format("\\b(" + as.sorted.map(Library.escape_regex).mkString("|") + ")\\b")
@@ -177,6 +178,26 @@ object Component_VSCode {
   }
 
 
+  /* Isabelle symbols provider (static subset only) */
+
+  val symbol_static = Path.basic("symbol_static.scala")
+
+  def make_symbol_provider(): File.Content =
+    File.content(symbol_static, """
+package isabelle.platform
+
+import isabelle._
+
+
+object Symbol_Static {
+  def symbols: Symbol.Symbols =
+    Symbol.Symbols.make(""" + Scala.print_string(File.read(Path.explode("~~/etc/symbols"))) + """)
+}
+
+val symbol_provider = Symbol_Static
+""")
+
+
   /* build extension */
 
   def build_extension(options: Options,
@@ -198,8 +219,32 @@ object Component_VSCode {
       Isabelle_System.with_tmp_dir("build") { build_dir =>
         val node_dir =
           Nodejs.setup(build_dir,
-            platform_context = Isabelle_Platform.Context(progress = progress),
+            platform_context = Isabelle_Platform.Bash_Context(progress = progress),
             packages = List("yarn", "vsce"))
+
+        val extension_dir = Path.explode("$ISABELLE_VSCODE_HOME/extension")
+        val context = setup.Build.component_context(extension_dir.java_path).nn
+        val extension_sources =
+          for (name <- context.sources.nn.asScala.toList if File.is_scala(name))
+          yield extension_dir + Path.explode(name)
+
+        make_symbol_provider().write(build_dir)
+        val scala_sources = (build_dir + symbol_static) :: extension_sources
+
+        val modules =
+          List(
+            Scalajs.Module("output_view", "isabelle.vscode.extension.Output_View"),
+            Scalajs.Module("sledgehammer_view", "isabelle.vscode.extension.Sledgehammer_View"),
+            Scalajs.Module("state_panel", "isabelle.vscode.extension.State_Panel"),
+            Scalajs.Module("symbols_view", "isabelle.vscode.extension.Symbols_View"))
+
+        progress.echo("Compiling scalajs modules ...")
+        val scalajs_result =
+          Scalajs.compile(scala_sources.map(_.file), modules,
+            Isabelle_System.make_directory(build_dir + Path.basic("media")))
+
+        scalajs_result.messages.foreach(_.output(progress))
+        if (!scalajs_result.ok) error("Failed to compile js modules")
 
         val manifest_text = File.read(VSCode_Main.extension_dir + VSCode_Main.MANIFEST)
         val manifest_entries = split_lines(manifest_text).filter(_.nonEmpty)
@@ -212,15 +257,17 @@ object Component_VSCode {
         val fonts_dir = Isabelle_System.make_directory(build_dir + Path.basic("fonts"))
         for (entry <- Isabelle_Fonts.fonts()) { Isabelle_System.copy_file(entry.path, fonts_dir) }
         val manifest_text2 =
-          manifest_text + cat_lines(Isabelle_Fonts.fonts().map(e => "fonts/" + e.path.file_name))
+          manifest_text + cat_lines(
+            Isabelle_Fonts.fonts().map(e => "fonts/" + e.path.file_name) :::
+              scalajs_result.outputs.map(m => "media/" + m.file_name))
         val manifest_entries2 = split_lines(manifest_text2).filter(_.nonEmpty)
 
-        val manifest_shasum: SHA1.Shasum = {
-          val a = SHA1.shasum_meta_info(SHA1.digest(manifest_text2))
+        val manifest_shasum: Shasum = {
+          val a = Shasum.make_meta_info(SHA1.digest(manifest_text2))
           val bs =
             for (name <- manifest_entries2)
-              yield SHA1.shasum(SHA1.digest(build_dir + Path.explode(name)), name)
-          SHA1.flat_shasum(a :: bs)
+              yield Shasum.make(SHA1.digest(build_dir + Path.explode(name)), name)
+          Shasum.flat(a :: bs)
         }
         File.write(build_dir + VSCode_Main.MANIFEST.shasum, manifest_shasum.toString)
 
@@ -229,7 +276,7 @@ object Component_VSCode {
 
         val opt_json = options_json(options)
         val package_path = build_dir + Path.basic("package.json")
-        val package_body = File.read(package_path).replace("\"ISABELLE_OPTIONS\": {},", opt_json)
+        val package_body = File.read(package_path).replacing("\"ISABELLE_OPTIONS\": {}," -> opt_json)
         File.write(package_path, package_body)
 
 

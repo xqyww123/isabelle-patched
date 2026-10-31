@@ -1341,6 +1341,13 @@ proof
   finally show False by simp
 qed
 
+lemma has_log_derivative_exp [derivative_intros]:
+  assumes "((\<lambda>x. f x) has_field_derivative f') (at x within A)"
+  shows   "((\<lambda>x. exp (f x)) has_log_derivative f') (at x within A)"
+  using assms
+  by (cases "at x within A = bot")
+     (auto simp: has_log_derivative_def Lim_ident_at intro!: derivative_eq_intros)
+
 lemma exp_minus_inverse: "exp x * exp (- x) = 1"
   by (simp add: exp_add_commuting[symmetric])
 
@@ -1411,6 +1418,72 @@ next
     using False by simp
   finally show ?thesis .
 qed
+
+lemma
+  fixes z :: "'a :: {banach, real_normed_field}"
+  assumes "norm z \<le> 1 / 2"
+  shows   norm_exp_bounds_lemma: "norm (exp z - 1 - z) \<le> norm z / 2"
+    and   norm_exp_bounds: "norm (exp z - 1) \<ge> 1 / 2 * norm z"
+                           "norm (exp z - 1) \<le> 3 / 2 * norm z"
+proof -
+  show *: "norm (exp z - 1 - z) \<le> norm z / 2"
+  proof (cases "z = 0")
+    case False
+    have sums: "(\<lambda>k. z ^ (k + 2) /\<^sub>R fact (k + 2)) sums (exp z - (\<Sum>k<2. z ^ k /\<^sub>R fact k))"
+      by (intro sums_split_initial_segment exp_converges)
+  
+    have "summable (\<lambda>k. norm z ^ (k + 2) /\<^sub>R fact (k + 2))"
+      using summable_norm_exp[of z]
+      by (intro summable_norm summable_ignore_initial_segment)
+         (auto simp: norm_power norm_divide divide_simps)
+    also have "?this \<longleftrightarrow> summable (\<lambda>k. norm z ^ 2 * (norm z ^ k / fact (k +2)))"
+      by (simp add: power_add mult_ac divide_simps power2_eq_square del: of_nat_Suc of_nat_add)
+    also have "\<dots> \<longleftrightarrow> summable (\<lambda>k. norm z ^ k / fact (k + 2))"
+      by (subst summable_cmult_iff) (use \<open>z \<noteq> 0\<close> in auto)
+    finally have summable: "summable (\<lambda>k. norm z ^ k / fact (k + 2))" .
+  
+    have "exp z - 1 - z = (\<Sum>k. z ^ (k + 2) / fact (k + 2))"
+      using sums by (simp add: sums_iff scaleR_conv_of_real divide_simps eval_nat_numeral)
+    also have "norm \<dots> \<le> (\<Sum>k. norm (z ^ (k + 2) / fact (k + 2)))"
+      using summable_norm_exp[of z]
+      by (intro summable_norm summable_ignore_initial_segment)
+         (auto simp: norm_power norm_divide divide_simps)
+    also have "\<dots> = (\<Sum>k. norm z ^ 2 * (norm z ^ k / fact (k + 2)))"
+      by (simp add: power_add norm_power norm_divide mult_ac norm_mult power2_eq_square del: of_nat_Suc)
+    also have "\<dots> = norm z ^ 2 * (\<Sum>k. norm z ^ k / fact (k + 2))"
+      using summable by (rule suminf_mult)
+    also have "\<dots> \<le> norm z ^ 2 * (1 / (1 - norm z) / 2)"
+    proof (intro mult_left_mono, rule sums_le)
+      show "(\<lambda>k. norm z ^ k / fact (k + 2)) sums (\<Sum>k. norm z ^ k / fact (k + 2))"
+        using summable by blast
+      show "(\<lambda>k. norm z ^ k / 2) sums (1 / (1 - norm z) / 2)"
+        using assms by (intro geometric_sums sums_divide) auto
+    next
+      fix k :: nat
+      have "norm z ^ k / fact (k + 2) \<le> norm z ^ k / fact 2"
+        by (intro divide_left_mono fact_mono) auto
+      thus "norm z ^ k / fact (k + 2) \<le> norm z ^ k / 2"
+        by simp
+    qed (auto simp: divide_simps)
+    also have "\<dots> = norm z * (norm z / (1 - norm z)) / 2"
+      by (simp add: power2_eq_square)
+    also have "\<dots> \<le> norm z * ((1 / 2) / (1 - (1 / 2))) / 2"
+      using assms by (intro mult_mono frac_le diff_mono) auto
+    also have "\<dots> = norm z / 2"
+      by simp
+    finally show "norm (exp z - 1 - z) \<le> norm z / 2" .
+  qed auto
+
+  have "norm (exp z - 1) \<le> norm z + norm (exp z - 1 - z)"
+    by (rule norm_triangle_sub)
+  with * show "norm (exp z - 1) \<le> 3 / 2 * norm z"
+    by simp
+
+  have "norm z - norm (exp z - 1 - z) \<le> norm (exp z - 1)"
+    using norm_triangle_ineq3[of "exp z - 1 - z" "-z"] by simp
+  with * show "norm (exp z - 1) \<ge> 1 / 2 * norm z"
+    by simp
+qed 
 
 
 subsubsection \<open>Properties of the Exponential Function on Reals\<close>
@@ -2187,6 +2260,17 @@ proof -
     then show ?thesis by simp
   qed
 qed
+
+lemma has_log_derivative_imp_has_field_derivative_ln_real:
+  assumes "f x > (0::real)" "(f has_log_derivative D) (at x within A)"
+  shows   "((\<lambda>x. ln (f x)) has_field_derivative D) (at x within A)"
+proof (cases "at x within A = bot")
+  case [simp]: False
+  have [simp]: "Lim (at x within A) (\<lambda>x. x) = x"
+    by (simp add: Lim_ident_at)
+  show ?thesis using assms
+    by (auto intro!: derivative_eq_intros simp: has_log_derivative_def)
+qed auto
 
 corollary ln_diff_less: "0 < x \<Longrightarrow> 0 < y \<Longrightarrow> x \<noteq> y \<Longrightarrow> ln x - ln y < (x - y) / y" for x :: real
 using ln_eq_minus_one[of "x/y"] ln_diff_le[of x y]
@@ -3547,8 +3631,9 @@ proof -
         using \<open>n \<le> p\<close> neq0_conv that(1) by blast
       then have \<section>: "(- 1::real) ^ (p div 2 - Suc 0) = - ((- 1) ^ (p div 2))"
         using \<open>even p\<close> by (auto simp add: dvd_def power_eq_if)
-      from \<open>n \<le> p\<close> np have *: "n - Suc 0 + (p - Suc n) = p - Suc (Suc 0)" "Suc (Suc 0) \<le> p"
-        by arith+
+      from \<open>n \<le> p\<close> np have *: "n - Suc 0 + (p - Suc n) = p - Suc (Suc 0)"
+        by (force simp: le_Suc_eq split: nat_diff_split)
+        (* by arith somehow takes forever when exporting proofs *)
       have "(p - Suc (Suc 0)) div 2 = p div 2 - Suc 0"
         by simp
       with \<open>n \<le> p\<close> np  \<section> * show ?thesis
@@ -4445,7 +4530,7 @@ lemma abs_sin_x_le_abs_x: "\<bar>sin x\<bar> \<le> \<bar>x\<bar>"
 
 subsection \<open>More Corollaries about Sine and Cosine\<close>
 
-lemma sin_cos_npi [simp]: "sin (real (Suc (2 * n)) * pi/2) = (-1) ^ n"
+lemma sin_cos_npi: "sin (real (Suc (2 * n)) * pi/2) = (-1) ^ n"
 proof -
   have "sin ((real n + 1/2) * pi) = cos (real n * pi)"
     by (auto simp: algebra_simps sin_add)
@@ -4479,8 +4564,8 @@ proof -
   finally show ?thesis .
 qed
 
-lemma cos_pi_eq_zero [simp]: "cos (pi * real (Suc (2 * m)) / 2) = 0"
-  by (simp only: cos_add sin_add of_nat_Suc distrib_right distrib_left add_divide_distrib, auto)
+lemma cos_pi_eq_zero: "cos (pi * real (Suc (2 * m)) / 2) = 0"
+  by (simp add: cos_add sin_add distrib_right distrib_left add_divide_distrib)
 
 lemma DERIV_cos_add [simp]: "DERIV (\<lambda>x. cos (x + k)) xa :> - sin (xa + k)"
   by (auto intro!: derivative_eq_intros)

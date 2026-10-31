@@ -28,52 +28,54 @@ object Thy_Header {
 
   val THEORY = "theory"
   val IMPORTS = "imports"
+  val OPTIONS = "options"
   val KEYWORDS = "keywords"
   val ABBREVS = "abbrevs"
   val AND = "and"
   val BEGIN = "begin"
-
-  val bootstrap_header: Keywords =
-    List(
-      ("%", Keyword.Spec()),
-      ("(", Keyword.Spec()),
-      (")", Keyword.Spec()),
-      (",", Keyword.Spec()),
-      ("::", Keyword.Spec()),
-      ("=", Keyword.Spec()),
-      (AND, Keyword.Spec()),
-      (BEGIN, Keyword.Spec(kind = Keyword.QUASI_COMMAND)),
-      (IMPORTS, Keyword.Spec(kind = Keyword.QUASI_COMMAND)),
-      (KEYWORDS, Keyword.Spec(kind = Keyword.QUASI_COMMAND)),
-      (ABBREVS, Keyword.Spec(kind = Keyword.QUASI_COMMAND)),
-      (CHAPTER, Keyword.Spec(kind = Keyword.DOCUMENT_HEADING)),
-      (SECTION, Keyword.Spec(kind = Keyword.DOCUMENT_HEADING)),
-      (SUBSECTION, Keyword.Spec(kind = Keyword.DOCUMENT_HEADING)),
-      (SUBSUBSECTION, Keyword.Spec(kind = Keyword.DOCUMENT_HEADING)),
-      (PARAGRAPH, Keyword.Spec(kind = Keyword.DOCUMENT_HEADING)),
-      (SUBPARAGRAPH, Keyword.Spec(kind = Keyword.DOCUMENT_HEADING)),
-      (TEXT, Keyword.Spec(kind = Keyword.DOCUMENT_BODY)),
-      (TXT, Keyword.Spec(kind = Keyword.DOCUMENT_BODY)),
-      (TEXT_RAW, Keyword.Spec(kind = Keyword.DOCUMENT_RAW)),
-      (THEORY, Keyword.Spec(kind = Keyword.THY_BEGIN, tags = List("theory"))),
-      ("ML", Keyword.Spec(kind = Keyword.THY_DECL, tags = List("ML"))))
-
-  val bootstrap_keywords: Keyword.Keywords =
-    Keyword.Keywords.empty.add_keywords(bootstrap_header)
+  val END = "end"
 
   val bootstrap_syntax: Outer_Syntax =
-    Outer_Syntax.empty.add_keywords(bootstrap_header)
+    Outer_Syntax.empty.add_keywords(
+      List(
+        ("%", Keyword.Spec()),
+        ("(", Keyword.Spec()),
+        (")", Keyword.Spec()),
+        (",", Keyword.Spec()),
+        ("::", Keyword.Spec()),
+        ("=", Keyword.Spec()),
+        ("[", Keyword.Spec()),
+        ("]", Keyword.Spec()),
+        (AND, Keyword.Spec()),
+        (BEGIN, Keyword.Spec(kind = Keyword.QUASI_COMMAND)),
+        (IMPORTS, Keyword.Spec(kind = Keyword.QUASI_COMMAND)),
+        (OPTIONS, Keyword.Spec(kind = Keyword.QUASI_COMMAND)),
+        (KEYWORDS, Keyword.Spec(kind = Keyword.QUASI_COMMAND)),
+        (ABBREVS, Keyword.Spec(kind = Keyword.QUASI_COMMAND)),
+        (CHAPTER, Keyword.Spec(kind = Keyword.DOCUMENT_HEADING)),
+        (SECTION, Keyword.Spec(kind = Keyword.DOCUMENT_HEADING)),
+        (SUBSECTION, Keyword.Spec(kind = Keyword.DOCUMENT_HEADING)),
+        (SUBSUBSECTION, Keyword.Spec(kind = Keyword.DOCUMENT_HEADING)),
+        (PARAGRAPH, Keyword.Spec(kind = Keyword.DOCUMENT_HEADING)),
+        (SUBPARAGRAPH, Keyword.Spec(kind = Keyword.DOCUMENT_HEADING)),
+        (TEXT, Keyword.Spec(kind = Keyword.DOCUMENT_BODY)),
+        (TXT, Keyword.Spec(kind = Keyword.DOCUMENT_BODY)),
+        (TEXT_RAW, Keyword.Spec(kind = Keyword.DOCUMENT_RAW)),
+        (THEORY, Keyword.Spec(kind = Keyword.THY_BEGIN, tags = List("theory"))),
+        (END, Keyword.Spec(kind = Keyword.THY_END)),
+        ("ML", Keyword.Spec(kind = Keyword.THY_DECL, tags = List("ML")))))
+
+  def bootstrap_keywords: Keyword.Keywords = bootstrap_syntax.keywords
 
 
   /* file name vs. theory name */
 
-  val PURE = "Pure"
   val ML_BOOTSTRAP = "ML_Bootstrap"
-  val ml_roots = List("ROOT0.ML" -> "ML_Root0", "ROOT.ML" -> "ML_Root")
-  val bootstrap_thys = List(PURE, ML_BOOTSTRAP).map(a => a -> ("Bootstrap_" + a))
+  val ml_roots: List[(String, String)] = List("ROOT0.ML" -> "ML_Root0", "ROOT.ML" -> "ML_Root")
+  private val bootstrap_thys = List(Sessions.Pure, ML_BOOTSTRAP).map(a => a -> ("Bootstrap_" + a))
 
-  val bootstrap_global_theories =
-    (Sessions.root_name :: (ml_roots ::: bootstrap_thys).map(_._2)).map(_ -> PURE)
+  val bootstrap_global_theories: List[(String, String)] =
+    (Sessions.root_name :: (ml_roots ::: bootstrap_thys).map(_._2)).map(_ -> Sessions.Pure)
 
   def import_name(s: String): String =
     Url.get_base_name(s) match {
@@ -110,7 +112,7 @@ object Thy_Header {
 
   /* parser */
 
-  trait Parsers extends Parse.Parsers {
+  trait Parsers extends Options.Parsers {
     val header: Parser[Thy_Header] = {
       val load_command =
         ($$$("(") ~! (position(name) <~ $$$(")")) ^^ { case _ ~ x => x }) |
@@ -141,11 +143,13 @@ object Thy_Header {
         position(this.theory_name) ~
         (opt($$$(IMPORTS) ~! rep1(position(this.theory_name))) ^^
           { case None => Nil case Some(_ ~ xs) => xs }) ~
+        (opt($$$(OPTIONS) ~! options_update) ^^
+          { case None => Nil case Some(_ ~ xs) => xs }) ~
         (opt($$$(KEYWORDS) ~! keyword_decls) ^^
           { case None => Nil case Some(_ ~ xs) => xs }) ~
         (opt($$$(ABBREVS) ~! abbrevs) ^^
           { case None => Nil case Some(_ ~ xs) => xs }) ~
-        $$$(BEGIN) ^^ { case a ~ b ~ c ~ d ~ _ => Thy_Header(a._1, a._2, b, c, d) }
+        $$$(BEGIN) ^^ { case a ~ b ~ c ~ d ~ e ~ _ => Thy_Header(a._1, a._2, b, c, d, e) }
 
       val heading =
         (command(CHAPTER) |
@@ -175,15 +179,15 @@ object Thy_Header {
       }
 
     val all_tokens = make_tokens(reader)
-    val drop_tokens =
+    val skip_tokens =
       if (strict) Nil
       else all_tokens.takeWhile(tok => !tok.is_command(Thy_Header.THEORY)).toList
 
-    val tokens = all_tokens.drop(drop_tokens.length)
+    val tokens = all_tokens.drop(skip_tokens.length)
     val tokens1 = tokens.takeWhile(tok => !tok.is_begin).toList
     val tokens2 = tokens.dropWhile(tok => !tok.is_begin).headOption.toList
 
-    (drop_tokens, tokens1 ::: tokens2)
+    (skip_tokens, tokens1 ::: tokens2)
   }
 
   private object Parsers extends Parsers {
@@ -196,17 +200,15 @@ object Thy_Header {
 
   def read(node_name: Document.Node.Name, reader: Reader[Char],
     command: Boolean = true,
-    strict: Boolean = true
+    strict: Boolean = true,
+    unicode_symbols: Boolean = true
   ): Thy_Header = {
-    val (_, tokens0) = read_tokens(reader, true)
-    val text = Scan.reader_decode_utf8(reader, Token.implode(tokens0))
-
+    val text = Scan.reader_decode_utf8(reader, Token.implode(read_tokens(reader, true)._2))
     val (skip_tokens, tokens) = read_tokens(Scan.char_reader(text), strict)
-    val pos =
+    val start =
       if (command) Token.Pos.command
       else skip_tokens.foldLeft(Token.Pos.file(node_name.node))(_ advance _)
-
-    Parsers.parse_header(tokens, pos).map(Symbol.decode).check(node_name)
+    Parsers.parse_header(tokens, start).output(unicode_symbols).check(node_name)
   }
 }
 
@@ -214,14 +216,20 @@ sealed case class Thy_Header(
   name: String,
   pos: Position.T,
   imports: List[(String, Position.T)],
+  options: Options.Update,
   keywords: Thy_Header.Keywords,
   abbrevs: Thy_Header.Abbrevs
 ) {
-  def map(f: String => String): Thy_Header =
+  def imports_no_pos: List[String] = imports.map(_._1)
+
+  def output(unicode_symbols: Boolean): Thy_Header = {
+    def f(s: String): String = Symbol.output(unicode_symbols, s)
     Thy_Header(f(name), pos,
       imports.map({ case (a, b) => (f(a), b) }),
+      options.map({ case spec => spec.copy(name = f(spec.name), value = spec.value.map(f)) }),
       keywords.map({ case (a, spec) => (f(a), spec.map(f)) }),
       abbrevs.map({ case (a, b) => (f(a), f(b)) }))
+  }
 
   def check(node_name: Document.Node.Name): Thy_Header = {
     val base_name = node_name.theory_base_name

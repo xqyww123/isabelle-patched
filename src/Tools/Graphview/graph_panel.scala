@@ -7,6 +7,7 @@ GUI panel for graph layout.
 
 package isabelle.graphview
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -291,7 +292,8 @@ class Graph_Panel(val graphview: Graphview) extends BorderPanel {
         case FileChooser.Result.Approve =>
           try { Graph_File.write(chooser.selectedFile, graphview) }
           catch {
-            case ERROR(msg) => GUI.error_dialog(this.peer, "Error", GUI.scrollable_text(msg))
+            case ERROR(msg) =>
+              GUI.error_dialog(message = Seq(GUI.scrollable_text(msg)), parent = Some(this.peer))
           }
         case _ =>
       }

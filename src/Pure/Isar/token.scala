@@ -172,7 +172,7 @@ object Token {
 
   def quote_name(keywords: Keyword.Keywords, name: String): String =
     if (read_name(keywords, name).isDefined) name
-    else quote(name.replace("\"", "\\\""))
+    else quote(name.replacing("\"" -> "\\\""))
 
 
   /* plain antiquotation (0 or 1 args) */
@@ -229,8 +229,8 @@ object Token {
       (if (line > 0) Position.Line(line) else Nil) :::
       (if (offset > 0) Position.Offset(offset) else Nil) :::
       (if (end_offset > 0) Position.End_Offset(end_offset) else Nil) :::
-      (if (file != "") Position.File(file) else Nil) :::
-      (if (id != "") Position.Id_String(id) else Nil)
+      (if (file.nonEmpty) Position.File(file) else Nil) :::
+      (if (id.nonEmpty) Position.Id_String(id) else Nil)
 
     def position(): Position.T = position(0)
     def position(token: Token): Position.T = position(advance(token).offset)

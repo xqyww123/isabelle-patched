@@ -14,7 +14,7 @@ import java.util.{Timer, TimerTask, Date => JDate}
 
 
 object Event_Timer {
-  private lazy val event_timer = new Timer("event_timer", true)
+  private lazy val event_timer = new Timer("Isabelle.event_timer", true)
 
   final class Request private[Event_Timer](
     val time: Time,
@@ -24,8 +24,12 @@ object Event_Timer {
     def cancel(): Boolean = task.cancel()
   }
 
-  def request(time: Time, repeat: Option[Time] = None)(event: => Unit): Request = {
-    val task = new TimerTask { def run(): Unit = event }
+  def request(
+    log: Logger,
+    time: Time,
+    repeat: Option[Time] = None
+  )(event: => Unit): Request = {
+    val task = new TimerTask { def run(): Unit = Exn.capture_trace(log.error_message) { event } }
     repeat match {
       case None => event_timer.schedule(task, new JDate(time.ms))
       case Some(rep) => event_timer.schedule(task, new JDate(time.ms), rep.ms)

@@ -193,7 +193,7 @@ object Build {
     no_build: Boolean = false,
     soft_build: Boolean = false,
     export_files: Boolean = false,
-    augment_options: String => List[Options.Spec] = _ => Nil,
+    augment_options: String => Options.Update = _ => Nil,
     session_setup: (String, Session) => Unit = (_, _) => (),
     cache: Rich_Text.Cache = Rich_Text.Cache.make()
   ): Results = {
@@ -205,105 +205,109 @@ object Build {
         cache = cache)
     val build_options = store.options
 
-    using(store.open_server()) { server =>
+    progress.interrupt_handler {
+      using(store.open_server()) { server =>
 
-      /* session selection and dependencies */
+        /* session selection and dependencies */
 
-      val full_sessions =
-        Sessions.load_structure(build_options, dirs = AFP.main_dirs(afp_root) ::: dirs,
-          select_dirs = select_dirs, infos = infos, augment_options = augment_options)
-      val selected_sessions = full_sessions.imports_selection(selection)
+        val full_sessions =
+          Sessions.load_structure(build_options, dirs = AFP.main_dirs(afp_root) ::: dirs,
+            select_dirs = select_dirs, infos = infos, augment_options = augment_options)
+        val selected_sessions = full_sessions.imports_selection(selection)
 
-      val build_deps = {
-        val deps0 =
-          Sessions.deps(full_sessions.selection(selection), progress = progress,
-            inlined_files = true, list_files = list_files).check_errors
+        val build_deps = {
+          val deps0 =
+            Sessions.deps(full_sessions.selection(selection), progress = progress,
+              inlined_files = true, list_files = list_files).check_errors
 
-        if (soft_build && !fresh_build) {
-          val outdated =
-            deps0.sessions_structure.build_topological_order.flatMap(name =>
-              store.try_open_database(name, server = server) match {
-                case Some(db) =>
-                  using(db)(store.read_build(_, name)) match {
-                    case Some(build) if build.ok =>
-                      val sources_shasum = deps0.sources_shasum(name)
-                      val thorough = deps0.sessions_structure(name).build_thorough
-                      if (Sessions.eq_sources(thorough, build.sources, sources_shasum)) None
-                      else Some(name)
-                    case _ => Some(name)
-                  }
-                case None => Some(name)
-              })
+          if (soft_build && !fresh_build) {
+            val outdated =
+              deps0.sessions_structure.build_topological_order.flatMap(name =>
+                store.try_open_database(name, server = server) match {
+                  case Some(db) =>
+                    try {
+                      val current =
+                        store.check_output(name,
+                          conditions = deps0.eval_conditions(name).value,
+                          opened_db = Some(db),
+                          sources_shasum = deps0.sources_shasum(name)
+                        ).current(build_thorough = deps0.sessions_structure(name).build_thorough)
+                      if (current) None else Some(name)
+                    }
+                    finally { db.close }
+                  case None => Some(name)
+                })
 
-          Sessions.deps(full_sessions.selection(Sessions.Selection(sessions = outdated)),
-            progress = progress, inlined_files = true).check_errors
+            Sessions.deps(full_sessions.selection(Sessions.Selection(sessions = outdated)),
+              progress = progress, inlined_files = true).check_errors
+          }
+          else deps0
         }
-        else deps0
-      }
 
 
-      /* check unknown files */
+        /* check unknown files */
 
-      if (check_unknown_files) {
-        val source_files =
-          List.from(
-            for {
-              (_, base) <- build_deps.session_bases.iterator
-              (path, _) <- base.session_sources.iterator
-            } yield path)
-        Mercurial.check_files(source_files)._2 match {
-          case Nil =>
-          case unknown_files =>
-            progress.echo_warning(
-              "Unknown files (not part of the underlying Mercurial repository):" +
-              unknown_files.map(File.standard_path).sorted.mkString("\n  ", "\n  ", ""))
+        if (check_unknown_files) {
+          val source_files =
+            List.from(
+              for {
+                (_, base) <- build_deps.session_bases.iterator
+                (path, _) <- base.session_sources.iterator
+              } yield path)
+          Mercurial.check_files(source_files)._2 match {
+            case Nil =>
+            case unknown_files =>
+              progress.echo_warning(
+                "Unknown files (not part of the underlying Mercurial repository):" +
+                unknown_files.map(File.standard_path).sorted.mkString("\n  ", "\n  ", ""))
+          }
         }
-      }
 
 
-      /* build process and results */
+        /* build process and results */
 
-      val clean_sessions =
-        if (clean_build) full_sessions.imports_descendants(selected_sessions) else Nil
+        val clean_sessions =
+          if (clean_build) full_sessions.imports_descendants(selected_sessions) else Nil
 
-      val numa_nodes = Host.numa_nodes(enabled = numa_shuffling)
-      val build_context =
-        Context(store, build_deps, engine = engine, afp_root = afp_root,
-          build_hosts = build_hosts, hostname = hostname(build_options),
-          clean_sessions = clean_sessions, store_heap = build_heap,
-          numa_shuffling = numa_shuffling, numa_nodes = numa_nodes,
-          fresh_build = fresh_build, no_build = no_build, session_setup = session_setup,
-          jobs = max_jobs.getOrElse(if (build_hosts.nonEmpty) 0 else 1), master = true)
+        val numa_nodes = Host.numa_nodes(enabled = numa_shuffling)
+        val build_context =
+          Build.Context(store, build_deps, engine = engine, afp_root = afp_root,
+            build_hosts = build_hosts, hostname = hostname(build_options),
+            clean_sessions = clean_sessions, store_heap = build_heap,
+            numa_shuffling = numa_shuffling, numa_nodes = numa_nodes,
+            fresh_build = fresh_build, no_build = no_build, session_setup = session_setup,
+            jobs = max_jobs.getOrElse(if (build_hosts.nonEmpty) 0 else 1), master = true)
 
-      val results = engine.run_build_process(build_context, progress, server)
+        val results = engine.run_build_process(build_context, progress, server)
 
-      if (export_files) {
-        for (name <- selected_sessions.iterator if results(name).ok) {
-          val info = results.info(name)
-          if (info.export_files.nonEmpty) {
-            progress.echo("Exporting " + info.name + " ...")
-            for ((dir, prune, pats) <- info.export_files) {
-              Export.export_files(store, name, info.dir + dir,
-                progress = if (progress.verbose) progress else new Progress,
-                export_prune = prune,
-                export_patterns = pats)
+        if (export_files) {
+          for (name <- selected_sessions.iterator if results(name).ok) {
+            val info = results.info(name)
+            if (info.export_files.nonEmpty) {
+              progress.echo("Exporting " + info.name + " ...")
+              for ((dir, prune, pats) <- info.export_files) {
+                Export.export_files(store, name, info.dir + dir,
+                  progress = if (progress.verbose) progress else new Progress,
+                  export_prune = prune,
+                  export_patterns = pats)
+              }
             }
           }
         }
-      }
 
-      val presentation_sessions =
-        results.sessions_ok.filter(name => browser_info.enabled(results.info(name)))
-      if (presentation_sessions.nonEmpty && !progress.stopped) {
-        Browser_Info.build(browser_info, results.store, results.deps, presentation_sessions,
-          progress = progress, server = server)
-      }
+        val presentation_sessions =
+          results.sessions_ok.filter(name => browser_info.enabled(results.info(name)))
+        if (presentation_sessions.nonEmpty && !progress.stopped) {
+          Browser_Info.build(browser_info, results.store, results.deps, presentation_sessions,
+            progress = progress, server = server)
+        }
 
-      if (results.unfinished.nonEmpty && (progress.verbose || !no_build)) {
-        progress.echo("Unfinished session(s): " + commas(results.unfinished))
-      }
+        if (results.unfinished.nonEmpty && (progress.verbose || !no_build)) {
+          progress.echo("Unfinished session(s): " + commas(results.unfinished))
+        }
 
-      results
+        results
+      }
     }
   }
 
@@ -339,8 +343,8 @@ object Build {
     val results =
       if (fresh) full_build()
       else {
-        val results0 = test_build()
-        if (results0.ok) results0 else full_build()
+        val test_results = test_build()
+        if (test_results.ok) test_results else full_build()
       }
 
     if (strict && !results.ok) error(build_logic_failed(logic)) else results
@@ -371,7 +375,7 @@ object Build {
       var max_jobs: Option[Int] = None
       var list_files = false
       var no_build = false
-      var options = Options.init(specs = Options.Spec.ISABELLE_BUILD_OPTIONS)
+      var options = Options.init(update = Options.Spec.ISABELLE_BUILD_OPTIONS)
       var verbose = false
       val exclude_sessions = new mutable.ListBuffer[String]
 
@@ -453,33 +457,32 @@ Usage: isabelle build [OPTIONS] [SESSIONS ...]
       progress.echo(Build_Log.Settings.show(ml_settings) + "\n", verbose = true)
 
       val results =
-        progress.interrupt_handler {
-          build(options,
-            selection = Sessions.Selection(
-              requirements = requirements,
-              all_sessions = all_sessions,
-              base_sessions = base_sessions.toList,
-              exclude_session_groups = exclude_session_groups.toList,
-              exclude_sessions = exclude_sessions.toList,
-              session_groups = session_groups.toList,
-              sessions = sessions),
-            browser_info = browser_info,
-            progress = progress,
-            check_unknown_files = Mercurial.is_repository(Path.ISABELLE_HOME),
-            build_heap = build_heap,
-            clean_build = clean_build,
-            afp_root = afp_root,
-            dirs = dirs.toList,
-            select_dirs = select_dirs.toList,
-            numa_shuffling = Host.numa_check(progress, numa_shuffling),
-            max_jobs = max_jobs,
-            list_files = list_files,
-            fresh_build = fresh_build,
-            no_build = no_build,
-            soft_build = soft_build,
-            export_files = export_files,
-            build_hosts = build_hosts.toList)
-        }
+        build(options,
+          selection = Sessions.Selection(
+            requirements = requirements,
+            all_sessions = all_sessions,
+            base_sessions = base_sessions.toList,
+            exclude_session_groups = exclude_session_groups.toList,
+            exclude_sessions = exclude_sessions.toList,
+            session_groups = session_groups.toList,
+            sessions = sessions),
+          browser_info = browser_info,
+          progress = progress,
+          check_unknown_files = Mercurial.is_repository(Path.ISABELLE_HOME),
+          build_heap = build_heap,
+          clean_build = clean_build,
+          afp_root = afp_root,
+          dirs = dirs.toList,
+          select_dirs = select_dirs.toList,
+          numa_shuffling = Host.numa_check(progress, numa_shuffling),
+          max_jobs = max_jobs,
+          list_files = list_files,
+          fresh_build = fresh_build,
+          no_build = no_build,
+          soft_build = soft_build,
+          export_files = export_files,
+          build_hosts = build_hosts.toList)
+
       val stop_date = progress.now()
       val elapsed_time = stop_date - progress.start
 
@@ -591,7 +594,7 @@ Usage: isabelle build [OPTIONS] [SESSIONS ...]
       var force = false
       var list_builds = false
       var options =
-        Options.init(specs =
+        Options.init(update =
           Options.Spec.ISABELLE_BUILD_OPTIONS ::: List(Options.Spec.make("build_database")))
       var remove_builds = false
 
@@ -630,7 +633,7 @@ Usage: isabelle build_process [OPTIONS]
   def build_worker_command(
     host: Build_Cluster.Host,
     ssh: SSH.System = SSH.Local,
-    build_options: List[Options.Spec] = Nil,
+    build_options: Options.Update = Nil,
     build_id: String = "",
     isabelle_home: Path = Path.current,
     dirs: List[Path] = Nil,
@@ -659,27 +662,29 @@ Usage: isabelle build_process [OPTIONS]
     val store = engine.build_store(options, build_cluster = true)
     val build_options = store.options
 
-    using(store.open_server()) { server =>
-      using_optional(store.maybe_open_build_database(server = server)) { build_database =>
-        val builds = read_builds(build_database)
+    progress.interrupt_handler {
+      using(store.open_server()) { server =>
+        using_optional(store.maybe_open_build_database(server = server)) { build_database =>
+          val builds = read_builds(build_database)
 
-        val build_master = find_builds(build_database, build_id, builds.filter(_.active))
+          val build_master = find_builds(build_database, build_id, builds.filter(_.active))
 
-        val more_dirs = List(Path.ISABELLE_HOME + Sync.DIRS).filter(Sessions.is_session_dir(_))
+          val more_dirs = List(Path.ISABELLE_HOME + Sync.DIRS).filter(Sessions.is_session_dir(_))
 
-        val sessions_structure =
-          Sessions.load_structure(build_options, dirs = more_dirs ::: dirs).
-            selection(Sessions.Selection(sessions = build_master.sessions))
+          val sessions_structure =
+            Sessions.load_structure(build_options, dirs = more_dirs ::: dirs).
+              selection(Sessions.Selection(sessions = build_master.sessions))
 
-        val build_deps =
-          Sessions.deps(sessions_structure, progress = progress, inlined_files = true).check_errors
+          val build_deps =
+            Sessions.deps(sessions_structure, progress = progress, inlined_files = true).check_errors
 
-        val build_context =
-          Context(store, build_deps, engine = engine, hostname = hostname(build_options),
-            numa_shuffling = numa_shuffling, build_uuid = build_master.build_uuid,
-            build_start = Some(build_master.start), jobs = max_jobs.getOrElse(1))
+          val build_context =
+            Build.Context(store, build_deps, engine = engine, hostname = hostname(build_options),
+              numa_shuffling = numa_shuffling, build_uuid = build_master.build_uuid,
+              build_start = Some(build_master.start), jobs = max_jobs.getOrElse(1))
 
-        engine.run_build_process(build_context, progress, server)
+          engine.run_build_process(build_context, progress, server)
+        }
       }
     }
   }
@@ -692,7 +697,7 @@ Usage: isabelle build_process [OPTIONS]
       val dirs = new mutable.ListBuffer[Path]
       var max_jobs: Option[Int] = None
       var options =
-        Options.init(specs =
+        Options.init(update =
           Options.Spec.ISABELLE_BUILD_OPTIONS ::: List(Options.Spec.make("build_database")))
       var quiet = false
       var verbose = false
@@ -721,18 +726,16 @@ Usage: isabelle build_worker [OPTIONS]
       if (more_args.nonEmpty) getopts.usage()
 
       val progress =
-        if (quiet && verbose) new Progress { override def verbose: Boolean = true }
-        else if (quiet) new Progress
+        if (quiet && verbose) new Verbose_Progress with Progress.Global_Interrupts
+        else if (quiet) new Progress with Progress.Global_Interrupts
         else new Console_Progress(verbose = verbose)
 
-      progress.interrupt_handler {
-        build_worker(options,
-          build_id = build_id,
-          progress = progress,
-          dirs = dirs.toList,
-          numa_shuffling = Host.numa_check(progress, numa_shuffling),
-          max_jobs = max_jobs)
-      }
+      build_worker(options,
+        build_id = build_id,
+        progress = progress,
+        dirs = dirs.toList,
+        numa_shuffling = Host.numa_check(progress, numa_shuffling),
+        max_jobs = max_jobs)
     })
 
 
@@ -746,12 +749,12 @@ Usage: isabelle build_worker [OPTIONS]
     unicode_symbols: Boolean = false,
     migrate_file: String => String = identity
   ): Option[Document.Snapshot] = {
-    def decode(str: String): String = Symbol.output(unicode_symbols, str)
+    def recode(str: String): String = Symbol.output(unicode_symbols, str)
 
     def read(name: String): Export.Entry = theory_context(name, permissive = true)
 
     def read_xml(name: String): XML.Body =
-      YXML.parse_body(read(name).bytes, recode = decode, cache = theory_context.cache)
+      YXML.parse_body(read(name).bytes, recode = recode, cache = theory_context.cache)
 
     def read_source_file(name: String): Store.Source_File =
       theory_context.session_context.source_file(name)
@@ -770,7 +773,7 @@ Usage: isabelle build_worker [OPTIONS]
 
           val file = read_source_file(name0)
           val bytes = file.bytes
-          val text = decode(bytes.text)
+          val text = recode(bytes.text)
           val chunk = Symbol.Text_Chunk(text)
           val content = Some((file.digest, chunk))
 
@@ -778,7 +781,7 @@ Usage: isabelle build_worker [OPTIONS]
             Document.Blobs.Item(bytes, text, chunk, command_offset = command_offset)
         }
 
-      val thy_source = decode(read_source_file(thy_file0).bytes.text)
+      val thy_source = recode(read_source_file(thy_file0).bytes.text)
       val thy_xml = read_xml(Export.MARKUP)
       val blobs_xml =
         for (i <- (1 to blobs.length).toList)
@@ -822,7 +825,7 @@ Usage: isabelle build_worker [OPTIONS]
         filter.forall(r => r.findFirstIn(Protocol_Message.clean_output(s)).nonEmpty)
       }
 
-    check(message_head, Protocol.message_heading(elem, pos)) &&
+    check(message_head, Protocol.message_heading(elem, pos = pos)) &&
     check(message_body, Pretty.unformatted_string_of(List(elem)))
   }
 
@@ -846,10 +849,10 @@ Usage: isabelle build_worker [OPTIONS]
         val result =
           for {
             db <- session_context.session_db()
-            theories = store.read_theories(db, session_name)
+            used_theories = store.read_theories(db, session_name)
             errors = store.read_errors(db, session_name)
             info <- store.read_build(db, session_name)
-          } yield (theories, errors, info.return_code)
+          } yield (used_theories, errors, info.return_code)
         result match {
           case None => store.error_database(session_name)
           case Some((used_theories, errors, rc)) =>

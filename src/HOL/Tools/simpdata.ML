@@ -33,6 +33,13 @@ structure Quantifier1 = Quantifier1
   val iff_exI = @{thm iff_exI}
   val all_comm = @{thm all_comm}
   val ex_comm = @{thm ex_comm}
+  fun atomizable ctxt t =
+    let
+      val body = Term.strip_all_body t
+    in
+      HOLogic.is_Trueprop (Logic.strip_imp_concl body)
+      andalso forall (atomizable ctxt) (Logic.strip_imp_prems body)
+    end
   val atomize =
     let val rules = @{thms atomize_all atomize_imp atomize_eq atomize_conj}
     in fn ctxt => Simplifier.rewrite_wrt ctxt true rules end
@@ -132,7 +139,7 @@ fun unsafe_solver_tac ctxt =
     (fn i => REPEAT_DETERM (match_tac ctxt @{thms simp_impliesI} i)) THEN' sol_tac
   end;
 
-val unsafe_solver = mk_solver "HOL unsafe" unsafe_solver_tac;
+val unsafe_solver = Simplifier.mk_solver "HOL unsafe" unsafe_solver_tac;
 
 
 (*No premature instantiation of variables during simplification*)
@@ -141,7 +148,7 @@ fun safe_solver_tac ctxt =
   FIRST' [match_tac ctxt (reflexive_thm :: @{thm TrueI} :: @{thm refl} :: Simplifier.prems_of ctxt),
     eq_assume_tac, ematch_tac ctxt @{thms FalseE}];
 
-val safe_solver = mk_solver "HOL safe" safe_solver_tac;
+val safe_solver = Simplifier.mk_solver "HOL safe" safe_solver_tac;
 
 structure Splitter = Splitter
 (
@@ -185,21 +192,21 @@ val mksimps_pairs =
   (\<^const_name>\<open>If\<close>, [@{thm if_bool_eq_conj} RS @{thm iffD1}])];
 
 val HOL_basic_ss =
-  empty_simpset \<^context>
-  |> Simplifier.set_safe_solver safe_solver
-  |> Simplifier.set_unsafe_solver unsafe_solver
-  |> Simplifier.set_subgoaler asm_simp_tac
-  |> Simplifier.set_mksimps (mksimps mksimps_pairs)
-  |> Simplifier.set_mkeqTrue mk_eq_True
-  |> Simplifier.set_mkcong mk_meta_cong
-  |> simpset_of;
+  Simplifier.empty_ss
+  |> Simplifier.simpset_map \<^context> (
+    Simplifier.set_safe_solver safe_solver
+    #> Simplifier.set_unsafe_solver unsafe_solver
+    #> Simplifier.set_subgoaler asm_simp_tac
+    #> Simplifier.set_mksimps (mksimps mksimps_pairs)
+    #> Simplifier.set_mkeqTrue mk_eq_True
+    #> Simplifier.set_mkcong mk_meta_cong);
 
 fun hol_simplify ctxt rews =
-  Simplifier.full_simplify (put_simpset HOL_basic_ss ctxt |> Simplifier.add_simps rews);
+  full_simplify (ctxt |> Simplifier.put_simpset HOL_basic_ss |> Simplifier.add_simps rews);
 
 fun unfold_tac ctxt ths =
   ALLGOALS (full_simp_tac
-    (clear_simpset (put_simpset HOL_basic_ss ctxt) |> Simplifier.add_simps ths));
+    (ctxt |> Simplifier.put_simpset HOL_basic_ss |> Simplifier.clear_simpset |> Simplifier.add_simps ths));
 
 end;
 

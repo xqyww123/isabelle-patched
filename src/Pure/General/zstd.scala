@@ -17,13 +17,13 @@ object Zstd {
     require(!zstd.util.Native.isLoaded(),
       "Zstd library already initialized by other means than isabelle.Zstd.init()")
 
-    val lib_dir = Path.explode("$ISABELLE_ZSTD_HOME/" + Platform.jvm_platform)
+    val lib_dir = Path.explode("$ISABELLE_ZSTD_HOME") + Path.basic(Platform.jvm_platform)
     val lib_file = File.get_file(lib_dir)
 
     System.load(lib_file.absolute_file.getPath)
 
     zstd.util.Native.assumeLoaded()
     assert(zstd.util.Native.isLoaded())
-    Class.forName("com.github.luben.zstd.Zstd")
+    Classpath.the_class("com.github.luben.zstd.Zstd")
   }
 }

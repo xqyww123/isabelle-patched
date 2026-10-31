@@ -32,44 +32,44 @@ sig
     (binding * string option * mixfix) list -> string list ->
     (Attrib.binding * string) list -> theory -> (term list * thm list) * theory
   val axiom: Attrib.binding * term -> theory -> thm * theory
-  val definition: (binding * typ option * mixfix) option ->
+  val definition: {verbose: bool} -> (binding * typ option * mixfix) option ->
     (binding * typ option * mixfix) list -> term list -> Attrib.binding * term ->
     local_theory -> (term * (string * thm)) * local_theory
-  val definition_cmd: (binding * string option * mixfix) option ->
+  val definition_cmd: {verbose: bool} -> (binding * string option * mixfix) option ->
     (binding * string option * mixfix) list -> string list -> Attrib.binding * string ->
-    bool -> local_theory -> (term * (string * thm)) * local_theory
-  val abbreviation: Syntax.mode -> (binding * typ option * mixfix) option ->
-    (binding * typ option * mixfix) list -> term -> bool -> local_theory -> local_theory
-  val abbreviation_cmd: Syntax.mode -> (binding * string option * mixfix) option ->
-    (binding * string option * mixfix) list -> string -> bool -> local_theory -> local_theory
+    local_theory -> (term * (string * thm)) * local_theory
+  val abbreviation: {verbose: bool} -> Syntax.mode -> (binding * typ option * mixfix) option ->
+    (binding * typ option * mixfix) list -> term -> local_theory -> local_theory
+  val abbreviation_cmd: {verbose: bool} -> Syntax.mode -> (binding * string option * mixfix) option ->
+    (binding * string option * mixfix) list -> string -> local_theory -> local_theory
   val alias: binding * string -> local_theory -> local_theory
   val alias_cmd: binding * (xstring * Position.T) -> local_theory -> local_theory
   val type_alias: binding * string -> local_theory -> local_theory
   val type_alias_cmd: binding * (xstring * Position.T) -> local_theory -> local_theory
-  val theorems: string ->
+  val theorems: {verbose: bool, kind: string} ->
     (Attrib.binding * Attrib.thms) list ->
     (binding * typ option * mixfix) list ->
-    bool -> local_theory -> (string * thm list) list * local_theory
-  val theorems_cmd: string ->
+    local_theory -> (string * thm list) list * local_theory
+  val theorems_cmd: {verbose: bool, kind: string} ->
     (Attrib.binding * (Facts.ref * Token.src list) list) list ->
     (binding * string option * mixfix) list ->
-    bool -> local_theory -> (string * thm list) list * local_theory
-  val theorem: bool -> string -> Method.text option ->
+    local_theory -> (string * thm list) list * local_theory
+  val theorem: {verbose: bool, long: bool, kind: string} -> Method.text option ->
     (thm list list -> local_theory -> local_theory) -> Attrib.binding ->
     Bundle.name list -> Element.context_i list -> Element.statement_i ->
-    bool -> local_theory -> Proof.state
-  val theorem_cmd: bool -> string -> Method.text option ->
+    local_theory -> Proof.state
+  val theorem_cmd: {verbose: bool, long: bool, kind: string} -> Method.text option ->
     (thm list list -> local_theory -> local_theory) -> Attrib.binding ->
     Bundle.xname list -> Element.context list -> Element.statement ->
-    bool -> local_theory -> Proof.state
-  val schematic_theorem: bool -> string -> Method.text option ->
+    local_theory -> Proof.state
+  val schematic_theorem: {verbose: bool, long: bool, kind: string} -> Method.text option ->
     (thm list list -> local_theory -> local_theory) -> Attrib.binding ->
     Bundle.name list -> Element.context_i list -> Element.statement_i ->
-    bool -> local_theory -> Proof.state
-  val schematic_theorem_cmd: bool -> string -> Method.text option ->
+    local_theory -> Proof.state
+  val schematic_theorem_cmd: {verbose: bool, long: bool, kind: string} -> Method.text option ->
     (thm list list -> local_theory -> local_theory) -> Attrib.binding ->
     Bundle.xname list -> Element.context list -> Element.statement ->
-    bool -> local_theory -> Proof.state
+    local_theory -> Proof.state
 end;
 
 structure Specification: SPECIFICATION =
@@ -112,9 +112,10 @@ fun prep_decls prep_var raw_vars ctxt =
       |> Proof_Context.add_fixes vars
       ||> Context_Position.restore_visible ctxt';
     val _ =
-      Context_Position.reports ctxt''
-        (map (Binding.pos_of o #1) vars ~~
-          map (Variable.markup_entity_def ctxt'' ##> Properties.remove Markup.kindN) xs);
+      (map (Binding.pos_of o #1) vars ~~
+        map (Variable.markups_entity_def ctxt'' #> map (apsnd (Properties.remove Markup.kindN))) xs)
+      |> maps (fn (p, ms) => map (pair p) ms)
+      |> Context_Position.reports ctxt''
   in ((vars, xs), ctxt'') end;
 
 fun close_form ctxt ys prems concl =
@@ -238,7 +239,7 @@ fun axiom (b, ax) = axiomatization [] [] [] [(b, ax)] #>> (hd o snd);
 
 (* definition *)
 
-fun gen_def prep_spec prep_att raw_var raw_params raw_prems ((a, raw_atts), raw_spec) int lthy =
+fun gen_def prep_spec prep_att {verbose} raw_var raw_params raw_prems ((a, raw_atts), raw_spec) lthy =
   let
     val atts = map (prep_att lthy) raw_atts;
 
@@ -269,17 +270,17 @@ fun gen_def prep_spec prep_att raw_var raw_params raw_prems ((a, raw_atts), raw_
     val lhs' = Morphism.term (Local_Theory.target_morphism lthy4) lhs;
 
     val _ =
-      Proof_Display.print_consts int (Position.thread_data ()) lthy4
+      Proof_Display.print_consts {verbose = verbose, pos = Position.thread_data ()} lthy4
         (Frees.defined (Frees.build (Frees.add_frees lhs'))) [(x, T)];
   in ((lhs, (def_name, th)), lthy4) end;
 
-fun definition xs ys As B = gen_def check_spec_open (K I) xs ys As B false;
+val definition = gen_def check_spec_open (K I);
 val definition_cmd = gen_def read_spec_open Attrib.check_src;
 
 
 (* abbreviation *)
 
-fun gen_abbrev prep_spec mode raw_var raw_params raw_spec int lthy =
+fun gen_abbrev prep_spec {verbose} mode raw_var raw_params raw_spec lthy =
   let
     val lthy1 = lthy |> Proof_Context.set_syntax_mode mode;
     val ((vars, xs, get_pos, spec), _) = lthy
@@ -299,7 +300,9 @@ fun gen_abbrev prep_spec mode raw_var raw_params raw_spec int lthy =
       |> Local_Theory.abbrev mode ((b, mx), rhs) |> snd
       |> Proof_Context.restore_syntax_mode lthy;
 
-    val _ = Proof_Display.print_consts int (Position.thread_data ()) lthy2 (K false) [(x, T)];
+    val _ =
+      Proof_Display.print_consts {verbose = verbose, pos = Position.thread_data ()}
+        lthy2 (K false) [(x, T)];
   in lthy2 end;
 
 val abbreviation = gen_abbrev check_spec_open;
@@ -331,8 +334,7 @@ val type_alias_cmd =
 
 local
 
-fun gen_theorems prep_fact prep_att add_fixes
-    kind raw_facts raw_fixes int lthy =
+fun gen_theorems prep_fact prep_att add_fixes {verbose, kind} raw_facts raw_fixes lthy =
   let
     val facts = raw_facts |> map (fn ((name, atts), bs) =>
       ((name, map (prep_att lthy) atts),
@@ -344,7 +346,7 @@ fun gen_theorems prep_fact prep_att add_fixes
       |> Attrib.transform_facts (Proof_Context.export_morphism ctxt' lthy);
     val (res, lthy') = lthy |> Local_Theory.notes_kind kind facts';
     val _ =
-      Proof_Display.print_results {interactive = int, pos = Position.thread_data ()}
+      Proof_Display.print_results {verbose = verbose, pos = Position.thread_data ()}
         lthy' ((kind, ""), res);
   in (res, lthy') end;
 
@@ -386,8 +388,8 @@ fun prep_statement prep_att prep_stmt raw_elems raw_stmt ctxt =
         in ((Obtain.obtains_attribs raw_obtains, prems, stmt', SOME that'), that_ctxt) end)
   end;
 
-fun gen_theorem schematic bundle_includes prep_att prep_stmt
-    long kind before_qed after_qed (name, raw_atts) raw_includes raw_elems raw_concl int lthy =
+fun gen_theorem schematic bundle_includes prep_att prep_stmt {verbose, long, kind}
+    before_qed after_qed (name, raw_atts) raw_includes raw_elems raw_concl lthy =
   let
     val _ = Local_Theory.assert lthy;
 
@@ -398,7 +400,7 @@ fun gen_theorem schematic bundle_includes prep_att prep_stmt
     val atts = more_atts @ map (prep_att lthy) raw_atts;
 
     val print_results =
-      Proof_Display.print_results {interactive = int, pos = Position.thread_data ()};
+      Proof_Display.print_results {verbose = verbose, pos = Position.thread_data ()};
 
     fun after_qed' results goal_ctxt' =
       let

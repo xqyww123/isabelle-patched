@@ -16,7 +16,7 @@ object Go_Setup {
 
     def download(base_url: String, version: String): String = {
       val ext = if (is_windows) ".zip" else ".tar.gz"
-      Url.append_path(base_url, "go" + version + "." + go_platform.replace("_", "-") + ext)
+      Url.append_path(base_url, "go" + version + "." + go_platform.replacing("_" -> "-") + ext)
     }
   }
 
@@ -84,7 +84,7 @@ fi
     /* download and setup */
 
     Isabelle_System.with_tmp_dir("download") { download_dir =>
-      for (platform <- all_platforms if platforms.exists(platform.is)) {
+      for (platform <- all_platforms if platforms.exists(platform.test)) {
         val platform_dir = component_dir.path + platform.path
         if (platform_dir.is_dir && !force) {
           progress.echo_warning("Platform " + platform + " already installed")
@@ -114,8 +114,8 @@ fi
       }
     }
 
-    File.find_files(component_dir.path.file, pred = file => File.is_exe(file.getName)).
-      foreach(file => File.set_executable(File.path(file)))
+    File.find_files(component_dir.path, pred = File.is_exe).
+      foreach(File.set_executable(_))
 
 
     /* README */

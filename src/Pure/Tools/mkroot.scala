@@ -29,7 +29,7 @@ object Mkroot {
   ): Unit = {
     Isabelle_System.make_directory(session_dir)
 
-    val name = proper_string(session_name) getOrElse session_dir.absolute_file.getName
+    val name = proper_string(session_name) getOrElse session_dir.absolute_file.file_name
     val parent = proper_string(session_parent) getOrElse Isabelle_System.default_logic()
 
     val root_path = session_dir + Sessions.ROOT
@@ -111,7 +111,8 @@ object Mkroot {
 \begin{document}
 
 \title{""" + (proper_string(title) getOrElse latex_name(name)) + """}
-\author{""" + (proper_string(author) getOrElse latex_name(System.getProperty("user.name"))) + """}
+\author{""" +
+  (proper_string(author) getOrElse latex_name(Isabelle_System.get_property("user.name"))) + """}
 \maketitle
 
 \tableofcontents
@@ -217,7 +218,7 @@ Usage: isabelle mkroot [OPTIONS] [DIRECTORY]
           case _ => getopts.usage()
         }
 
-      val progress = new Console_Progress
+      val progress = new Console_Progress()
 
       mkroot(session_name = session_name, session_dir = session_dir, init_repos = init_repos,
         author = author, title = title, quiet = quiet, progress = progress)

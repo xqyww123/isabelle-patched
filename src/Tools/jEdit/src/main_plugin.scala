@@ -6,6 +6,7 @@ Main plumbing for PIDE infrastructure as jEdit plugin.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -24,28 +25,36 @@ import org.gjt.sp.util.Log
 object PIDE {
   /* semantic document content */
 
-  def maybe_snapshot(view: View = null): Option[Document.Snapshot] = GUI_Thread.now {
-    val buffer = JEdit_Lib.jedit_view(view).getBuffer
-    Document_Model.get_snapshot(buffer)
+  def maybe_snapshot(view: Option[View] = None): Option[Document.Snapshot] = GUI_Thread.now {
+    for {
+      actual_view <- JEdit_Lib.jedit_view(view = view)
+      buffer <- proper_value(actual_view.getBuffer)
+      snapshot <- Document_Model.get_snapshot(buffer)
+    } yield snapshot
   }
 
-  def maybe_rendering(view: View = null): Option[JEdit_Rendering] = GUI_Thread.now {
-    val text_area = JEdit_Lib.jedit_view(view).getTextArea
-    Document_View.get_rendering(text_area)
+  def maybe_rendering(view: Option[View] = None): Option[JEdit_Rendering] = GUI_Thread.now {
+    for {
+      actual_view <- JEdit_Lib.jedit_view(view = view)
+      text_area <- proper_value(actual_view.getTextArea)
+      rendering <- Document_View.get_rendering(text_area)
+    } yield rendering
   }
 
-  def snapshot(view: View = null): Document.Snapshot =
-    maybe_snapshot(view) getOrElse error("No document model for current buffer")
+  def snapshot(view: View | Null = null): Document.Snapshot =
+    maybe_snapshot(view = proper_value(view))
+      .getOrElse(error("No document model for current buffer"))
 
-  def rendering(view: View = null): JEdit_Rendering =
-    maybe_rendering(view) getOrElse error("No document view for current text area")
+  def rendering(view: View | Null = null): JEdit_Rendering =
+    maybe_rendering(view = proper_value(view))
+      .getOrElse(error("No document view for current text area"))
 
 
   /* plugin instance */
 
   @volatile var _plugin: Main_Plugin = null
 
-  def get_plugin: Option[Main_Plugin] = Option(_plugin)
+  def get_plugin: Option[Main_Plugin] = proper_value(_plugin)
 
   def plugin: Main_Plugin =
     get_plugin.getOrElse(error("Uninitialized Isabelle/jEdit plugin"))
@@ -53,16 +62,18 @@ object PIDE {
   def title: String =
     proper_string(Isabelle_System.getenv("ISABELLE_IDENTIFIER")).getOrElse("Isabelle") +
       (get_plugin match {
-        case Some(main) => "/" + main.session.resources.session_base.session_name
+        case Some(main) => "/" + main.session.resources.current_background.session_name
         case None => ""
       })
 
-  def options: JEdit_Options = plugin.options
+  def options: Options =
+    get_plugin match {
+      case Some(pide) => pide.options.value
+      case None => Options.defaults
+    }
+
   def session: JEdit_Session = plugin.session
   def resources: JEdit_Resources = session.resources
-  def ml_settings: ML_Settings = session.store.ml_settings
-
-  object editor extends JEdit_Editor
 }
 
 class Main_Plugin extends EBPlugin {
@@ -70,8 +81,8 @@ class Main_Plugin extends EBPlugin {
 
   private lazy val initial_options: Options = Options.init()
 
-  private lazy val more_options: List[Options.Spec] =
-    ("show_results=false" :: Library.space_explode('\u000b', Isabelle_System.getenv("JEDIT_ISABELLE_OPTIONS")))
+  private lazy val more_options: Options.Update =
+    ("show_results" :: Library.space_explode('\u000b', Isabelle_System.getenv("JEDIT_ISABELLE_OPTIONS")))
       .map(Options.Spec.make)
 
   lazy val startup_options: Options = initial_options ++ more_options
@@ -101,16 +112,15 @@ class Main_Plugin extends EBPlugin {
 
   val completion_history = new Completion.History_Variable
   val spell_checker = new Spell_Checker_Variable
-  val navigator = new Isabelle_Navigator
 
 
   /* theory files */
 
   private lazy val delay_init: Delay =
-    Delay.last(PIDE.session.load_delay, gui = true) { init_models() }
+    GUI.Delay.last(PIDE.session.load_delay) { init_models() }
 
   private lazy val delay_load: Delay =
-    Delay.last(session.load_delay, gui = true) {
+    GUI.Delay.last(session.load_delay) {
       if (JEdit_Options.continuous_checking()) {
         if (!PerspectiveManager.isPerspectiveEnabled ||
             JEdit_Lib.jedit_buffers().exists(_.isLoading)) delay_load.invoke()
@@ -129,7 +139,8 @@ class Main_Plugin extends EBPlugin {
       val models = Document_Model.get_models_map()
 
       val thy_files =
-        session.resources.resolve_dependencies(models.values, PIDE.editor.document_required())
+        session.resources.resolve_dependencies(session.conditions,
+          models.values, JEdit_Editor.document_required())
 
       val aux_files =
         if (session.auto_resolve) {
@@ -166,10 +177,10 @@ class Main_Plugin extends EBPlugin {
   }
 
   private def file_watcher_action(changed: Set[JFile]): Unit =
-    if (Document_Model.sync_files(changed)) PIDE.editor.invoke_generated()
+    if (Document_Model.sync_files(changed)) JEdit_Editor.invoke_generated()
 
   lazy val file_watcher: File_Watcher =
-    File_Watcher(file_watcher_action, session.load_delay)
+    File_Watcher(file_watcher_action, session.resources, session.load_delay)
 
 
   /* session phase */
@@ -177,8 +188,10 @@ class Main_Plugin extends EBPlugin {
   val session_phase_changed: Session.Consumer[Session.Phase] = Session.Consumer("Isabelle/jEdit") {
     case Session.Terminated(result) if !result.ok =>
       GUI_Thread.later {
-        GUI.error_dialog(jEdit.getActiveView, "Prover process terminated with error",
-          "Isabelle Syslog", GUI.scrollable_text(session.syslog.content()))
+        GUI.error_dialog(
+          title = "Prover process terminated with error",
+          message = Seq("Isabelle Syslog", GUI.scrollable_text(session.syslog.content())),
+          parent = JEdit_Lib.jedit_view())
       }
 
     case Session.Ready if !shutting_down.value =>
@@ -187,12 +200,14 @@ class Main_Plugin extends EBPlugin {
       if (!JEdit_Options.continuous_checking()) {
         GUI_Thread.later {
           val answer =
-            GUI.confirm_dialog(jEdit.getActiveView,
-              "Continuous checking of PIDE document",
-              JOptionPane.YES_NO_OPTION,
-              "Continuous checking is presently disabled:",
-              "editor buffers will remain inactive!",
-              "Enable continuous checking now?")
+            GUI.confirm_dialog(
+              option_type = JOptionPane.YES_NO_OPTION,
+              title = "Continuous checking of PIDE document",
+              message =
+                Seq("Continuous checking is presently disabled:",
+                  "editor buffers will remain inactive!",
+                  "Enable continuous checking now?"),
+              parent = JEdit_Lib.jedit_view())
           if (answer == 0) JEdit_Options.continuous_checking.set()
         }
       }
@@ -203,7 +218,7 @@ class Main_Plugin extends EBPlugin {
       GUI_Thread.later {
         delay_load.revoke()
         delay_init.revoke()
-        PIDE.editor.shutdown()
+        JEdit_Editor.shutdown()
         exit_models(JEdit_Lib.jedit_buffers().toList)
       }
 
@@ -225,7 +240,7 @@ class Main_Plugin extends EBPlugin {
 
   def init_models(): Unit = {
     GUI_Thread.now {
-      PIDE.editor.flush()
+      JEdit_Editor.flush_edits()
 
       for {
         buffer <- JEdit_Lib.jedit_buffers()
@@ -244,7 +259,7 @@ class Main_Plugin extends EBPlugin {
         else delay_init.invoke()
       }
 
-      PIDE.editor.invoke_generated()
+      JEdit_Editor.invoke_generated()
     }
   }
 
@@ -290,9 +305,10 @@ class Main_Plugin extends EBPlugin {
     if (startup_failure.isDefined && !startup_notified) {
       message match {
         case _: EditorStarted =>
-          GUI.error_dialog(null, "Isabelle plugin startup failure",
-            GUI.scrollable_text(Exn.message(startup_failure.get)),
-            "Prover IDE inactive!")
+          GUI.error_dialog(
+            title = "Isabelle plugin startup failure",
+            message =
+              Seq(GUI.scrollable_text(Exn.message(startup_failure.get)), "Prover IDE inactive!"))
           startup_notified = true
         case _ =>
       }
@@ -303,28 +319,37 @@ class Main_Plugin extends EBPlugin {
         case _: EditorStarted =>
           val view = jEdit.getActiveView
 
-          try { session.resources.session_background.check_errors }
+          try {
+            session.resources.parent_background.check_errors
+            session.resources.current_background.check_errors
+          }
           catch {
             case ERROR(msg) =>
-              GUI.warning_dialog(view,
-                "Bad session structure: may cause problems with theory imports",
-                GUI.scrollable_text(msg))
+              GUI.warning_dialog(
+                title = "Bad session structure: may cause problems with theory imports",
+                message = Seq(GUI.scrollable_text(msg)),
+                parent = proper_value(view))
           }
 
-          jEdit.propertiesChanged()
+          JEdit_Menu.init()
 
           if (view != null) {
             init_editor(view)
 
-            PIDE.editor.hyperlink_position(Document.Snapshot.init,
-              JEdit_Session.logic_root(options.value), focus = true).foreach(_.follow(view))
+            JEdit_Editor.hyperlink_position(Document.Snapshot.init,
+              JEdit_Session.logic_root(options.value), focus = true)
+                .foreach(_.follow(JEdit_Editor.Context(view)))
           }
 
         case msg: ViewUpdate =>
           val what = msg.getWhat
           val view = msg.getView
           what match {
-            case ViewUpdate.CREATED if view != null => init_title(view)
+            case ViewUpdate.CREATED if view != null =>
+              init_title(view)
+              Isabelle_Navigator.init(view)
+            case ViewUpdate.CLOSED if view != null =>
+              Isabelle_Navigator.exit(view)
             case _ =>
           }
 
@@ -337,7 +362,7 @@ class Main_Plugin extends EBPlugin {
           what match {
             case BufferUpdate.LOAD_STARTED | BufferUpdate.CLOSING if buffer != null =>
               exit_models(List(buffer))
-              PIDE.editor.invoke_generated()
+              JEdit_Editor.invoke_generated()
             case BufferUpdate.PROPERTIES_CHANGED | BufferUpdate.LOADED if session.is_ready =>
               delay_init.invoke()
               delay_load.invoke()
@@ -346,8 +371,8 @@ class Main_Plugin extends EBPlugin {
 
           if (buffer != null && !buffer.isUntitled) {
             what match {
-              case BufferUpdate.CREATED => navigator.init(Set(buffer))
-              case BufferUpdate.CLOSED => navigator.exit(Set(buffer))
+              case BufferUpdate.CREATED => Isabelle_Navigator.add_listener(List(buffer))
+              case BufferUpdate.CLOSED => Isabelle_Navigator.del_listener(List(buffer))
               case _ =>
             }
           }
@@ -357,6 +382,7 @@ class Main_Plugin extends EBPlugin {
           val edit_pane = msg.getEditPane
           val buffer = if (edit_pane == null) null else edit_pane.getBuffer
           val text_area = if (edit_pane == null) null else edit_pane.getTextArea
+          val view = if (text_area == null) null else text_area.getView
 
           if (buffer != null && text_area != null) {
             if (what == EditPaneUpdate.BUFFER_CHANGED || what == EditPaneUpdate.CREATED) {
@@ -364,7 +390,7 @@ class Main_Plugin extends EBPlugin {
             }
 
             if (what == EditPaneUpdate.BUFFER_CHANGING || what == EditPaneUpdate.DESTROYED) {
-              Isabelle.dismissed_popups(text_area.getView)
+              Isabelle.dismissed_popups(view)
               exit_view(buffer, text_area)
             }
 
@@ -375,17 +401,16 @@ class Main_Plugin extends EBPlugin {
 
           if (msg.isInstanceOf[PositionChanging]) {
             JEdit_Mouse_Handler.jump(edit_pane)
-            navigator.record(Isabelle_Navigator.Pos(edit_pane))
+            if (view != null) JEdit_Editor.navigator_record(JEdit_Editor.Context(view))
           }
 
         case _: PropertiesChanged =>
           for {
             view <- JEdit_Lib.jedit_views()
-            edit_pane <- JEdit_Lib.jedit_edit_panes(view)
+            text_area <- JEdit_Lib.jedit_text_areas(view)
           } {
-            val buffer = edit_pane.getBuffer
-            val text_area = edit_pane.getTextArea
-            if (buffer != null && text_area != null) init_view(buffer, text_area)
+            val editor_context = JEdit_Editor.Context(text_area)
+            for (buffer <- editor_context.proper_buffer) init_view(buffer, text_area)
           }
 
           spell_checker.update(options.value)
@@ -428,7 +453,7 @@ class Main_Plugin extends EBPlugin {
 
   private val shutting_down = Synchronized(false)
 
-  override def start(): Unit = {
+  override def start(): Unit = GUI_Thread.now {
     /* strict initialization */
 
     init_options()
@@ -439,11 +464,16 @@ class Main_Plugin extends EBPlugin {
     /* non-strict initialization */
 
     try {
-      completion_history.load()
+      completion_history.load(GUI.log)
       spell_checker.update(options.value)
 
-      JEdit_Lib.jedit_views().foreach(init_title)
-      navigator.init(JEdit_Lib.jedit_buffers())
+      JEdit_Menu.init()
+
+      for (view <- JEdit_Lib.jedit_views()) {
+        init_title(view)
+        Isabelle_Navigator.init(view)
+      }
+      Isabelle_Navigator.add_listener(JEdit_Lib.jedit_buffers().toList)
 
       Syntax_Style.set_extender(Syntax_Style.Main_Extender)
       init_mode_provider()
@@ -462,11 +492,10 @@ class Main_Plugin extends EBPlugin {
 
     shutting_down.change(_ => false)
 
-    val view = jEdit.getActiveView
-    if (view != null) init_editor(view)
+    for (view <- JEdit_Lib.jedit_view()) init_editor(view)
   }
 
-  override def stop(): Unit = {
+  override def stop(): Unit = GUI_Thread.now {
     http_server.stop()
 
     Syntax_Style.set_extender(Syntax_Style.Base_Extender)
@@ -488,8 +517,10 @@ class Main_Plugin extends EBPlugin {
     shutting_down.change(_ => true)
     session.stop()
     file_watcher.shutdown()
-    PIDE.editor.shutdown()
+    JEdit_Editor.shutdown()
 
     Document_Model.reset()
+
+    JEdit_Menu.exit()
   }
 }

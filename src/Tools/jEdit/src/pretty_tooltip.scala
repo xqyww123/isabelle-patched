@@ -6,6 +6,7 @@ Tooltip based on Pretty_Text_Area.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -46,7 +47,11 @@ object Pretty_Tooltip {
     location: Point,
     rendering: JEdit_Rendering,
     results: Command.Results,
-    output: List[XML.Elem]
+    output: List[XML.Elem],
+    focus: Boolean = false,
+    propagate_keys: Boolean = false,
+    caret_visible: Boolean = false,
+    unicode_symbols: Boolean = Isabelle_Encoding.is_active()
   ): Unit = {
     GUI_Thread.require {}
 
@@ -65,9 +70,11 @@ object Pretty_Tooltip {
 
             val loc = SwingUtilities.convertPoint(parent, location, layered)
             val pretty_tooltip =
-              new Pretty_Tooltip(view, layered, parent, loc, rendering, results, output)
+              new Pretty_Tooltip(view, layered, parent, loc, rendering, results, output,
+                propagate_keys = propagate_keys, caret_visible = caret_visible,
+                unicode_symbols = unicode_symbols)
             stack = pretty_tooltip :: rest
-            pretty_tooltip.show_popup()
+            pretty_tooltip.show_popup(focus = focus)
         }
     }
   }
@@ -79,7 +86,7 @@ object Pretty_Tooltip {
   private var active = true
 
   private val pending_delay =
-    Delay.last(PIDE.options.seconds("jedit_tooltip_delay"), gui = true) {
+    GUI.Delay.last(PIDE.options.seconds("jedit_tooltip_delay")) {
       pending match {
         case Some(body) => pending = None; body()
         case None =>
@@ -101,7 +108,7 @@ object Pretty_Tooltip {
     }
 
   private lazy val reactivate_delay =
-    Delay.last(PIDE.options.seconds("jedit_tooltip_delay"), gui = true) {
+    GUI.Delay.last(PIDE.options.seconds("jedit_tooltip_delay")) {
       active = true
     }
 
@@ -116,7 +123,7 @@ object Pretty_Tooltip {
   /* dismiss */
 
   private lazy val focus_delay =
-    Delay.last(PIDE.session.input_delay, gui = true) { dismiss_unfocused() }
+    GUI.Delay.last(PIDE.session.input_delay) { dismiss_unfocused() }
 
   def dismiss_unfocused(): Unit = {
     stack.span(pretty_tooltip => !pretty_tooltip.pretty_text_area.isFocusOwner) match {
@@ -166,7 +173,10 @@ class Pretty_Tooltip private(
   location: Point,
   rendering: JEdit_Rendering,
   private val results: Command.Results,
-  private val output: List[XML.Elem]
+  private val output: List[XML.Elem],
+  propagate_keys: Boolean,
+  caret_visible: Boolean,
+  unicode_symbols: Boolean
 ) extends JPanel(new BorderLayout) {
   pretty_tooltip =>
 
@@ -203,7 +213,12 @@ class Pretty_Tooltip private(
   /* text area */
 
   val pretty_text_area: Pretty_Text_Area =
-    new Pretty_Text_Area(view, () => Pretty_Tooltip.dismiss(pretty_tooltip), true) {
+    new Pretty_Text_Area(view,
+      close_action = () => Pretty_Tooltip.dismiss(pretty_tooltip),
+      propagate_keys = propagate_keys,
+      caret_visible = caret_visible,
+      unicode_symbols = unicode_symbols
+    ) {
       override def get_background(): Option[Color] = Some(rendering.tooltip_background_color)
     }
 
@@ -238,38 +253,38 @@ class Pretty_Tooltip private(
 
   /* popup */
 
-  private val popup: Popup = {
-    val screen = GUI.screen_location(layered, location)
-    val size = {
-      val bounds = JEdit_Rendering.popup_bounds
+  private val popup: Popup =
+    new Popup(layered, pretty_tooltip, location) {
+      override val size: Dimension = {
+        val bounds = JEdit_Rendering.popup_bounds
 
-      val w_max = layered.getWidth min (screen.bounds.width * bounds).toInt
-      val h_max = layered.getHeight min (screen.bounds.height * bounds).toInt
+        val w_max = root.getWidth min (screen.bounds.width * bounds).toInt
+        val h_max = root.getHeight min (screen.bounds.height * bounds).toInt
 
-      val painter = pretty_text_area.getPainter
-      val geometry = JEdit_Lib.window_geometry(pretty_tooltip, painter)
-      val metric = JEdit_Lib.font_metric(painter)
-      val margin =
-        Rich_Text.make_margin(metric, rendering.tooltip_margin,
-          limit = ((w_max - geometry.deco_width) / metric.average_width).toInt)
+        val painter = pretty_text_area.getPainter
+        val geometry = JEdit_Lib.window_geometry(component, painter)
+        val metric = JEdit_Lib.font_metric(painter)
+        val margin =
+          Rich_Text.make_margin(metric, rendering.tooltip_margin,
+            limit = ((w_max - geometry.deco_width) / metric.average_width).toInt)
 
-      val formatted = Rich_Text.format(output, margin, metric, cache = PIDE.session.cache)
-      val lines = Rich_Text.formatted_lines(formatted)
+        val formatted =
+          Rich_Text.format(output, margin, metric, unicode_symbols, cache = PIDE.session.cache)
+        val lines = Rich_Text.formatted_lines(formatted)
 
-      val h = painter.getLineHeight * lines + geometry.deco_height
-      val margin1 =
-        if (h <= h_max) Rich_Text.formatted_margin(metric, formatted)
-        else margin.toDouble
-      val w = (metric.unit * (margin1 + 1)).round.toInt + geometry.deco_width
+        val h = painter.getLineHeight * lines + geometry.deco_height
+        val margin1 =
+          if (h <= h_max) Rich_Text.formatted_margin(metric, formatted)
+          else margin.toDouble
+        val w = (metric.unit * (margin1 + 1)).round.toInt + geometry.deco_width
 
-      new Dimension(w min w_max, h min h_max)
+        new Dimension(w min w_max, h min h_max)
+      }
     }
-    new Popup(layered, pretty_tooltip, screen.relative(layered, size), size)
-  }
 
-  private def show_popup(): Unit = {
+  private def show_popup(focus: Boolean = false): Unit = {
     popup.show
-    pretty_text_area.requestFocus()
+    if (focus) pretty_text_area.requestFocus()
     pretty_text_area.update(rendering.snapshot, results, output)
   }
 

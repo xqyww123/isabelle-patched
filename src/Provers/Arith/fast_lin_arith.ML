@@ -129,7 +129,7 @@ structure Data = Generic_Data
 
   val empty : T =
    {add_mono_thms = [], mult_mono_thms = [], inj_thms = [],
-    lessD = [], neqE = [], simpset = empty_ss,
+    lessD = [], neqE = [], simpset = Simplifier.empty_ss,
     number_of = NONE};
   fun merge
     ({add_mono_thms = add_mono_thms1, mult_mono_thms = mult_mono_thms1, inj_thms = inj_thms1,
@@ -141,7 +141,7 @@ structure Data = Generic_Data
      inj_thms = Thm.merge_thms (inj_thms1, inj_thms2),
      lessD = Thm.merge_thms (lessD1, lessD2),
      neqE = Thm.merge_thms (neqE1, neqE2),
-     simpset = merge_ss (simpset1, simpset2),
+     simpset = Simplifier.merge_ss (simpset1, simpset2),
      number_of = merge_options (number_of1, number_of2)};
 );
 
@@ -161,7 +161,7 @@ fun map_lessD f {add_mono_thms, mult_mono_thms, inj_thms, lessD, neqE, simpset, 
 fun map_simpset f context =
   map_data (fn {add_mono_thms, mult_mono_thms, inj_thms, lessD, neqE, simpset, number_of} =>
     {add_mono_thms = add_mono_thms, mult_mono_thms = mult_mono_thms, inj_thms = inj_thms,
-      lessD = lessD, neqE = neqE, simpset = simpset_map (Context.proof_of context) f simpset,
+      lessD = lessD, neqE = neqE, simpset = Simplifier.simpset_map (Context.proof_of context) f simpset,
       number_of = number_of}) context;
 
 fun add_inj_thms thms = map_data (map_inj_thms (append (map Thm.trim_context thms)));
@@ -728,7 +728,7 @@ fun prems_lin_arith_tac ctxt =
   simpset_lin_arith_tac ctxt;
 
 fun lin_arith_tac ctxt =
-  simpset_lin_arith_tac (empty_simpset ctxt);
+  simpset_lin_arith_tac (Simplifier.empty_simpset ctxt);
 
 
 

@@ -156,7 +156,7 @@ lemma ball_fun_contains_open_aux:
   shows "\<exists>U. open U \<and> x \<in> U \<and> U \<subseteq> {y. dist x y < e}"
 proof -
   have "\<exists>N::nat. 2^N > 8/e"
-    by (simp add: real_arch_pow)
+    by (simp add: arch_pow)
   then obtain N::nat where "2^N > 8/e" by auto
   define f where "f = e/4"
   have [simp]: "e>0" "f > 0" unfolding f_def using assms by auto
@@ -348,13 +348,12 @@ proof
     fix e assume [simp]: "e>(0::real)"
     have i: "\<exists>K. \<forall>n\<ge>K. dist (u n i) (x i) < e/4" for i
       by (rule metric_LIMSEQ_D, auto simp add: *)
-    have "\<exists>K. \<forall>i. \<forall>n\<ge>K i. dist (u n i) (x i) < e/4"
-      apply (rule choice) using i by auto
+    then have "\<exists>K. \<forall>i. \<forall>n\<ge>K i. dist (u n i) (x i) < e/4" by metis
     then obtain K where K: "\<And>i n. n \<ge> K i \<Longrightarrow> dist (u n i) (x i) < e/4"
       by blast
 
     have "\<exists>N::nat. 2^N > 4/e"
-      by (simp add: real_arch_pow)
+      by (simp add: arch_pow)
     then obtain N::nat where "2^N > 4/e" by auto
     define L where "L = Max {K (from_nat n)|n. n \<le> N}"
     have "dist (u k) x < e" if "k \<ge> L" for k

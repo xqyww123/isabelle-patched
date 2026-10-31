@@ -854,7 +854,9 @@ proposition indicator_measurable_on:
   assumes "S \<in> sets lebesgue"
   shows "indicat_real S measurable_on UNIV"
 proof -
-  { fix n::nat
+  have "\<exists>g E. continuous_on UNIV g \<and> (\<forall>x \<in> -E. g x = indicat_real S x) \<and>
+          (\<forall>x. norm(g x) \<le> 1) \<and> E \<in> sets lebesgue \<and> emeasure lebesgue E < ennreal (1 / 2^n)" for n
+  proof -
     let ?\<epsilon> = "(1::real) / (2 * 2^n)"
     have \<epsilon>: "?\<epsilon> > 0"
       by auto
@@ -884,12 +886,11 @@ proof -
       using \<open>closed T\<close> \<open>open U\<close> by auto
     obtain g where "continuous_on UNIV g" "\<And>x. x \<in> T \<union> -U \<Longrightarrow> g x = indicat_real S x" "\<And>x. norm(g x) \<le> 1"
       by (rule Tietze [OF 1 2, of 1]) auto
-    with le have "\<exists>g E. continuous_on UNIV g \<and> (\<forall>x \<in> -E. g x = indicat_real S x) \<and>
-                        (\<forall>x. norm(g x) \<le> 1) \<and> E \<in> sets lebesgue \<and> emeasure lebesgue E < ennreal (1 / 2^n)"
+    with le show ?thesis
       apply (rule_tac x=g in exI)
       apply (rule_tac x="-T \<inter> U" in exI)
       using \<open>S - T \<in> lmeasurable\<close> \<open>U - S \<in> lmeasurable\<close> eq by auto
-  }
+  qed
   then obtain g E where cont: "\<And>n. continuous_on UNIV (g n)"
     and geq: "\<And>n x. x \<in> - E n \<Longrightarrow> g n x = indicat_real S x"
     and ng1: "\<And>n x. norm(g n x) \<le> 1"
@@ -1205,15 +1206,17 @@ proof -
   proof (intro monoI le_funI)
     fix m n :: nat and x assume "m \<le> n"
     moreover
-    { fix d :: nat
+    have "f m x \<le> f(m + d) x" for d :: nat
+    proof -
       have "\<lfloor>2^d::real\<rfloor> * \<lfloor>2^m * (min (of_nat m) (u x))\<rfloor> \<le> \<lfloor>2^d * (2^m * (min (of_nat m) (u x)))\<rfloor>"
         by (rule le_mult_floor) (auto simp: nn)
       also have "\<dots> \<le> \<lfloor>2^d * (2^m *  (min (of_nat d + of_nat m) (u x)))\<rfloor>"
         by (intro floor_mono mult_mono min.mono)
            (auto simp: nn min_less_iff_disj of_nat_less_top)
-      finally have "f m x \<le> f(m + d) x"
+      finally show ?thesis
         unfolding f_def
-        by (auto simp: field_simps power_add * simp del: of_int_mult) }
+        by (auto simp: field_simps power_add * simp del: of_int_mult)
+    qed
     ultimately show "f m x \<le> f n x"
       by (auto simp: le_iff_add)
   qed
@@ -1232,30 +1235,29 @@ proof -
       unfolding f_def enn2real_def by measurable
   qed
   moreover
-  { fix x
-    have "(SUP i. (f i x)) = u x"
-    proof -
-      obtain n where "u x \<le> of_nat n" using real_arch_simple by auto
-      then have min_eq_r: "\<forall>\<^sub>F i in sequentially. min (real i) (u x) = u x"
-        by (auto simp: eventually_sequentially intro!: exI[of _ n] split: split_min)
-      have "(\<lambda>i. real_of_int \<lfloor>min (real i) (u x) * 2^i\<rfloor> / 2^i) \<longlonglongrightarrow> u x"
-      proof (rule tendsto_sandwich)
-        show "(\<lambda>n. u x - (1/2)^n) \<longlonglongrightarrow> u x"
-          by (auto intro!: tendsto_eq_intros LIMSEQ_power_zero)
-        show "\<forall>\<^sub>F n in sequentially. real_of_int \<lfloor>min (real n) (u x) * 2 ^ n\<rfloor> / 2 ^ n \<le> u x"
-          using min_eq_r by eventually_elim (auto simp: field_simps)
-        have *: "u x * (2 ^ n * 2 ^ n) \<le> 2^n + 2^n * real_of_int \<lfloor>u x * 2 ^ n\<rfloor>" for n
-          using real_of_int_floor_ge_diff_one[of "u x * 2^n", THEN mult_left_mono, of "2^n"]
-          by (auto simp: field_simps)
-        show "\<forall>\<^sub>F n in sequentially. u x - (1/2)^n \<le> real_of_int \<lfloor>min (real n) (u x) * 2 ^ n\<rfloor> / 2 ^ n"
-          using min_eq_r by eventually_elim (insert *, auto simp: field_simps)
-      qed auto
-      then have "(\<lambda>i. (f i x)) \<longlonglongrightarrow> u x"
-        by (simp add: f_def)
-      from LIMSEQ_unique LIMSEQ_incseq_SUP [OF bdd inc_f] this
-      show ?thesis
-        by blast
-    qed }
+  have "(SUP i. (f i x)) = u x" for x
+  proof -
+    obtain n where "u x \<le> of_nat n" using real_arch_simple by auto
+    then have min_eq_r: "\<forall>\<^sub>F i in sequentially. min (real i) (u x) = u x"
+      by (auto simp: eventually_sequentially intro!: exI[of _ n] split: split_min)
+    have "(\<lambda>i. real_of_int \<lfloor>min (real i) (u x) * 2^i\<rfloor> / 2^i) \<longlonglongrightarrow> u x"
+    proof (rule tendsto_sandwich)
+      show "(\<lambda>n. u x - (1/2)^n) \<longlonglongrightarrow> u x"
+        by (auto intro!: tendsto_eq_intros LIMSEQ_power_zero)
+      show "\<forall>\<^sub>F n in sequentially. real_of_int \<lfloor>min (real n) (u x) * 2 ^ n\<rfloor> / 2 ^ n \<le> u x"
+        using min_eq_r by eventually_elim (auto simp: field_simps)
+      have *: "u x * (2 ^ n * 2 ^ n) \<le> 2^n + 2^n * real_of_int \<lfloor>u x * 2 ^ n\<rfloor>" for n
+        using real_of_int_floor_ge_diff_one[of "u x * 2^n", THEN mult_left_mono, of "2^n"]
+        by (auto simp: field_simps)
+      show "\<forall>\<^sub>F n in sequentially. u x - (1/2)^n \<le> real_of_int \<lfloor>min (real n) (u x) * 2 ^ n\<rfloor> / 2 ^ n"
+        using min_eq_r by eventually_elim (insert *, auto simp: field_simps)
+    qed auto
+    then have "(\<lambda>i. (f i x)) \<longlonglongrightarrow> u x"
+      by (simp add: f_def)
+    from LIMSEQ_unique LIMSEQ_incseq_SUP [OF bdd inc_f] this
+    show ?thesis
+      by blast
+  qed
   ultimately show ?thesis
     by (intro exI [of _ "\<lambda>i x. f i x"]) (auto simp: \<open>incseq f\<close> bdd image_comp)
 qed
@@ -1314,8 +1316,6 @@ proof -
   qed auto
 qed
 
-
-
 lemma diff_null_sets_lebesgue: "\<lbrakk>N \<in> null_sets (lebesgue_on S); X-N \<in> sets (lebesgue_on S); N \<subseteq> X\<rbrakk>
     \<Longrightarrow> X \<in> sets (lebesgue_on S)"
   by (metis Int_Diff_Un inf.commute inf.orderE null_setsD2 sets.Un)
@@ -1356,7 +1356,35 @@ lemma lebesgue_measurable_diff_null:
   shows "f \<in> borel_measurable (lebesgue_on (-N)) \<longleftrightarrow> f \<in> borel_measurable lebesgue"
   by (simp add: Compl_eq_Diff_UNIV assms borel_measurable_diff_null lebesgue_on_UNIV_eq)
 
-
+lemma measurable_bounded_by_integrable_imp_absolutely_integrable_ae:
+  fixes f :: "'a::euclidean_space \<Rightarrow> 'b::euclidean_space"
+  assumes f_meas: "f \<in> borel_measurable (lebesgue_on S)"
+    and S_meas: "S \<in> sets lebesgue"
+    and g_int: "g integrable_on S"
+    and neg_T: "negligible T"
+    and bound: "\<And>x. x \<in> S - T \<Longrightarrow> norm (f x) \<le> g x"
+  shows "f absolutely_integrable_on S"
+proof -
+  have ST_meas: "S - T \<in> sets lebesgue"
+    using S_meas neg_T negligible_imp_sets by (metis sets.Diff)
+  have neg_ST: "negligible (S \<inter> T)"
+    using neg_T by (meson Int_lower2 negligible_subset)
+  have null_ST: "S \<inter> T \<in> null_sets (lebesgue_on S)"
+    using null_sets_restrict_space[of S lebesgue "S \<inter> T"] S_meas neg_ST
+    by (simp add: Int_commute negligible_iff_null_sets)
+  have f_meas_ST: "f \<in> borel_measurable (lebesgue_on (S - T))"
+    using borel_measurable_diff_null[OF null_ST S_meas] f_meas
+    by (metis Diff_Diff_Int Diff_subset Int_absorb1)
+  have g_int_ST: "g integrable_on (S - T)"
+    using integrable_spike_set_eq[of "S - T" S g] g_int neg_ST
+    by (simp add: Diff_Diff_Int)
+  have "f absolutely_integrable_on (S - T)"
+    by (rule measurable_bounded_by_integrable_imp_absolutely_integrable
+        [OF f_meas_ST ST_meas g_int_ST bound])
+  then show "f absolutely_integrable_on S"
+    using absolutely_integrable_spike_set_eq[of "S - T" S f] neg_ST
+    by (simp add: negligible_subset subset_iff)
+qed
 
 proposition measurable_on_imp_borel_measurable_lebesgue_UNIV:
   fixes f :: "'a::euclidean_space \<Rightarrow> 'b::euclidean_space"
@@ -1814,5 +1842,179 @@ lemma has_bochner_integral_null_eq[simp]:
   assumes "N \<in> null_sets lebesgue"
   shows "has_bochner_integral (lebesgue_on N) f i \<longleftrightarrow> i = 0"
   using assms has_bochner_integral_eq by blast
+
+
+lemma lebesgue_measurable_ordinate_set_le:
+  fixes f :: "real \<Rightarrow> real"
+  assumes "f measurable_on UNIV"
+  shows "{(x, y). y \<le> f x} \<in> sets (lebesgue :: (real \<times> real) measure)"
+proof -
+  have f_meas: "f \<in> borel_measurable lebesgue"
+    using assms measurable_on_imp_borel_measurable_lebesgue_UNIV by blast
+  \<comment> \<open>Step 1: rewrite as countable intersection\<close>
+  have eq: "{(x, y). y \<le> f x} =
+    (\<Inter>q \<in> \<rat>. {(x, y). f x < q \<longrightarrow> y < q})"
+  proof (intro equalityI subsetI)
+    fix p :: "real \<times> real"
+    assume "p \<in> {(x, y). y \<le> f x}"
+    then obtain x y where p: "p = (x, y)" "y \<le> f x" by auto
+    show "p \<in> (\<Inter>q\<in>\<rat>. {(x, y). f x < q \<longrightarrow> y < q})"
+      using p by (auto intro: order_le_less_trans)
+  next
+    fix p :: "real \<times> real"
+    assume H: "p \<in> (\<Inter>q\<in>\<rat>. {(x, y). f x < q \<longrightarrow> y < q})"
+    then obtain x y where p: "p = (x, y)" by (cases p)
+    have *: "\<And>q. q \<in> \<rat> \<Longrightarrow> f x < q \<Longrightarrow> y < q"
+      using H p by auto
+    have "y \<le> f x"
+      using le_iff_forall_rat_less_imp[of y "f x"] * by auto
+    then show "p \<in> {(x, y). y \<le> f x}" using p by auto
+  qed
+  \<comment> \<open>Step 2: each set in the intersection is measurable\<close>
+  have meas_q: "\<And>q. q \<in> \<rat> \<Longrightarrow> {(x, y). f x < q \<longrightarrow> y < q}
+      \<in> sets (lebesgue :: (real \<times> real) measure)"
+  proof -
+    fix q :: real assume "q \<in> \<rat>"
+    have decomp: "{(x :: real, y :: real). f x < q \<longrightarrow> y < q} =
+      {(x, y). q \<le> f x} \<union> {(x, y). y < q}"
+      by auto
+    \<comment> \<open>Part A: @{term "{(x,y). y < q}"} is Borel measurable\<close>
+    have "{(x :: real, y :: real). y < q} = (UNIV :: real set) \<times> {..<q}"
+      by auto
+    moreover have "{..<q} \<in> sets (borel :: real measure)"
+      by (rule lessThan_borel)
+    moreover have "(UNIV :: real set) \<in> sets (borel :: real measure)"
+      using sets.top[of "borel :: real measure"] by (simp add: space_borel)
+    ultimately have A: "{(x :: real, y :: real). y < q}
+        \<in> sets (lebesgue :: (real \<times> real) measure)"
+      using borel_Times sets_completionI_sets
+      by (metis sets_lborel)
+    \<comment> \<open>Part B: @{term "{(x,y). q \<le> f x}"} is Lebesgue measurable\<close>
+    have "{x :: real. f x \<in> {q..}} \<in> sets lebesgue"
+      using lebesgue_measurable_vimage_borel[OF f_meas atLeast_borel] .
+    then have "{x :: real. q \<le> f x} \<in> sets lebesgue"
+      by (simp add: atLeast_def)
+    then have B: "{(x :: real, y :: real). q \<le> f x}
+        \<in> sets (lebesgue :: (real \<times> real) measure)"
+    proof -
+      assume "{x :: real. q \<le> f x} \<in> sets lebesgue"
+      moreover have "{(x :: real, y :: real). q \<le> f x} =
+        {x. q \<le> f x} \<times> (UNIV :: real set)"
+        by auto
+      ultimately show ?thesis
+        using lebesgue_measurable_Times_UNIV by simp
+    qed
+    show "{(x, y). f x < q \<longrightarrow> y < q} \<in> sets (lebesgue :: (real \<times> real) measure)"
+      using decomp A B sets.Un by metis
+  qed
+
+  show ?thesis
+    unfolding eq
+  proof (rule sets.countable_INT'[OF countable_rat])
+    show "\<rat> \<noteq> ({}::real set)" using Rats_0 by blast
+    show "(\<lambda>q. {(x, y). f x < q \<longrightarrow> y < q}) ` \<rat>
+        \<subseteq> sets (lebesgue :: (real \<times> real) measure)"
+      using meas_q by auto
+  qed
+qed
+
+lemma lebesgue_measurable_ordinate_set_lt:
+  fixes f :: "real \<Rightarrow> real"
+  assumes "f measurable_on UNIV"
+  shows "{(x, y). y < f x} \<in> sets (lebesgue :: (real \<times> real) measure)"
+proof -
+  have f_meas: "f \<in> borel_measurable lebesgue"
+    using assms measurable_on_imp_borel_measurable_lebesgue_UNIV by blast
+  \<comment> \<open>Express as countable union using density of rationals\<close>
+  have "\<And>a b. b < f a \<Longrightarrow> \<exists>x\<in>\<rat>. x \<le> f a \<and> b < x"
+    by (meson Rats_dense_in_real less_le)
+  then have eq: "{(x, y). y < f x} = (\<Union>q \<in> \<rat>. {x. q \<le> f x} \<times> {y. y < q})"
+    by auto
+  \<comment> \<open>Each set in the union is measurable\<close>
+  have meas_q: "\<And>q. q \<in> \<rat> \<Longrightarrow> {x. q \<le> f x} \<times> {y :: real. y < q}
+      \<in> sets (lebesgue :: (real \<times> real) measure)"
+  proof -
+    fix q :: real assume "q \<in> \<rat>"
+    have A: "{y :: real. y < q} \<in> sets lebesgue"
+      using sets_completionI_sets[OF lessThan_borel] sets_lborel by fastforce
+    have "{x :: real. f x \<in> {q..}} \<in> sets lebesgue"
+      using lebesgue_measurable_vimage_borel[OF f_meas atLeast_borel] .
+    then have B: "{x :: real. q \<le> f x} \<in> sets lebesgue"
+      by (simp add: atLeast_def)
+    show "{x. q \<le> f x} \<times> {y :: real. y < q} \<in> sets (lebesgue :: (real \<times> real) measure)"
+      using lebesgue_measurable_Times_UNIV[OF B] lebesgue_measurable_UNIV_Times[OF A]
+        sets.Int[of "_ \<times> UNIV" _ "UNIV \<times> {y. y < q}"]
+      by (simp add: Times_Int_Times)
+  qed
+  show ?thesis
+    unfolding eq
+    by (intro sets.countable_UN''[OF countable_rat]) (use meas_q in auto)
+qed
+
+lemma negligible_measurable_function_graph:
+  fixes f :: "real \<Rightarrow> real"
+  assumes "f measurable_on UNIV"
+  shows "negligible {(x, y). f x = y}"
+proof -
+  \<comment> \<open>Extract continuous approximants\<close>
+  obtain N g where neg_N: "negligible N" "N \<in> sets lebesgue"
+    and g_cont: "\<And>n. continuous_on UNIV (g n)"
+    and g_conv: "\<And>x. x \<notin> N \<Longrightarrow> (\<lambda>n. g n x) \<longlonglongrightarrow> f x"
+    using assms[unfolded measurable_on_def]
+    using negligible_imp_sets by auto
+  \<comment> \<open>Define the Borel-measurable pointwise limit\<close>
+  define h where "h x = lim (\<lambda>n. g n x)" for x
+  have g_borel: "\<And>n. g n \<in> borel_measurable (borel :: real measure)"
+    using g_cont borel_measurable_continuous_onI by blast
+  have h_borel: "h \<in> borel_measurable (borel :: real measure)"
+    unfolding h_def by (simp add: borel_measurable_lim_metric g_borel)
+  have h_eq: "\<And>x. x \<notin> N \<Longrightarrow> h x = f x"
+    unfolding h_def using g_conv limI by blast
+
+  have graph_sub: "{(x, y). f x = y} \<subseteq> {(x, y). h x = y} \<union> N \<times> UNIV"
+    by (force simp: h_eq)
+  \<comment> \<open>The graph of h is in @{term \<open>sets (lborel \<Otimes>\<^sub>M lborel)\<close>} and null by Fubini\<close>
+  have h_meas_lborel: "h \<in> borel_measurable lborel"
+    using h_borel by (simp add: sets_lborel)
+  have diff_meas: "(\<lambda>p. h (fst p) - snd p) \<in> borel_measurable (lborel \<Otimes>\<^sub>M lborel)"
+  proof -
+    have "(\<lambda>p. h (fst p)) \<in> borel_measurable (lborel \<Otimes>\<^sub>M lborel)"
+      using measurable_comp[OF measurable_fst, of h lborel borel] h_meas_lborel
+      by (simp add: comp_def)
+    moreover have "(\<lambda>p. snd p :: real) \<in> borel_measurable (lborel \<Otimes>\<^sub>M lborel)"
+      using measurable_snd measurable_lborel1 by blast
+    ultimately show ?thesis by (rule borel_measurable_diff)
+  qed
+  have graph_h_borel: "{(x, y). h x = y} \<in> sets (lborel \<Otimes>\<^sub>M lborel)"
+  proof -
+    have "{(x, y). h x = y} =
+      (\<lambda>p. h (fst p) - snd p) -` {0} \<inter> space (lborel \<Otimes>\<^sub>M lborel)"
+      by (auto simp: space_pair_measure)
+    then show ?thesis using borel_measurable_vimage[OF diff_meas, of 0] by simp
+  qed
+  have "emeasure (lborel \<Otimes>\<^sub>M lborel) {(x, y). h x = y} = 0"
+    using lborel.emeasure_pair_measure_alt[OF graph_h_borel] by simp
+  then have graph_h_null: "{(x, y). h x = y} \<in> null_sets (lborel :: (real \<times> real) measure)"
+    by (metis graph_h_borel lborel_prod null_setsI)
+  \<comment> \<open>@{term "N \<times> (UNIV::real set)"} is contained in a null set in @{term lborel}\<close>
+  obtain N' where N': "N' \<in> null_sets lborel" "N \<subseteq> N'"
+    by (metis null_sets_completion_iff2 neg_N(1) negligible_iff_null_sets)
+  have "N' \<times> (UNIV :: real set) \<in> null_sets (lborel \<Otimes>\<^sub>M lborel)"
+    using lborel.times_in_null_sets1[OF N'(1) sets.top] by force
+  then have N'_cross_null: "N' \<times> (UNIV :: real set) \<in> null_sets (lborel :: (real \<times> real) measure)"
+    using lborel_prod by metis
+  have N_cross_sub: "N \<times> (UNIV :: real set) \<subseteq> N' \<times> (UNIV :: real set)"
+    using N'(2) by auto
+  \<comment> \<open>Combine: the graph of @{term f} is contained in a null set\<close>
+  have "{(x, y). h x = y} \<union> N' \<times> UNIV \<in> null_sets (lborel :: (real \<times> real) measure)"
+    using graph_h_null N'_cross_null by blast
+  moreover have "{(x, y). f x = y} \<subseteq> {(x, y). h x = y} \<union> N' \<times> UNIV"
+    using graph_sub N_cross_sub
+    by (meson Un_mono dual_order.refl dual_order.trans)
+  ultimately have "{(x, y). f x = y} \<in> null_sets (lebesgue :: (real \<times> real) measure)"
+    by (meson completion.complete2 null_sets_completionI)
+  then show ?thesis
+    by (simp add: negligible_iff_null_sets)
+qed
 
 end

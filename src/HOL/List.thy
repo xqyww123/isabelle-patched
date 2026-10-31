@@ -279,8 +279,8 @@ text \<open>
 abbreviation length :: "'a list \<Rightarrow> nat" where
 "length \<equiv> size"
 
-definition enumerate :: "nat \<Rightarrow> 'a list \<Rightarrow> (nat \<times> 'a) list" where
-enumerate_eq_zip: "enumerate n xs = zip [n..<n + length xs] xs"
+definition indexed_from :: "nat \<Rightarrow> 'a list \<Rightarrow> (nat \<times> 'a) list" where
+indexed_from_eq_zip: "indexed_from n xs = zip [n..<n + length xs] xs"
 
 primrec rotate1 :: "'a list \<Rightarrow> 'a list" where
 "rotate1 [] = []" |
@@ -347,7 +347,7 @@ text\<open>
 @{lemma "successively (\<noteq>) [True,False,True,False]" by simp}\\
 @{lemma "zip [a,b,c] [x,y,z] = [(a,x),(b,y),(c,z)]" by simp}\\
 @{lemma "zip [a,b] [x,y,z] = [(a,x),(b,y)]" by simp}\\
-@{lemma "enumerate 3 [a,b,c] = [(3,a),(4,b),(5,c)]" by normalization}\\
+@{lemma "indexed_from 3 [a,b,c] = [(3,a),(4,b),(5,c)]" by normalization}\\
 @{lemma "List.product [a,b] [c,d] = [(a, c), (a, d), (b, c), (b, d)]" by simp}\\
 @{lemma "product_lists [[a,b], [c], [d,e]] = [[a,c,d], [a,c,e], [b,c,d], [b,c,e]]" by simp}\\
 @{lemma "splice [a,b,c] [x,y,z] = [a,x,b,y,c,z]" by simp}\\
@@ -442,6 +442,12 @@ lemma strict_sorted_imp_sorted: "sorted_wrt (<) xs \<Longrightarrow> sorted xs"
   by (auto simp: strict_sorted_iff)
 
 end
+
+
+subsubsection \<open>List homomorphism\<close>
+
+definition hom_list :: "('a list \<Rightarrow> 'b list) \<Rightarrow> bool" where
+"hom_list h = (\<forall>xs ys. h (xs @ ys) = h xs @ h ys)"
 
 
 subsubsection \<open>List comprehension\<close>
@@ -940,6 +946,8 @@ by (rule Eq_FalseI) auto
 
 subsubsection \<open>\<open>@\<close> -- append\<close>
 
+named_theorems append_eq_iffs "iffs for decomposing equations involving (@) - may create new vars"
+
 global_interpretation append: monoid append Nil
 proof
   fix xs ys zs :: "'a list"
@@ -970,7 +978,7 @@ lemma append_eq_append_conv [simp]:
   \<Longrightarrow> (xs@us = ys@vs) = (xs=ys \<and> us=vs)"
   by (induct xs arbitrary: ys; case_tac ys; force)
 
-lemma append_eq_append_conv2: "(xs @ ys = zs @ ts) =
+lemma append_eq_append_conv2[append_eq_iffs]: "(xs @ ys = zs @ ts) =
   (\<exists>us. xs = zs @ us \<and> us @ ys = ts \<or> xs @ us = zs \<and> ys = us @ ts)"
 proof (induct xs arbitrary: ys zs ts)
   case (Cons x xs)
@@ -1010,11 +1018,11 @@ by (simp add: tl_append split: list.split)
 lemma tl_append_if: "tl (xs @ ys) = (if xs = [] then tl ys else tl xs @ ys)"
 by (simp)
 
-lemma Cons_eq_append_conv: "x#xs = ys@zs =
+lemma Cons_eq_append_conv[append_eq_iffs]: "x#xs = ys@zs =
  (ys = [] \<and> x#xs = zs \<or> (\<exists>ys'. x#ys' = ys \<and> xs = ys'@zs))"
 by(cases ys) auto
 
-lemma append_eq_Cons_conv: "(ys@zs = x#xs) =
+lemma append_eq_Cons_conv[append_eq_iffs]: "(ys@zs = x#xs) =
  (ys = [] \<and> zs = x#xs \<or> (\<exists>ys'. ys = x#ys' \<and> ys'@zs = xs))"
 by(cases ys) auto
 
@@ -1035,6 +1043,10 @@ lemma Cons_eq_appendI: "\<lbrakk>x # xs1 = ys; xs = xs1 @ zs\<rbrakk> \<Longrigh
 
 lemma append_eq_appendI: "\<lbrakk>xs @ xs1 = zs; ys = xs1 @ us\<rbrakk> \<Longrightarrow> xs @ ys = zs @ us"
   by auto
+
+
+lemma hom_list_Nil: "hom_list h \<Longrightarrow> h [] = []"
+unfolding hom_list_def by (metis self_append_conv)
 
 
 text \<open>
@@ -1060,8 +1072,9 @@ simproc_setup list_eq ("(xs::'a list) = ys")  = \<open>
       | butlast xs = Const(\<^const_name>\<open>Nil\<close>, fastype_of xs);
 
     val rearr_ss =
-      simpset_of (put_simpset HOL_basic_ss \<^context>
-        |> Simplifier.add_simps [@{thm append_assoc}, @{thm append_Nil}, @{thm append_Cons}]);
+      HOL_basic_ss
+      |> Simplifier.simpset_map \<^context>
+        (Simplifier.add_simps @{thms append_assoc append_Nil append_Cons});
 
     fun list_eq ctxt (F as (eq as Const(_,eqT)) $ lhs $ rhs) =
       let
@@ -1152,6 +1165,34 @@ next
   with Cons have "length zs = length ys" by blast
   with xs show ?case by simp
 qed
+
+lemma map_eq_append_conv[append_eq_iffs]:
+  "map f xs = ys @ zs \<longleftrightarrow> (\<exists>us vs. xs = us @ vs \<and> ys = map f us \<and> zs = map f vs)"
+proof(induction xs arbitrary: ys)
+  case Nil
+  then show ?case by(auto)
+next
+  case IH: (Cons x xs)
+  show ?case (is "?L = (\<exists>us. ?R us)")
+  proof
+    assume ?L
+    show "\<exists>us. ?R us"
+    proof (cases ys)
+      case Nil then show ?thesis using \<open>?L\<close> by force
+    next
+      case [simp]: (Cons y ys')
+      with  \<open>?L\<close> have [simp]: "y = f x" and *: "map f xs = ys' @ zs" by simp+
+      from IH * obtain us vs where [simp]: "xs = us @ vs \<and> ys' = map f us \<and> zs = map f vs" by blast
+      then have "?R (x#us)" by simp
+      then show ?thesis by blast
+    qed
+  next
+    assume "\<exists>us. ?R us"
+    then show ?L using IH map_eq_Cons_conv[of f "x # xs" "f x" "map f xs"] by force
+  qed
+qed
+
+lemmas append_eq_map_conv[append_eq_iffs] = map_eq_append_conv[THEN eq_iff_swap]
 
 lemma map_inj_on:
   assumes map: "map f xs = map f ys" and inj: "inj_on f (set xs Un set ys)"
@@ -1505,7 +1546,7 @@ lemma set_minus_filter_out:
 lemma append_Cons_eq_iff:
   "\<lbrakk> x \<notin> set xs; x \<notin> set ys \<rbrakk> \<Longrightarrow>
    xs @ x # ys = xs' @ x # ys' \<longleftrightarrow> (xs = xs' \<and> ys = ys')"
-by(auto simp: append_eq_Cons_conv Cons_eq_append_conv append_eq_append_conv2)
+by(auto simp: append_eq_iffs)
 
 
 subsubsection \<open>\<^const>\<open>concat\<close>\<close>
@@ -1569,6 +1610,26 @@ lemma concat_eq_append_conv:
 lemma hd_concat: "\<lbrakk>xs \<noteq> []; hd xs \<noteq> []\<rbrakk> \<Longrightarrow> hd (concat xs) = hd (hd xs)"
   by (metis concat.simps(2) hd_Cons_tl hd_append2)
 
+lemma map_eq_concat_iff:
+  "map f xs = concat yss \<longleftrightarrow> (\<exists>xss. xs = concat xss \<and> yss = map (map f) xss)"
+proof(induction yss arbitrary: xs)
+  case Nil
+  then show ?case by auto
+next
+  case (Cons ys yss)
+  show ?case (is "?L = (\<exists>xss. ?R xss)")
+  proof
+    assume ?L
+    then obtain xs1 xs2 where "xs = xs1 @ xs2" and mapf12: "map f xs1 = ys" "map f xs2 = concat yss"
+      by (auto simp: map_eq_append_conv)
+    with Cons.IH[of xs2] obtain xss where "xs2 = concat xss" "yss = map (map f) xss" by blast
+    then have "?R (xs1#xss)" using \<open>xs = _\<close> \<open>_ = ys\<close> by simp
+    then show "(\<exists>xss. ?R xss)" ..
+  next
+    assume "\<exists>xss. ?R xss"
+    then show ?L by (auto simp add: map_concat)
+  qed
+qed
 
 simproc_setup list_neq ("(xs::'a list) = ys") = \<open>
 (*
@@ -1588,7 +1649,7 @@ fun len (Const(\<^const_name>\<open>Nil\<close>,_)) acc = acc
     = len (Const(\<^const_name>\<open>concat\<close>,T) $ xss) acc
   | len t (ts,n) = (t::ts,n);
 
-val ss = simpset_of \<^context>;
+val ss = Simplifier.simpset_of \<^context>;
 
 fun list_neq ctxt ct =
   let
@@ -2283,6 +2344,14 @@ next
   then show ?case by (cases xs) simp_all
 qed
 
+lemma take_cong_le:
+  "take n xs = take n ys \<Longrightarrow> m \<le> n \<Longrightarrow> take m xs = take m ys"
+by (metis min_def take_take)
+
+lemma drop_cong_le:
+  "drop n xs = drop n ys \<Longrightarrow> n \<le> m \<Longrightarrow> drop m xs = drop m ys"
+using drop_drop[of "m-n" n xs] drop_drop[of "m-n" n ys] by simp
+
 lemma take_map: "take n (map f xs) = map f (take n xs)"
 proof (induct n arbitrary: xs)
   case 0
@@ -2396,18 +2465,6 @@ proof (induct xs arbitrary: zs)
   case (Cons x xs zs) then show ?case
     by (cases zs, auto)
 qed auto
-
-lemma map_eq_append_conv:
-  "map f xs = ys @ zs \<longleftrightarrow> (\<exists>us vs. xs = us @ vs \<and> ys = map f us \<and> zs = map f vs)"
-proof -
-  have "map f xs \<noteq> ys @ zs \<and> map f xs \<noteq> ys @ zs \<or> map f xs \<noteq> ys @ zs \<or> map f xs = ys @ zs \<and>
-    (\<exists>bs bsa. xs = bs @ bsa \<and> ys = map f bs \<and> zs = map f bsa)"
-    by (metis append_eq_conv_conj append_take_drop_id drop_map take_map)
-  then show ?thesis
-    using map_append by blast
-qed
-
-lemmas append_eq_map_conv = map_eq_append_conv[THEN eq_iff_swap]
 
 lemma take_add:  "take (i+j) xs = take i xs @ take j (drop i xs)"
 proof (induct xs arbitrary: i)
@@ -3321,7 +3378,7 @@ proof -
   show ?thesis by (simp add: eq_fold fold_set_fold)
 qed
 
-lemma (in complete_lattice) Inf_set_fold:
+lemma (in complete_lattice) Inf_set_fold [code]:
   "Inf (set xs) = fold inf xs top"
 proof -
   interpret comp_fun_idem "inf :: 'a \<Rightarrow> 'a \<Rightarrow> 'a"
@@ -3329,9 +3386,9 @@ proof -
   show ?thesis by (simp add: Inf_fold_inf fold_set_fold inf_commute)
 qed
 
-declare Inf_set_fold [where 'a = "'a set", code]
+declare Inf_set_fold [where 'a = \<open>'a set\<close>, code]
 
-lemma (in complete_lattice) Sup_set_fold:
+lemma (in complete_lattice) Sup_set_fold [code]:
   "Sup (set xs) = fold sup xs bot"
 proof -
   interpret comp_fun_idem "sup :: 'a \<Rightarrow> 'a \<Rightarrow> 'a"
@@ -3339,7 +3396,7 @@ proof -
   show ?thesis by (simp add: Sup_fold_sup fold_set_fold sup_commute)
 qed
 
-declare Sup_set_fold [where 'a = "'a set", code]
+declare Sup_set_fold [where 'a = \<open>'a set\<close>, code]
 
 lemma (in complete_lattice) INF_set_fold:
   "\<Sqinter>(f ` set xs) = fold (inf \<circ> f) xs top"
@@ -3514,8 +3571,20 @@ lemma nth_equalityI:
   by (frule nth_take_lemma [OF le_refl eq_imp_le]) simp_all
 
 lemma map_nth:
-  "map (\<lambda>i. xs ! i) [0..<length xs] = xs"
+  "map (nth xs) [0..<length xs] = xs"
   by (rule nth_equalityI, auto)
+
+lemma map_nth_upt: assumes "n \<le> length xs"
+  shows "map (nth xs) [m..<n] = take (n-m) (drop m xs)"
+proof -
+  have "map (nth xs) [m..<n] =  take (n-m) (drop m (map (nth xs) [0..<length xs]))"
+    using assms take_map[of n "(!) xs"] drop_take[of m n "map ((!) xs) [0..<length xs]"]
+    by(simp add: drop_map)
+  thus ?thesis by (metis map_nth)
+qed
+
+corollary map_nth_upt0: "n \<le> length xs \<Longrightarrow> map (nth xs) [0..<n] = take n xs"
+by(simp add: map_nth_upt)
 
 lemma list_all2_antisym:
   "\<lbrakk> (\<And>x y. \<lbrakk>P x y; Q y x\<rbrakk> \<Longrightarrow> x = y); list_all2 P xs ys; list_all2 Q ys xs \<rbrakk>
@@ -4491,7 +4560,9 @@ by (induct xs) simp_all
 
 subsubsection \<open>\<^const>\<open>count_list\<close>\<close>
 
-text \<open>This library is intentionally minimal. See the remark about multisets at the point above where @{const count_list} is defined.\<close>
+text \<open>This library is intentionally minimal.
+See the remark about multisets at the point above where @{const count_list} is defined.
+However, dragging in multisets can be overkill, so we should not be too minimal here.\<close>
 
 lemma count_list_append[simp]: "count_list (xs @ ys) x = count_list xs x + count_list ys x"
 by (induction xs) simp_all
@@ -4548,6 +4619,9 @@ qed
 
 lemma count_list_eq_length_filter: "count_list xs y = length(filter ((=) y) xs)"
 by (induction xs) auto
+
+lemma count_list_replicate[simp]: "count_list (replicate n x) y = (if x = y then n else 0)"
+by (induction n) auto
 
 lemma split_list_cycles:
   "\<exists>pref xss. xs = pref @ concat xss \<and> x \<notin> set pref \<and> (\<forall>ys \<in> set xss. \<exists>zs. ys = x # zs)"
@@ -5072,62 +5146,64 @@ lemma fold_replicate [simp]:
 by (subst foldr_fold [symmetric]) simp_all
 
 
-subsubsection \<open>\<^const>\<open>enumerate\<close>\<close>
+subsubsection \<open>\<^const>\<open>indexed_from\<close>\<close>
 
-lemma enumerate_simps [simp, code]:
-  "enumerate n [] = []"
-  "enumerate n (x # xs) = (n, x) # enumerate (Suc n) xs"
-  by (simp_all add: enumerate_eq_zip upt_rec)
+lemma indexed_from_simps [simp, code]:
+  "indexed_from n [] = []"
+  "indexed_from n (x # xs) = (n, x) # indexed_from (Suc n) xs"
+  by (simp_all add: indexed_from_eq_zip upt_rec)
 
-lemma length_enumerate [simp]:
-  "length (enumerate n xs) = length xs"
-by (simp add: enumerate_eq_zip)
+lemma length_indexed_from [simp]:
+  "length (indexed_from n xs) = length xs"
+by (simp add: indexed_from_eq_zip)
 
-lemma map_fst_enumerate [simp]:
-  "map fst (enumerate n xs) = [n..<n + length xs]"
-by (simp add: enumerate_eq_zip)
+lemma map_fst_indexed_from [simp]:
+  "map fst (indexed_from n xs) = [n..<n + length xs]"
+by (simp add: indexed_from_eq_zip)
 
-lemma map_snd_enumerate [simp]:
-  "map snd (enumerate n xs) = xs"
-by (simp add: enumerate_eq_zip)
+lemma map_snd_indexed_from [simp]:
+  "map snd (indexed_from n xs) = xs"
+by (simp add: indexed_from_eq_zip)
 
-lemma in_set_enumerate_eq:
-  "p \<in> set (enumerate n xs) \<longleftrightarrow> n \<le> fst p \<and> fst p < length xs + n \<and> nth xs (fst p - n) = snd p"
+lemma in_set_indexed_from_eq:
+  "p \<in> set (indexed_from n xs) \<longleftrightarrow> n \<le> fst p \<and> fst p < length xs + n \<and> nth xs (fst p - n) = snd p"
 proof -
-  { fix m
-    assume "n \<le> m"
-    moreover assume "m < length xs + n"
-    ultimately have "[n..<n + length xs] ! (m - n) = m \<and>
+  have "\<exists>q. [n..<n + length xs] ! q = m \<and> xs ! q = xs ! (m - n) \<and> q < length xs"
+    if "n \<le> m" "m < length xs + n" for m
+  proof -
+    from that have "[n..<n + length xs] ! (m - n) = m \<and>
       xs ! (m - n) = xs ! (m - n) \<and> m - n < length xs" by auto
-    then have "\<exists>q. [n..<n + length xs] ! q = m \<and>
-        xs ! q = xs ! (m - n) \<and> q < length xs" ..
-  } then show ?thesis by (cases p) (auto simp add: enumerate_eq_zip in_set_zip)
+    then show ?thesis
+      by auto
+  qed
+  then show ?thesis
+    by (cases p) (auto simp add: indexed_from_eq_zip in_set_zip)
 qed
 
-lemma nth_enumerate_eq: "m < length xs \<Longrightarrow> enumerate n xs ! m = (n + m, xs ! m)"
-by (simp add: enumerate_eq_zip)
+lemma nth_indexed_from_eq: "m < length xs \<Longrightarrow> indexed_from n xs ! m = (n + m, xs ! m)"
+by (simp add: indexed_from_eq_zip)
 
-lemma enumerate_replicate_eq:
-  "enumerate n (replicate m a) = map (\<lambda>q. (q, a)) [n..<n + m]"
+lemma indexed_from_replicate_eq:
+  "indexed_from n (replicate m a) = map (\<lambda>q. (q, a)) [n..<n + m]"
 by (rule pair_list_eqI)
-   (simp_all add: enumerate_eq_zip comp_def map_replicate_const)
+   (simp_all add: indexed_from_eq_zip comp_def map_replicate_const)
 
-lemma enumerate_Suc_eq:
-  "enumerate (Suc n) xs = map (apfst Suc) (enumerate n xs)"
+lemma indexed_from_Suc_eq:
+  "indexed_from (Suc n) xs = map (apfst Suc) (indexed_from n xs)"
 by (rule pair_list_eqI)
    (simp_all add: not_le, simp del: map_map add: map_Suc_upt map_map [symmetric])
 
-lemma distinct_enumerate [simp]:
-  "distinct (enumerate n xs)"
-by (simp add: enumerate_eq_zip distinct_zipI1)
+lemma distinct_indexed_from [simp]:
+  "distinct (indexed_from n xs)"
+by (simp add: indexed_from_eq_zip distinct_zipI1)
 
-lemma enumerate_append_eq:
-  "enumerate n (xs @ ys) = enumerate n xs @ enumerate (n + length xs) ys"
-  by (simp add: enumerate_eq_zip add.assoc zip_append2)
+lemma indexed_from_append_eq:
+  "indexed_from n (xs @ ys) = indexed_from n xs @ indexed_from (n + length xs) ys"
+  by (simp add: indexed_from_eq_zip add.assoc zip_append2)
 
-lemma enumerate_map_upt:
-  "enumerate n (map f [n..<m]) = map (\<lambda>k. (k, f k)) [n..<m]"
-by (cases "n \<le> m") (simp_all add: zip_map2 zip_same_conv_map enumerate_eq_zip)
+lemma indexed_from_map_upt:
+  "indexed_from n (map f [n..<m]) = map (\<lambda>k. (k, f k)) [n..<m]"
+by (cases "n \<le> m") (simp_all add: zip_map2 zip_same_conv_map indexed_from_eq_zip)
 
 
 subsubsection \<open>\<^const>\<open>rotate1\<close> and \<^const>\<open>rotate\<close>\<close>
@@ -6374,8 +6450,8 @@ next
   qed
 qed
 
-lemma sorted_enumerate [simp]: "sorted (map fst (enumerate n xs))"
-by (simp add: enumerate_eq_zip)
+lemma sorted_indexed_from [simp]: "sorted (map fst (indexed_from n xs))"
+by (simp add: indexed_from_eq_zip)
 
 lemma sorted_insort_is_snoc: "sorted xs \<Longrightarrow> \<forall>x \<in> set xs. a \<ge> x \<Longrightarrow> insort a xs = xs @ [a]"
  by (induct xs) (auto dest!: insort_is_Cons)
@@ -8487,6 +8563,9 @@ lemma map_filter_simps [simp, code, no_atp]:
 lemma map_filter_map_filter [code_unfold]:
   \<open>map f (filter P xs) = map_filter (\<lambda>x. if P x then Some (f x) else None) xs\<close>
   by (simp add: map_filter_def)
+
+lemma map_map_filter: "map f (map_filter g xs) = map_filter (map_option f \<circ> g) xs"
+  by (induction xs) (auto simp: option.case_eq_if)
 
 hide_const (open) map_filter
 

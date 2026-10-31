@@ -737,7 +737,7 @@ fun save_state _ (time_state as (_, {dirty_facts = SOME [], ...})) = time_state
        {access_G = access_G, xtabs = xtabs, ffds = ffds, freqs = freqs, dirty_facts = SOME []})
     end
 
-val global_state = Synchronized.var "Sledgehammer_MaSh.global_state" (Time.zeroTime, empty_state)
+val global_state = Synchronized.var \<^unchecked_name>\<open>Sledgehammer_MaSh.global_state\<close> (Time.zeroTime, empty_state)
 
 in
 
@@ -1004,10 +1004,10 @@ val typedef_ths =
   |> map nickname_of_thm
 
 fun is_size_def [dep] th =
-    (case first_field ".rec" dep of
+    (case first_field_substring ".rec" (Substring.full dep) of
       SOME (pref, _) =>
-      (case first_field ".size" (nickname_of_thm th) of
-        SOME (pref', _) => pref = pref'
+      (case first_field_substring ".size" (Substring.full (nickname_of_thm th)) of
+        SOME (pref', _) => Substring.compare (pref, pref') = EQUAL
       | NONE => false)
     | NONE => false)
   | is_size_def _ _ = false

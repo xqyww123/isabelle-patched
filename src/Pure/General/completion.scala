@@ -57,9 +57,9 @@ object Completion {
   object History {
     val empty: History = new History()
 
-    def load(): History = {
+    def load(log: Logger): History = {
       def ignore_error(msg: String): Unit =
-        Output.warning("Ignoring bad content of file " + COMPLETION_HISTORY +
+        log.warning("Ignoring bad content of file " + COMPLETION_HISTORY +
           if_proper(msg, "\n" + msg))
 
       val content =
@@ -111,8 +111,8 @@ object Completion {
     private var history = History.empty
     def value: History = synchronized { history }
 
-    def load(): Unit = {
-      val h = History.load()
+    def load(log: Logger): Unit = {
+      val h = History.load(log)
       synchronized { history = h }
     }
 
@@ -185,27 +185,27 @@ object Completion {
     def complete(
       range: Text.Range,
       history: Completion.History,
-      unicode: Boolean,
+      unicode_symbols: Boolean,
       original: String
     ): Option[Completion.Result] = {
-      def decode(s: String): String = if (unicode) Symbol.decode(s) else s
+      def output(s: String): String = Symbol.output(unicode_symbols, s)
       val items =
         for {
           (xname, (kind, name)) <- names
-          xname1 = decode(xname)
+          xname1 = output(xname)
           if xname1 != original
           (full_name, descr_name) =
-            if (kind == "") (name, quote(decode(name)))
+            if (kind == "") (name, quote(output(name)))
             else
              (Long_Name.qualify(kind, name),
-              Word.informal(kind) + (if (xname == name) "" else " " + quote(decode(name))))
+              Word.informal(kind) + (if (xname == name) "" else " " + quote(output(name))))
         } yield {
           val description = List(xname1, "(" + descr_name + ")")
           val replacement =
             List(original, xname1).map(Token.explode(Keyword.Keywords.empty, _)) match {
               case List(List(tok), _) if tok.kind == Token.Kind.CARTOUCHE =>
-                Symbol.cartouche_decoded(xname1)
-              case List(_, List(tok)) if tok.is_name => xname1
+                Symbol.output_cartouche(unicode_symbols, xname1)
+              case List(_, List(tok)) if tok.is_name || tok.kind == Token.Kind.CONTROL => xname1
               case _ => quote(xname1)
             }
           Item(range, original, full_name, description, replacement, 0, true)
@@ -381,12 +381,12 @@ final class Completion private(
 
         val (words_lex1, words_map1) =
           if (!is_word) (words_lex, words_map)
-          else if (text != "") (words_lex + abbr, words_map + abbrev)
+          else if (text.nonEmpty) (words_lex + abbr, words_map + abbrev)
           else (words_lex -- List(abbr), words_map - abbr)
 
         val (abbrevs_lex1, abbrevs_map1) =
           if (is_word) (abbrevs_lex, abbrevs_map)
-          else if (text != "") (abbrevs_lex + rev_abbr, abbrevs_map + (rev_abbr -> abbrev))
+          else if (text.nonEmpty) (abbrevs_lex + rev_abbr, abbrevs_map + (rev_abbr -> abbrev))
           else (abbrevs_lex -- List(rev_abbr), abbrevs_map - rev_abbr)
 
         new Completion(keywords, words_lex1, words_map1, abbrevs_lex1, abbrevs_map1)
@@ -397,7 +397,7 @@ final class Completion private(
 
   def complete(
     history: Completion.History,
-    unicode: Boolean,
+    unicode_symbols: Boolean,
     explicit: Boolean,
     start: Text.Offset,
     text: CharSequence,
@@ -407,7 +407,7 @@ final class Completion private(
     val length = text.length
 
     val abbrevs_result = {
-      val reverse_in = new Library.Reverse(text.subSequence(0, caret))
+      val reverse_in = new Library.Reverse(text.subSequence(0, caret).nn)
       Scan.Parsers.parse(Scan.Parsers.literal(abbrevs_lex), reverse_in) match {
         case Scan.Parsers.Success(reverse_abbr, _) =>
           val abbrevs = abbrevs_map.get_list(reverse_abbr)
@@ -430,9 +430,9 @@ final class Completion private(
         val word_context =
           caret < length && Completion.Word_Parsers.is_word_char(text.charAt(caret))
         val result =
-          Completion.Word_Parsers.read_symbol(text.subSequence(0, caret)) match {
+          Completion.Word_Parsers.read_symbol(text.subSequence(0, caret).nn) match {
             case Some(symbol) => Some((symbol, ""))
-            case None => Completion.Word_Parsers.read_word(text.subSequence(0, caret))
+            case None => Completion.Word_Parsers.read_word(text.subSequence(0, caret).nn)
           }
         result.map(
           {
@@ -464,14 +464,11 @@ final class Completion private(
               Character.codePointCount(original, 0, original.length) > 1)
         val unique = completions.length == 1
 
-        def decode1(s: String): String = if (unicode) Symbol.decode(s) else s
-        def decode2(s: String): String = if (unicode) s else Symbol.decode(s)
-
         val items =
           for {
             (complete_word, name0) <- completions
-            name1 = decode1(name0)
-            name2 = decode2(name0)
+            name1 = Symbol.output(unicode_symbols, name0)
+            name2 = Symbol.output(!unicode_symbols, name0)
             if name1 != original
             (s1, s2) = Completion.split_template(name1)
             move = - s2.length

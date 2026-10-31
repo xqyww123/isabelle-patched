@@ -7,43 +7,48 @@ Delayed events.
 package isabelle
 
 
-object Delay {
+class Delay_Ops(log: Logger) {
+  override def toString: String = "Delay(" + log.toString + ")"
+
+  protected def app(body: => Unit): Unit = body
+
   // delayed event after first invocation
-  def first(delay: => Time, log: Logger = new Logger, gui: Boolean = false)(event: => Unit): Delay =
-    new Delay(true, delay, log, if (gui) GUI_Thread.later { event } else event)
+  def first(delay: => Time)(event: => Unit): Delay = new Delay(true, delay, log, app, event)
 
   // delayed event after last invocation
-  def last(delay: => Time, log: Logger = new Logger, gui: Boolean = false)(event: => Unit): Delay =
-    new Delay(false, delay, log, if (gui) GUI_Thread.later { event } else event)
+  def last(delay: => Time)(event: => Unit): Delay = new Delay(false, delay, log, app, event)
 }
 
-final class Delay private(first: Boolean, delay: => Time, log: Logger, event: => Unit) {
+final class Delay(
+  first: Boolean,
+  delay: => Time,
+  log: Logger,
+  app: (=> Unit) => Unit,
+  event: => Unit
+) {
   private var running: Option[Event_Timer.Request] = None
 
   private def run(): Unit = {
     val do_run = synchronized {
       if (running.isDefined) { running = None; true } else false
     }
-    if (do_run) {
-      try { event }
-      catch { case exn: Throwable if !Exn.is_interrupt(exn) => log(Exn.message(exn)); throw exn }
-    }
+    if (do_run) app(event)
   }
 
   def invoke(msg: String = ""): Unit = synchronized {
-    if (msg.nonEmpty) log("Delay.invoke " + msg)
+    if (msg.nonEmpty) log.warning("Delay.invoke " + msg)
     val new_run =
       running match {
         case Some(request) => if (first) false else { request.cancel(); true }
         case None => true
       }
     if (new_run) {
-      running = Some(Event_Timer.request(Time.now() + delay)(run()))
+      running = Some(Event_Timer.request(log, Time.now() + delay)(run()))
     }
   }
 
   def revoke(msg: String = ""): Unit = synchronized {
-    if (msg.nonEmpty) log("Delay.revoke " + msg)
+    if (msg.nonEmpty) log.warning("Delay.revoke " + msg)
     running match {
       case Some(request) => request.cancel(); running = None
       case None =>
@@ -51,12 +56,12 @@ final class Delay private(first: Boolean, delay: => Time, log: Logger, event: =>
   }
 
   def postpone(alt_delay: Time, msg: String = ""): Unit = synchronized {
-    if (msg.nonEmpty) log("Delay.postpone " + msg)
+    if (msg.nonEmpty) log.warning("Delay.postpone " + msg)
     running match {
       case Some(request) =>
         val alt_time = Time.now() + alt_delay
         if (request.time < alt_time && request.cancel()) {
-          running = Some(Event_Timer.request(alt_time)(run()))
+          running = Some(Event_Timer.request(log, alt_time)(run()))
         }
       case None =>
     }

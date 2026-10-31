@@ -284,9 +284,34 @@ text \<open>
     settings or preferences, not within a session \<^verbatim>\<open>ROOT\<close>).
 
     \<^item> @{system_option_def "condition"} specifies a comma-separated list of
-    process environment variables (or Isabelle settings) that are required for
-    the subsequent theories to be processed. Conditions are considered
-    ``true'' if the corresponding environment value is defined and non-empty.
+    pre-conditions (conjunction) that guard the processing a theory body. A
+    false condition means that the theory body remains empty: its commands are
+    ignored (except for document commands of the header). Theory imports are
+    always processed, and the resulting theory may be always imported
+    elsewhere. This allows to construct variants of specifications, depending
+    on parameters that are changed by external means (e.g. Isabelle system
+    options): with suitable naming conventions and proof tool setup, later
+    theories may work uniformly on either variant.
+
+    The syntax and semantics of individual conditions is as follows:
+
+      \<^item> \<^verbatim>\<open>true\<close> and \<^verbatim>\<open>false\<close> refer to literal Boolean values.
+
+      \<^item> \<^verbatim>\<open>$NAME\<close> refers to a process environment variable: to be enabled, the
+      value needs to be set and non-empty.
+
+      \<^item> \<^verbatim>\<open>name\<close> refers to a system option; to be enabled, the value needs to
+      be true (bool), non-empty (string), or > 0 (int, real).
+
+      \<^item> \<^verbatim>\<open>name()\<close> refers to a predicate defined in Isabelle/Scala (via
+      \<^verbatim>\<open>services\<close> in \<^verbatim>\<open>etc/build.props\<close> and suitable instances of the service
+      class @{scala_type isabelle.Thy_Conditions.Predicates}).
+
+    \<^item> @{system_option_def "condition_proofs"} is analogous to @{system_option
+    condition}, but skips proof checking only. Thus
+    \<^verbatim>\<open>[condition_proofs = false]\<close> is like the historical option
+    \<^verbatim>\<open>[skip_proofs = true]\<close>, but @{system_option condition_proofs} may depend
+    on the process environment, session options, Isabelle/Scala predicates.
 
     \<^item> @{system_option_def "timeout"} and @{system_option_def "timeout_scale"}
     specify a real wall-clock timeout for the session as a whole: the two
@@ -306,8 +331,9 @@ text \<open>
 
     \<^item> @{system_option_def system_log} specifies an optional log file for
     low-level messages produced by \<^ML>\<open>Output.system_message\<close> in
-    Isabelle/ML; the standard value ``\<^verbatim>\<open>-\<close>'' refers to console progress of the
-    build job.
+    Isabelle/ML, or via the @{scala_object isabelle.Logger} module in
+    Isabelle/Scala. Its default value ``\<^verbatim>\<open>-\<close>'' refers to \<^verbatim>\<open>progress\<close> provided
+    to the Isabelle tool in question: usually this refers to the console.
 
     \<^item> @{system_option_def "system_heaps"} determines the directories for
     session heap images: \<^path>\<open>$ISABELLE_HEAPS\<close> is the user directory and
@@ -316,7 +342,7 @@ text \<open>
     user directory and may be loaded from both directories. For
     \<^verbatim>\<open>system_heaps=true\<close>, store and load happens only in the system directory.
 
-  The @{tool_def options} tool prints Isabelle system options. Its
+  The @{tool_def "options"} tool prints Isabelle system options. Its
   command-line usage is:
   @{verbatim [display]
 \<open>Usage: isabelle options [OPTIONS] [MORE_OPTIONS ...]
@@ -326,7 +352,6 @@ text \<open>
     -g OPTION    get value of OPTION
     -l           list options
     -t TAGS      restrict list to given tags (comma-separated)
-    -x FILE      export options to FILE in YXML format
 
   Report Isabelle system options, augmented by MORE_OPTIONS given as
   arguments NAME=VAL or NAME.\<close>}
@@ -340,9 +365,6 @@ text \<open>
   Option \<^verbatim>\<open>-g\<close> prints the value of the given option. Option \<^verbatim>\<open>-l\<close> lists all
   options with their declaration and current value. Option \<^verbatim>\<open>-t\<close> restricts the
   listing to given tags (as comma-separated list), e.g. \<^verbatim>\<open>-t build,document\<close>.
-
-  Option \<^verbatim>\<open>-x\<close> specifies a file to export the result in YXML format, instead
-  of printing it in human-readable form.
 \<close>
 
 

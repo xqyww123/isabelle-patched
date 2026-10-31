@@ -6,11 +6,13 @@ Isabelle encoding -- based on UTF-8.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
 import org.gjt.sp.jedit.buffer.JEditBuffer
 import org.gjt.sp.jedit.io.Encoding
+import org.gjt.sp.jedit.jEdit
 
 import java.nio.charset.{CodingErrorAction, CharacterCodingException}
 import java.io.{InputStream, OutputStream, Reader, Writer, OutputStreamWriter,
@@ -20,11 +22,20 @@ import scala.io.{Codec, BufferedSource}
 
 
 object Isabelle_Encoding {
-  def is_active(buffer: JEditBuffer): Boolean =
-    buffer.getStringProperty(JEditBuffer.ENCODING).asInstanceOf[String] == "UTF-8-Isabelle"
+  val NAME = "UTF-8-Isabelle"
 
-  def perhaps_decode(buffer: JEditBuffer, s: String): String =
-    if (is_active(buffer)) Symbol.decode(s) else s
+  def is_active(buffer: JEditBuffer = null): Boolean = {
+    val name =
+      if (buffer == null) jEdit.getProperty("buffer.encoding")
+      else buffer.getStringProperty(JEditBuffer.ENCODING)
+    NAME == name
+  }
+
+  def set_active(buffer: JEditBuffer, active: Boolean): Unit =
+    buffer.setStringProperty(JEditBuffer.ENCODING, if (active) NAME else UTF8.charset_name)
+
+  def gui_style(buffer: JEditBuffer = null): GUI.Style_Symbol =
+    GUI.Style_Symbol_Recoded(is_active(buffer = buffer))
 }
 
 class Isabelle_Encoding extends Encoding {
@@ -58,6 +69,6 @@ class Isabelle_Encoding extends Encoding {
       }
       override def close(): Unit = out.close()
     }
-    new OutputStreamWriter(buffer, UTF8.charset.newEncoder())
+    new OutputStreamWriter(buffer, UTF8.charset.newEncoder().nn)
   }
 }

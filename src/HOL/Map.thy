@@ -582,6 +582,9 @@ lemma dom_fun_upd [simp]:
   "dom(f(x := y)) = (if y = None then dom f - {x} else insert x (dom f))"
   by (auto simp: dom_def)
 
+lemma inj_on_the_image_dom: "inj_on the (mu ` dom mu)"
+  by (rule inj_onI) force
+
 lemma dom_if:
   "dom (\<lambda>x. if P x then f x else g x) = dom f \<inter> {x. P x} \<union> dom g \<inter> {x. \<not> P x}"
   by (auto split: if_splits)
@@ -700,6 +703,23 @@ lemma ranI: "m a = Some b \<Longrightarrow> b \<in> ran m"
 lemma ran_empty [simp]: "ran empty = {}"
   by (auto simp: ran_def)
 
+lemma ran_conv_dom: "ran mu = the ` mu ` dom mu"
+proof (intro subset_antisym subsetI)
+  fix b
+  assume "b \<in> ran mu"
+  then obtain a where "mu a = Some b"
+    unfolding ran_def by blast
+  then show "b \<in> the ` mu ` dom mu"
+    by force
+next
+  fix b
+  assume "b \<in> the ` mu ` dom mu"
+  then obtain a  where "a \<in> dom mu" and "b = the (mu a)"
+    by auto
+  then show "b \<in> ran mu"
+    by (auto intro: ranI)
+qed
+
 lemma ran_map_upd [simp]:  "m a = None \<Longrightarrow> ran(m(a\<mapsto>b)) = insert b (ran m)"
   unfolding ran_def
   by force
@@ -815,6 +835,17 @@ lemma graph_map_of_if_distinct_dom: "distinct (map fst al) \<Longrightarrow> gra
 lemma finite_graph_iff_finite_dom[simp]: "finite (graph m) = finite (dom m)"
   by (metis graph_eq_to_snd_dom finite_imageI fst_graph_eq_dom)
 
+lemma inj_on_graph: "inj_on Map.graph A"
+proof (rule inj_onI)
+  fix x y
+  assume "Map.graph x = Map.graph y"
+  hence "(x a = Some b) = (y a = Some b)" for a b
+    unfolding Map.graph_def by auto
+  hence "x k = y k" for k
+    by (metis not_None_eq)
+  thus "x = y" ..
+qed
+
 lemma inj_on_fst_graph: "inj_on fst (graph m)"
   unfolding graph_def inj_on_def by force
 
@@ -901,6 +932,9 @@ by(subst map_add_eq_empty_iff[symmetric])(rule eq_commute)
 
 
 subsection \<open>Various\<close>
+
+lemma card_dom_eq_card_range: "inj_on mu (dom mu) \<Longrightarrow> card (dom mu) = card (ran mu)"
+  by (simp only: ran_conv_dom card_image inj_on_the_image_dom)
 
 lemma set_map_of_compr:
   assumes distinct: "distinct (map fst xs)"

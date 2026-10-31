@@ -21,7 +21,9 @@ object XML {
   case class End(name: String) extends Trav
 
   sealed abstract class Tree extends Trav {
-    override def toString: String = string_of_tree(this)
+    override def toString: String =
+      try { string_of_tree(this) }
+      catch { case ERROR(_) => "<malformed>" }
   }
   type Body = List[Tree]
   case class Elem(markup: Markup, body: Body) extends Tree with Trav {
@@ -69,6 +71,7 @@ object XML {
     }
   }
 
+  def elem(body: Body): XML.Elem = XML.Elem(Markup.Empty, body)
   def elem(markup: Markup): XML.Elem = XML.Elem(markup, Nil)
   def elem(name: String, body: Body): XML.Elem = XML.Elem(Markup(name, Nil), body)
   def elem(name: String): XML.Elem = XML.elem(name, Nil)
@@ -185,6 +188,45 @@ object XML {
   def content(tree: Tree): String = content(List(tree))
 
 
+  /* builder */
+
+  class Builder extends Traversal {
+    private var rev_stack: List[Elem] = List(XML.elem(Markup.Empty))
+
+    private def rev_elem(elem: Elem): Elem = elem.copy(body = elem.body.map(rev_tree).reverse)
+    private def rev_tree(tree: Tree): Tree =
+      tree match {
+        case elem: Elem => rev_elem(elem)
+        case text: Text => text
+      }
+
+    def result: Body =
+      rev_stack match {
+        case root :: Nil => rev_elem(root).body
+        case _ => error("Unclosed element")
+      }
+
+    private def push(tree: Tree): Unit = {
+      tree match {
+        case elem: Elem => rev_stack ::= elem
+        case text: Text =>
+          val head = rev_stack.head
+          rev_stack = head.copy(body = text :: head.body) :: rev_stack.tail
+      }
+    }
+
+    private def pop(): Unit =
+      rev_stack match {
+        case e1 :: e2 :: rest => rev_stack = e2.copy(body = e1 :: e2.body) :: rest
+        case _ => error("No element to close")
+      }
+
+    def text(s: String): Unit = push(Text(s))
+    def elem(markup: Markup, end: Boolean): Unit = { push(XML.elem(markup)); if (end) pop() }
+    def end_elem(name: String): Unit =
+      if (rev_stack.head.name == name) pop() else error("Wrong element to close")
+  }
+
 
   /** string representation **/
 
@@ -192,16 +234,13 @@ object XML {
 
   class Output(builder: StringBuilder) extends Traversal {
     def string(str: String, permissive: Boolean = false): Unit = {
-      if (str == null) { builder ++= str }
-      else {
-        str foreach {
-          case '<' => builder ++= "&lt;"
-          case '>' => builder ++= "&gt;"
-          case '&' => builder ++= "&amp;"
-          case '"' if !permissive => builder ++= "&quot;"
-          case '\'' if !permissive => builder ++= "&apos;"
-          case c => builder += c
-        }
+      str foreach {
+        case '<' => builder ++= "&lt;"
+        case '>' => builder ++= "&gt;"
+        case '&' => builder ++= "&amp;"
+        case '"' if !permissive => builder ++= "&quot;"
+        case '\'' if !permissive => builder ++= "&apos;"
+        case c => builder += c
       }
     }
 
@@ -249,19 +288,30 @@ object XML {
         compress: Compress.Cache = Compress.Cache.make(),
         max_string: Int = isabelle.Cache.default_max_string,
         initial_size: Int = isabelle.Cache.default_initial_size): Cache =
-      new Cache(compress, max_string, initial_size)
+      new Memory_Cache(compress, max_string, initial_size)
 
-    val none: Cache = make(Compress.Cache.none, max_string = 0)
+    val none: Cache = new Cache { }
   }
 
-  class Cache(val compress: Compress.Cache, max_string: Int, initial_size: Int)
-  extends isabelle.Cache(max_string, initial_size) {
+  trait Cache extends isabelle.Cache {
+    def compress: Compress.Cache = Compress.Cache.none
+    def tree0(x: XML.Tree): XML.Tree = x
+    def props(x: Properties.T): Properties.T = x
+    def markup(x: Markup): Markup = x
+    def tree(x: XML.Tree): XML.Tree = x
+    def body(x: XML.Body): XML.Body = x
+    def elem(x: XML.Elem): XML.Elem = x
+  }
+
+  class Memory_Cache(override val compress: Compress.Cache, max_string: Int, initial_size: Int)
+  extends isabelle.Memory_Cache(max_string, initial_size) with Cache {
     protected def cache_props(x: Properties.T): Properties.T = {
       if (x.isEmpty) x
       else
         lookup(x) match {
           case Some(y) => y
-          case None => store(x.map(p => (Library.isolate_substring(p._1).intern, cache_string(p._2))))
+          case None =>
+            store(x.map(p => (Library.isolate_substring(p._1).intern.nn, cache_string(p._2))))
         }
     }
 
@@ -298,20 +348,14 @@ object XML {
     }
 
     // support hash-consing
-    def tree0(x: XML.Tree): XML.Tree =
-      if (no_cache) x else synchronized { lookup(x) getOrElse store(x) }
+    override def tree0(x: XML.Tree): XML.Tree = synchronized { lookup(x) getOrElse store(x) }
 
     // main methods
-    def props(x: Properties.T): Properties.T =
-      if (no_cache) x else synchronized { cache_props(x) }
-    def markup(x: Markup): Markup =
-      if (no_cache) x else synchronized { cache_markup(x) }
-    def tree(x: XML.Tree): XML.Tree =
-      if (no_cache) x else synchronized { cache_tree(x) }
-    def body(x: XML.Body): XML.Body =
-      if (no_cache) x else synchronized { cache_body(x) }
-    def elem(x: XML.Elem): XML.Elem =
-      if (no_cache) x else synchronized { cache_tree(x).asInstanceOf[XML.Elem] }
+    override def props(x: Properties.T): Properties.T = synchronized { cache_props(x) }
+    override def markup(x: Markup): Markup = synchronized { cache_markup(x) }
+    override def tree(x: XML.Tree): XML.Tree = synchronized { cache_tree(x) }
+    override def body(x: XML.Body): XML.Body = synchronized { cache_body(x) }
+    override def elem(x: XML.Elem): XML.Elem = synchronized { cache_tree(x).asInstanceOf[XML.Elem] }
   }
 
 

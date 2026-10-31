@@ -4076,6 +4076,17 @@ lemma fls_inverse_deriv':
   using fls_inverse_deriv[of a]
   by    (simp add: field_simps)
 
+lemma fls_deriv_divide:
+  fixes f g :: "'a :: field fls"
+  shows "fls_deriv (f / g) = (g * fls_deriv f - f * fls_deriv g) / g ^ 2"
+proof -
+  have "fls_deriv (f / g) = fls_deriv (f * inverse g)"
+    by (simp add: field_simps)
+  also have "\<dots> = (g * fls_deriv f - f * fls_deriv g) / g ^ 2"
+    by (subst fls_deriv_mult, subst fls_inverse_deriv')
+       (simp add: divide_simps power2_eq_square)
+  finally show ?thesis .
+qed
 
 subsubsection \<open>Equality of derivatives\<close>
 
@@ -4110,6 +4121,33 @@ lemma fls_deriv_eq_iff_ex:
   shows "(fls_deriv f = fls_deriv g) \<longleftrightarrow> (\<exists>c. f = fls_const c + g)"
   by    (auto simp: fls_deriv_eq_iff)
 
+lemma fls_logderiv_unique:
+  fixes F1 F2 G :: "'a :: field_char_0 fls"
+  assumes "fls_deriv F1 = H * F1" "fls_deriv F2 = H * F2" "F1 \<noteq> 0"
+  obtains c where "F2 = fls_const c * F1"
+proof -
+  define Q where "Q = F2 / F1"
+  have "fls_deriv Q = 0"
+    by (simp add: Q_def fls_deriv_divide assms)
+  then obtain c where "Q = fls_const c"
+    using fls_deriv_eq_0_iff by auto
+  thus ?thesis
+    by (intro that[of c]) (use assms in \<open>auto simp: Q_def field_simps\<close>)
+qed
+
+lemma fps_logderiv_unique:
+  fixes F1 F2 G :: "'a :: field_char_0 fps"
+  assumes "fps_deriv F1 = H * F1" "fps_deriv F2 = H * F2" "F1 \<noteq> 0"
+  obtains c where "F2 = fps_const c * F1"
+proof -
+  obtain c where "fps_to_fls F2 = fls_const c * fps_to_fls F1"
+    by (rule fls_logderiv_unique[of "fps_to_fls F1" "fps_to_fls H" "fps_to_fls F2"])
+       (use assms in \<open>auto simp: fls_deriv_fps_to_fls fls_times_fps_to_fls\<close>)
+  also have "\<dots> = fps_to_fls (fps_const c * F1)"
+    by (simp add: fls_times_fps_to_fls)
+  finally show ?thesis
+    by (intro that[of c]) simp
+qed
 
 subsubsection \<open>Residues\<close>
 
@@ -4579,10 +4617,10 @@ definition
 lemma dist_fls_ge0: "dist (a :: 'a fls) b \<ge> 0"
   by (simp add: dist_fls_def)
 
-definition uniformity_fls_def [code del]:
+definition uniformity_fls_def:
   "(uniformity :: ('a fls \<times> 'a fls) filter) = (INF e \<in> {0 <..}. principal {(x, y). dist x y < e})"
 
-definition open_fls_def' [code del]:
+definition open_fls_def':
   "open (U :: 'a fls set) \<longleftrightarrow> (\<forall>x\<in>U. eventually (\<lambda>(x', y). x' = x \<longrightarrow> y \<in> U) uniformity)"
 
 lemma dist_fls_sym: "dist (a :: 'a fls) b = dist b a"
@@ -4659,8 +4697,6 @@ qed (rule open_fls_def' uniformity_fls_def)+
 
 end
 end
-
-declare uniformity_Abort[where 'a="'a :: group_add fls", code]
 
 lemma open_fls_def:
   "open (S :: 'a::group_add fls set) = (\<forall>a \<in> S. \<exists>r. r >0 \<and> {y. dist y a < r} \<subseteq> S)"

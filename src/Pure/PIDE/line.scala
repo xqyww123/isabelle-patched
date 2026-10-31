@@ -14,7 +14,7 @@ object Line {
   /* logical lines */
 
   def normalize(text: String): String =
-    if (text.contains('\r')) text.replace("\r\n", "\n") else text
+    if (text.contains('\r')) text.replacing("\r\n" -> "\n") else text
 
   def logical_lines(text: String): List[String] =
     split_lines(normalize(text))
@@ -127,7 +127,7 @@ object Line {
     lazy val text: String = Document.text(lines)
 
     def get_text(range: Text.Range): Option[String] =
-      if (full_range.contains(range)) Some(range.substring(text)) else None
+      if (full_range.contains(range)) Some(range.substring(text).nn) else None
 
     def get_text(range: Line.Range): Option[String] =
       text_range(range).flatMap(get_text)
@@ -150,7 +150,7 @@ object Line {
           case line :: ls =>
             val n = line.text.length
             if (ls.isEmpty || i <= n) {
-              Position(line = lines_count).advance(line.text.substring(n - i))
+              Position(line = lines_count).advance(line.text.drop(n - i))
             }
             else move(i - (n + 1), lines_count + 1, ls)
         }
@@ -202,8 +202,8 @@ object Line {
               Some(
                 if (lines1.isEmpty) ("", prefix ::: Document.split(insert))
                 else {
-                  val removed_text = s1.substring(c1, c2)
-                  val changed_text = s1.substring(0, c1) + insert + s1.substring(c2)
+                  val removed_text = s1.slice(c1, c2)
+                  val changed_text = s1.slice(0, c1) + insert + s1.drop(c2)
                   (removed_text, prefix ::: Document.split(changed_text) ::: rest1)
                 })
             }
@@ -216,12 +216,12 @@ object Line {
               Some(
                 if (lines1.isEmpty) ("", prefix ::: Document.split(insert))
                 else {
-                  val r1 = s1.substring(c1)
-                  val r2 = s2.substring(0, c2)
+                  val r1 = s1.drop(c1)
+                  val r2 = s2.slice(0, c2)
                   val removed_text =
                     if (lines2.isEmpty) Document.text(Line(r1) :: middle)
                     else Document.text(Line(r1) :: middle ::: List(Line(r2)))
-                  val changed_text = s1.substring(0, c1) + insert + s2.substring(c2)
+                  val changed_text = s1.slice(0, c1) + insert + s2.drop(c2)
                   (removed_text, prefix ::: Document.split(changed_text) ::: rest2)
                 })
             }

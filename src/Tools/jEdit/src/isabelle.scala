@@ -6,6 +6,7 @@ Global configuration and convenience operations for Isabelle/jEdit.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -47,7 +48,7 @@ object Isabelle {
 
   def mode_syntax(mode: String): Option[Outer_Syntax] =
     mode match {
-      case "isabelle" => Some(PIDE.resources.session_base.overall_syntax)
+      case "isabelle" => Some(PIDE.resources.current_background.base.overall_syntax)
       case "isabelle-options" => Some(Options.options_syntax)
       case "isabelle-root" => Some(Sessions.root_syntax)
       case "isabelle-ml" => Some(ml_syntax)
@@ -84,8 +85,8 @@ object Isabelle {
 
   /* navigation */
 
-  def navigate_backwards(view: View): Unit = PIDE.plugin.navigator.backward(view)
-  def navigate_forwards(view: View): Unit = PIDE.plugin.navigator.forward(view)
+  def navigate_backwards(view: View): Unit = Isabelle_Navigator.get(view).backward()
+  def navigate_forwards(view: View): Unit = Isabelle_Navigator.get(view).forward()
 
 
   /* text structure */
@@ -309,14 +310,15 @@ object Isabelle {
   }
 
   def insert_line_padding(text_area: JEditTextArea, text: String): Unit = {
-    val buffer = text_area.getBuffer
+    val editor_context = JEdit_Editor.Context(text_area)
+    val buffer = editor_context.buffer
     JEdit_Lib.buffer_edit(buffer) {
       val text1 =
         if (text_area.getSelectionCount == 0) {
           def pad(range: Text.Range): String =
             if (JEdit_Lib.get_text(buffer, range).contains("\n")) "" else "\n"
 
-          val caret = JEdit_Lib.caret_range(text_area)
+          val caret = editor_context.caret_range
           val before_caret = JEdit_Lib.point_range(buffer, caret.start - 1)
           pad(before_caret) + text + pad(caret)
         }
@@ -333,54 +335,45 @@ object Isabelle {
     text: String
   ): Unit = {
     val buffer = text_area.getBuffer
-    if (!snapshot.is_outdated && text != "") {
-      (snapshot.find_command(id), Document_Model.get_model(buffer)) match {
-        case (Some((node, command)), Some(model)) if command.node_name == model.node_name =>
-          node.command_start(command) match {
-            case Some(start) =>
-              JEdit_Lib.buffer_edit(buffer) {
-                val range = command.core_range + start
-                JEdit_Lib.buffer_edit(buffer) {
-                  if (padding) {
-                    text_area.moveCaretPosition(start + range.length)
-                    val start_line = text_area.getCaretLine + 1
-                    text_area.setSelectedText("\n" + text)
-                    val end_line = text_area.getCaretLine
-                    for (line <- start_line to end_line) {
-                      Token_Markup.Line_Context.refresh(buffer, line)
-                      buffer.indentLine(line, true)
-                    }
-                  }
-                  else {
-                    buffer.remove(start, range.length)
-                    text_area.moveCaretPosition(start)
-                    text_area.setSelectedText(text)
-                  }
-                }
+    if (!snapshot.is_outdated && text.nonEmpty) {
+      for {
+        command <- snapshot.get_command(id)
+        model <- Document_Model.get_model(buffer)
+        if command.node_name == model.node_name
+        start <- snapshot.command_start(command)
+      } {
+        JEdit_Lib.buffer_edit(buffer) {
+          val range = command.core_range + start
+          JEdit_Lib.buffer_edit(buffer) {
+            if (padding) {
+              text_area.moveCaretPosition(start + range.length)
+              val start_line = text_area.getCaretLine + 1
+              text_area.setSelectedText("\n" + text)
+              val end_line = text_area.getCaretLine
+              for (line <- start_line to end_line) {
+                Token_Markup.Line_Context.refresh(buffer, line)
+                buffer.indentLine(line, true)
               }
-            case None =>
+            }
+            else {
+              buffer.remove(start, range.length)
+              text_area.moveCaretPosition(start)
+              text_area.setSelectedText(text)
+            }
           }
-        case _ =>
+        }
       }
     }
   }
 
 
-  /* formal entities and structure */
-
-  def goto_entity(view: View): Unit = {
-    val text_area = view.getTextArea
-    for {
-      rendering <- Document_View.get_rendering(text_area)
-      caret_range = JEdit_Lib.caret_range(text_area)
-      link <- rendering.hyperlink_entity(caret_range)
-    } link.info.follow(view)
-  }
+  /* select formal entity or structure */
 
   def select_entity(text_area: JEditTextArea): Unit = {
     for (rendering <- Document_View.get_rendering(text_area)) {
-      val caret_range = JEdit_Lib.caret_range(text_area)
-      val buffer_range = JEdit_Lib.buffer_range(text_area.getBuffer)
+      val editor_context = JEdit_Editor.Context(text_area)
+      val caret_range = editor_context.caret_range
+      val buffer_range = editor_context.buffer_range
       val active_focus = rendering.caret_focus_ranges(caret_range, buffer_range)
       if (active_focus.nonEmpty) {
         text_area.selectNone()
@@ -392,8 +385,9 @@ object Isabelle {
 
   def select_structure(text_area: JEditTextArea): Unit = {
     for (rendering <- Document_View.get_rendering(text_area)) {
+      val editor_context = JEdit_Editor.Context(text_area)
       val sel_ranges = JEdit_Lib.selection_ranges(text_area)
-      val caret_range = JEdit_Lib.caret_range(text_area)
+      val caret_range = editor_context.caret_range
       val infos =
         rendering.markup_structure(Rendering.structure_elements, List(caret_range),
           filter = markup => !sel_ranges.exists(r => r.contains(markup.range)))
@@ -402,12 +396,6 @@ object Isabelle {
       }
     }
   }
-
-
-  /* completion */
-
-  def complete(view: View, word_only: Boolean): Unit =
-    Completion_Popup.Text_Area.action(view.getTextArea, word_only)
 
 
   /* control styles */
@@ -445,24 +433,21 @@ object Isabelle {
 
   /* antiquoted cartouche */
 
-  def antiquoted_cartouche(text_area: TextArea): Unit = {
-    val buffer = text_area.getBuffer
+  def antiquoted_cartouche(text_area: JEditTextArea): Unit = {
+    val editor_context = JEdit_Editor.Context(text_area)
+    val buffer = editor_context.buffer
     for {
       rendering <- Document_View.get_rendering(text_area)
-      caret_range = JEdit_Lib.caret_range(text_area)
+      caret_range = editor_context.caret_range
       antiq_range <- rendering.antiquoted(caret_range)
       antiq_text <- JEdit_Lib.get_text(buffer, antiq_range)
       body_text <- Antiquote.read_antiq_body(antiq_text)
       (name, arg) <- Token.read_antiq_arg(Keyword.Keywords.empty, body_text)
       if Symbol.is_ascii_identifier(name)
     } {
-      val op_text =
-        Isabelle_Encoding.perhaps_decode(buffer,
-          Symbol.control_prefix + name + Symbol.control_suffix)
-      val arg_text =
-        if (arg.isEmpty) ""
-        else if (Isabelle_Encoding.is_active(buffer)) Symbol.cartouche_decoded(arg.get)
-        else Symbol.cartouche(arg.get)
+      val style = Isabelle_Encoding.gui_style(buffer = buffer)
+      val op_text = style.output(Symbol.control_prefix + name + Symbol.control_suffix)
+      val arg_text = style.output(if_proper(arg, Symbol.cartouche(arg.get)))
 
       buffer.remove(antiq_range.start, antiq_range.length)
       text_area.setCaretPosition(antiq_range.start)
@@ -474,10 +459,11 @@ object Isabelle {
   /* spell-checker dictionary */
 
   def update_dictionary(text_area: JEditTextArea, include: Boolean, permanent: Boolean): Unit = {
+    val editor_context = JEdit_Editor.Context(text_area)
     for {
       spell_checker <- PIDE.plugin.spell_checker.get
       rendering <- Document_View.get_rendering(text_area)
-      range = JEdit_Lib.caret_range(text_area)
+      range = editor_context.caret_range
       Text.Info(_, word) <- Spell_Checker.current_word(rendering, range)
     } {
       spell_checker.update(word, include, permanent)
@@ -518,7 +504,100 @@ object Isabelle {
   }
 
 
-  /* popups */
+  /* hyperlinks and popups */
+
+  def follow_link(text_area: JEditTextArea): Unit = {
+    val editor_context = JEdit_Editor.Context(text_area)
+    for (rendering <- Document_View.get_rendering(text_area)) {
+      val caret_range = editor_context.caret_range
+      for (info <- rendering.hyperlink(caret_range)) {
+        new Selection_Popup.Hyperlink(editor_context, info).select()
+      }
+    }
+  }
+
+  def show_links(text_area: JEditTextArea): Unit = {
+    val editor_context = JEdit_Editor.Context(text_area)
+    for {
+      rendering <- Document_View.get_rendering(text_area)
+      completion <- Completion_Popup.Text_Area(text_area)
+    } {
+      val caret_range = editor_context.caret_range
+      val links = rendering.hyperlinks(caret_range)
+      if (links.nonEmpty) {
+        val items = links.map(info => new Selection_Popup.Hyperlink(editor_context, info))
+        completion.open_popup(caret_range, items,
+          focus = true,
+          select_enter = true,
+          select_tab = true)
+      }
+    }
+  }
+
+  def show_line_status(text_area: JEditTextArea): Unit = {
+    GUI_Thread.require {}
+
+    val editor_context = JEdit_Editor.Context(text_area)
+    val caret = editor_context.caret_offset
+    val line = text_area.getCaretLine
+    val line_range = JEdit_Lib.line_range(text_area.getBuffer, line)
+
+    for {
+      rendering <- Document_View.get_rendering(text_area)
+      loc0 <- proper_value(text_area.offsetToXY(caret))
+    } {
+      val painter = editor_context.text_area_painter
+      val loc = new Point(loc0.x, loc0.y + painter.getLineHeight * 3 / 4)
+
+      val msgs = rendering.main_messages(line_range).map(_.info)
+
+      val title = {
+        val m = msgs.count(Protocol.is_error)
+        val n = msgs.count(Protocol.is_warning_or_legacy)
+        val a = if (m == 0) "" else if (m == 1) "1 error" else m.toString + " errors"
+        val b = if (n == 0) "" else if (n == 1) "1 warning" else n.toString + " warnings"
+        "Line " + (line + 1) + if_proper(a.nonEmpty || b.nonEmpty, ": ") +
+          List(a, b).filter(_.nonEmpty).mkString(", ")
+      }
+
+      val output =
+        XML.Elem(Markup.Empty, XML.string(title)) ::
+        msgs.map({
+          case elem@XML.Elem(markup, body) =>
+            XML.Elem(markup, XML.string(Protocol.message_heading(elem) + ":\n") ::: body)
+        })
+
+      val results = rendering.snapshot.command_results(line_range)
+      val unicode_symbols = Isabelle_Encoding.is_active(buffer = text_area.getBuffer)
+      Pretty_Tooltip(editor_context.view, painter, loc, rendering, results, output,
+        focus = true, caret_visible = true, unicode_symbols = unicode_symbols)
+    }
+  }
+
+  def show_tooltip(text_area: JEditTextArea, control: Boolean): Unit = {
+    GUI_Thread.require {}
+
+    val editor_context = JEdit_Editor.Context(text_area)
+    val painter = editor_context.text_area_painter
+    val caret_range = editor_context.caret_range
+    for {
+      rendering <- Document_View.get_rendering(text_area)
+      tip <- rendering.tooltip(caret_range, control = control)
+      loc0 <- proper_value(text_area.offsetToXY(caret_range.start))
+    } {
+      val loc = new Point(loc0.x, loc0.y + painter.getLineHeight * 3 / 4)
+      val results = rendering.snapshot.command_results(tip.range)
+      val unicode_symbols = Isabelle_Encoding.is_active(buffer = text_area.getBuffer)
+      Pretty_Tooltip(editor_context.view, painter, loc, rendering, results, tip.info,
+        focus = true, caret_visible = true, unicode_symbols = unicode_symbols)
+    }
+  }
+
+  def completion(text_area: JEditTextArea, word_only: Boolean): Unit =
+    Completion_Popup.Text_Area.action(text_area, word_only = word_only,
+      focus = true,
+      select_enter = true,
+      select_tab = true)
 
   def dismissed_popups(view: View): Boolean = {
     var dismissed = false
@@ -532,30 +611,10 @@ object Isabelle {
   }
 
 
-  /* tooltips */
-
-  def show_tooltip(view: View, control: Boolean): Unit = {
-    GUI_Thread.require {}
-
-    val text_area = view.getTextArea
-    val painter = text_area.getPainter
-    val caret_range = JEdit_Lib.caret_range(text_area)
-    for {
-      rendering <- Document_View.get_rendering(text_area)
-      tip <- rendering.tooltip(caret_range, control)
-      loc0 <- Option(text_area.offsetToXY(caret_range.start))
-    } {
-      val loc = new Point(loc0.x, loc0.y + painter.getLineHeight * 3 / 4)
-      val results = rendering.snapshot.command_results(tip.range)
-      Pretty_Tooltip(view, painter, loc, rendering, results, tip.info)
-    }
-  }
-
-
   /* error navigation */
 
   private def goto_error(
-    view: View,
+    editor_context: JEdit_Editor.Static_Context,
     range: Text.Range,
     avoid_range: Text.Range = Text.Range.offside,
     which: String = "")(
@@ -563,48 +622,73 @@ object Isabelle {
   ): Unit = {
     GUI_Thread.require {}
 
-    val text_area = view.getTextArea
-    for (rendering <- Document_View.get_rendering(text_area)) {
+    for (rendering <- Document_View.get_rendering(editor_context.text_area)) {
       val errs = rendering.errors(range).filterNot(_.range.overlaps(avoid_range))
       get(errs) match {
         case Some(err) =>
-          PIDE.editor.goto_file(
-            view, JEdit_Lib.buffer_name(view.getBuffer), offset = err.range.start)
+          JEdit_Editor.navigator_recording(editor_context) {
+            JEdit_Editor.goto_file(
+              editor_context, editor_context.buffer_name, offset = err.range.start)
+          }
         case None =>
-          view.getStatus.setMessageAndClear("No " + which + "error in current document snapshot")
+          editor_context.view.getStatus
+            .setMessageAndClear("No " + which + "error in current document snapshot")
       }
     }
   }
 
-  def goto_first_error(view: View): Unit =
-    goto_error(view, JEdit_Lib.buffer_range(view.getBuffer))(_.headOption)
+  def goto_first_error(text_area: JEditTextArea): Unit = {
+    val editor_context = JEdit_Editor.Context(text_area)
+    goto_error(editor_context, editor_context.buffer_range)(_.headOption)
+  }
 
-  def goto_last_error(view: View): Unit =
-    goto_error(view, JEdit_Lib.buffer_range(view.getBuffer))(_.lastOption)
+  def goto_last_error(text_area: JEditTextArea): Unit = {
+    val editor_context = JEdit_Editor.Context(text_area)
+    goto_error(editor_context, editor_context.buffer_range)(_.lastOption)
+  }
 
-  def goto_prev_error(view: View): Unit = {
-    val caret_range = JEdit_Lib.caret_range(view.getTextArea)
+  def goto_prev_error(text_area: JEditTextArea): Unit = {
+    val editor_context = JEdit_Editor.Context(text_area)
+    val caret_range = editor_context.caret_range
     val range = Text.Range(0, caret_range.stop)
-    goto_error(view, range, avoid_range = caret_range, which = "previous ")(_.lastOption)
+    goto_error(editor_context, range, avoid_range = caret_range, which = "previous ")(_.lastOption)
   }
 
-  def goto_next_error(view: View): Unit = {
-    val caret_range = JEdit_Lib.caret_range(view.getTextArea)
-    val range = Text.Range(caret_range.start, view.getBuffer.getLength)
-    goto_error(view, range, avoid_range = caret_range, which = "next ")(_.headOption)
+  def goto_next_error(text_area: JEditTextArea): Unit = {
+    val editor_context = JEdit_Editor.Context(text_area)
+    val caret_range = editor_context.caret_range
+    val range = Text.Range(caret_range.start, editor_context.buffer.getLength)
+    goto_error(editor_context, range, avoid_range = caret_range, which = "next ")(_.headOption)
   }
+
+
+  /* recode symbols */
+
+  def recode_plain(buffer: Buffer): Unit = Isabelle_Navigator.recode_buffer(buffer, false)
+  def recode_symbols(buffer: Buffer): Unit = Isabelle_Navigator.recode_buffer(buffer, true)
 
 
   /* java monitor */
 
   def java_monitor(view: View): Unit =
-    Java_Monitor.java_monitor_external(view, look_and_feel = GUI.current_laf())
+    Java_Monitor.java_monitor_external(parent = Some(view), look_and_feel = GUI.current_laf())
 
 
-  /* HTTP browser_info */
+  /* PIDE HTTP services */
 
   def open_browser_info(view: View): Unit = {
+    val editor_context = JEdit_Editor.Context(view)
     val url = Url.append_path(PIDE.plugin.http_server.url, HTTP.Browser_Info_Service.index_path())
-    PIDE.editor.hyperlink_url(url).follow(view)
+    JEdit_Editor.hyperlink_url(url).follow(editor_context)
+  }
+
+  def open_preview(view: View, plain_text: Boolean): Unit = {
+    val editor_context = JEdit_Editor.Context(view)
+    Document_Model.get_model(editor_context.buffer) match {
+      case Some(model) =>
+        val url = Document_Model.Preview_Service.server_url(plain_text, model.node_name)
+        JEdit_Editor.hyperlink_url(url).follow(editor_context)
+      case _ =>
+    }
   }
 }

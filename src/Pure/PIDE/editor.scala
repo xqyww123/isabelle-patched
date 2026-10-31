@@ -27,6 +27,7 @@ object Editor {
 
 abstract class Editor {
   type Context
+  type Session <: isabelle.Session
 
 
   /* PIDE session and document model */
@@ -171,7 +172,14 @@ abstract class Editor {
     snapshot: Document.Snapshot,
     id: Document_ID.Generic,
     offset: Symbol.Offset = 0,
+    description: String = "",
     focus: Boolean = false): Option[Hyperlink]
+
+
+  /* navigator */
+
+  def navigator_record(editor_context: Context): Boolean = false
+  def navigator_recording[A](editor_context: Context)(body: => A): A = body
 
 
   /* dispatcher thread */

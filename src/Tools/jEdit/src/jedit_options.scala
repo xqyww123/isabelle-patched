@@ -6,6 +6,7 @@ Options for Isabelle/jEdit.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -35,7 +36,7 @@ object JEdit_Options {
     def changed(): Unit = GUI_Thread.require { PIDE.session.update_options(access.options.value) }
   }
 
-  class Bool_Access(name: String) extends Access(PIDE.options.bool, name) {
+  class Bool_Access(name: String) extends Access(PIDE.plugin.options.bool, name) {
     def set(): Unit = update(true)
     def reset(): Unit = update(false)
     def toggle(): Unit = change(b => !b)
@@ -64,8 +65,8 @@ object JEdit_Options {
   object output_state extends Bool_Access("editor_output_state") {
     override def changed(): Unit = GUI_Thread.require {
       super.changed()
-      PIDE.editor.flush_edits(hidden = true)
-      PIDE.editor.flush()
+      JEdit_Editor.flush_edits(hidden = true)
+      JEdit_Editor.flush_edits()
     }
 
     class GUI extends Bool_GUI(this, "Proof state") {
@@ -110,7 +111,7 @@ object JEdit_Options {
   }
 
   class Isabelle_General_Options extends Isabelle_Options("isabelle-general") {
-    val options: JEdit_Options = PIDE.options
+    val options: JEdit_Options = PIDE.plugin.options
 
     private val predefined =
       List(
@@ -128,20 +129,18 @@ object JEdit_Options {
 
     private val predefined =
       (for {
-        opt <- PIDE.options.value.iterator
+        opt <- PIDE.options.iterator
         if opt.for_color_dialog && opt.is_dark == is_dark
-      } yield PIDE.options.make_color_component(opt)).toList
+      } yield PIDE.plugin.options.make_color_component(opt)).toList
 
     assert(predefined.nonEmpty)
 
     protected val components: List[(String, List[Entry])] =
-      PIDE.options.make_components(predefined, _ => false)
+      PIDE.plugin.options.make_components(predefined, _ => false)
   }
 }
 
 class JEdit_Options(init_options: Options) extends Options_Variable(init_options) {
-  def color_value(s: String): Color = Color_Value(string(s + Options.theme_suffix()))
-
   def make_color_component(opt: Options.Entry): JEdit_Options.Entry = {
     GUI_Thread.require {}
 
@@ -187,8 +186,10 @@ class JEdit_Options(init_options: Options) extends Options_Variable(init_options
               try { JEdit_Options.this += (opt_name, text) }
               catch {
                 case ERROR(msg) =>
-                  GUI.error_dialog(this.peer, "Failed to update options",
-                    GUI.scrollable_text(msg))
+                  GUI.error_dialog(
+                    title = "Failed to update options",
+                    message = Seq(GUI.scrollable_text(msg)),
+                    parent = Some(this.peer))
               }
           }
         text_area.peer.setInputVerifier({

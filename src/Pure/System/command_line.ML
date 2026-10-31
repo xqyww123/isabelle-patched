@@ -23,6 +23,6 @@ fun tool main =
             (case Exn.capture print_failure exn of
               Exn.Res rc => rc
             | Exn.Exn crash => Exn.failure_rc crash));
-    in exit rc end);
+    in PolyML.exit rc end);
 
 end;

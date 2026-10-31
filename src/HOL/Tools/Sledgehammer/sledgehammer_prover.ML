@@ -67,7 +67,7 @@ sig
      factss : (string * fact list) list,
      has_already_found_something : unit -> bool,
      found_something : string -> unit,
-     memoize_fun_call : (string -> string) -> string -> string}
+     memoize_fun_call : (Bytes.T -> string list) -> Bytes.T -> string list}
 
   datatype prover_slice_extra =
     ATP_Slice of atp_slice
@@ -195,7 +195,7 @@ type prover_problem =
    factss : (string * fact list) list,
    has_already_found_something : unit -> bool,
    found_something : string -> unit,
-   memoize_fun_call : (string -> string) -> string -> string}
+   memoize_fun_call : (Bytes.T -> string list) -> Bytes.T -> string list}
 
 datatype prover_slice_extra =
   ATP_Slice of atp_slice
@@ -254,7 +254,8 @@ fun bunches_of_metis_methods ctxt needs_full_types needs_lam_defs =
   end
 
 fun bunches_of_smt_methods ctxt =
-  [map (SMT_Method o SMT_Verit) (Verit_Strategies.all_veriT_stgies (Context.Proof ctxt))]
+  [map (SMT_Method o SMT_cvc) (Alethe_Strategies.all_cvc5_stgies (Context.Proof ctxt)),
+   map (SMT_Method o SMT_Verit) (Alethe_Strategies.all_veriT_stgies (Context.Proof ctxt))]
 
 fun bunches_of_proof_methods ctxt smt_proofs needs_full_types needs_lam_defs =
   let

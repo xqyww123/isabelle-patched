@@ -11,7 +11,6 @@ import java.io.{File => JFile, InputStream}
 import java.nio.file.{Paths, FileSystemNotFoundException}
 import java.net.{URI, URISyntaxException, MalformedURLException, URLDecoder, URLEncoder,
   URLConnection}
-import java.util.Locale
 import java.util.zip.GZIPInputStream
 
 
@@ -20,7 +19,7 @@ object Url {
 
   def escape_special(c: Char): String =
     if ("!#$&'()*+,/:;=?@[]".contains(c)) {
-      String.format(Locale.ROOT, "%%%02X", Integer.valueOf(c.toInt))
+      Library.format("%%%02X", Value.Int.obj(c))
     }
     else c.toString
 
@@ -33,6 +32,7 @@ object Url {
   /* make and check URLs */
 
   def is_malformed(exn: Throwable): Boolean =
+    exn.isInstanceOf[NullPointerException] ||
     exn.isInstanceOf[MalformedURLException] ||
     exn.isInstanceOf[URISyntaxException] ||
     exn.isInstanceOf[IllegalArgumentException]
@@ -57,7 +57,8 @@ object Url {
   /* file name */
 
   def file_name(url: Url): String =
-    Library.take_suffix[Char](c => c != '/' && c != '\\', url.java_url.getFile.toList)._2.mkString
+    Library.take_suffix[Char](c => c != '/' && c != '\\',
+      url.java_url.getFile.nn.toList)._2.mkString
 
   def trim_index(url: Url): Url = {
     Library.try_unprefix("/index.html", url.toString) match {
@@ -73,8 +74,8 @@ object Url {
 
   /* strings */
 
-  def decode(s: String): String = URLDecoder.decode(s, UTF8.charset)
-  def encode(s: String): String = URLEncoder.encode(s, UTF8.charset)
+  def decode(s: String): String = URLDecoder.decode(s, UTF8.charset).nn
+  def encode(s: String): String = URLEncoder.encode(s, UTF8.charset).nn
 
 
   /* read */
@@ -92,10 +93,10 @@ object Url {
 
   /* file URIs */
 
-  def print_file(file: JFile): String = File.absolute(file).toPath.toUri.toString
+  def print_file(file: JFile): String = File.absolute(file).java_path.toUri.nn.toString
   def print_file_name(name: String): String = print_file(new JFile(name))
 
-  def parse_file(uri: String): JFile = Paths.get(new URI(uri)).toFile
+  def parse_file(uri: String): JFile = Paths.get(new URI(uri)).nn.java_file
 
   def is_wellformed_file(uri: String): Boolean =
     try { parse_file(uri); true }
@@ -105,10 +106,10 @@ object Url {
     }
 
   def absolute_file(uri: String): JFile = File.absolute(parse_file(uri))
-  def absolute_file_name(uri: String): String = absolute_file(uri).getPath
+  def absolute_file_name(uri: String): String = absolute_file(uri).getPath.nn
 
   def canonical_file(uri: String): JFile = File.canonical(parse_file(uri))
-  def canonical_file_name(uri: String): String = canonical_file(uri).getPath
+  def canonical_file_name(uri: String): String = canonical_file(uri).getPath.nn
 
 
   /* generic path notation: standard, platform, ssh, rsync, ftp, http, https */
@@ -121,21 +122,21 @@ object Url {
 
   def get_base_name(s: String, suffix: String = ""): Option[String] = {
     val i = s.lastIndexWhere(separators2.contains)
-    if (i + 1 >= s.length) None else Library.try_unsuffix(suffix, s.substring(i + 1))
+    if (i + 1 >= s.length) None else Library.try_unsuffix(suffix, s.drop(i + 1))
   }
 
   def strip_base_name(s: String, suffix: String = ""): Option[String] = {
     val i = s.lastIndexWhere(separators2.contains)
     val j = s.lastIndexWhere(c => !separators1.contains(c), end = i)
     if (i + 1 >= s.length || !s.endsWith(suffix)) None
-    else if (j < 0) Some(s.substring(0, i + 1))
-    else Some(s.substring(0, j + 1))
+    else if (j < 0) Some(s.slice(0, i + 1))
+    else Some(s.slice(0, j + 1))
   }
 
   def get_ext(str: String): String = {
     val s = get_base_name(str).getOrElse("")
     val i = s.lastIndexOf('.')
-    if (i < 0 || i + 1 >= s.length) "" else s.substring(i + 1)
+    if (i < 0 || i + 1 >= s.length) "" else s.drop(i + 1)
   }
 
   def append_path(prefix: String, suffix: String): String =
@@ -143,7 +144,7 @@ object Url {
       prefix + suffix
     }
     else if (prefix.endsWith(":.") || prefix.endsWith("/.") || prefix.endsWith("\\.") || prefix == ".") {
-      prefix.substring(0, prefix.length - 1) + suffix
+      prefix.slice(0, prefix.length - 1) + suffix
     }
     else if (prefix.contains('\\') || suffix.contains('\\')) {
       prefix + "\\" + suffix
@@ -170,9 +171,9 @@ final class Url private(val uri: URI) {
     }
 
   def resolve(route: String): Url =
-    if (route.isEmpty) this else new Url(uri.resolve(route))
+    if (route.isEmpty) this else new Url(uri.resolve(route).nn)
 
-  val java_url: java.net.URL = uri.toURL
-  def open_stream(): InputStream = java_url.openStream()
-  def open_connection(): URLConnection = java_url.openConnection()
+  val java_url: java.net.URL = uri.toURL.nn
+  def open_stream(): InputStream = java_url.openStream().nn
+  def open_connection(): URLConnection = java_url.openConnection().nn
 }

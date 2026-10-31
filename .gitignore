@@ -5,8 +5,9 @@
 /lib/classes
 /lib/browser_info.db
 /src/Tools/Demo/lib
+/src/Tools/Scalajs_Demo/lib
 /src/Tools/Find_Facts/lib/isabelle.db
-/Isabelle2025-2
+/Isabelle2026
 /etc/ISABELLE_IDENTIFIER
 *.unicode.thy
 *.proof-cache.lock

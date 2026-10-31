@@ -29,22 +29,14 @@ object Progress {
       case _ => msg
     }
 
-  enum Kind { case writeln, warning, error_message }
   sealed case class Message(
-    kind: Kind,
+    kind: Output.Kind,
     text: String,
     override val verbose: Boolean = false,
     override val status: Boolean = false
   ) extends Msg {
     override def message: Message = this
-
-    lazy val output_text: String =
-      kind match {
-        case Kind.writeln => Output.writeln_text(text)
-        case Kind.warning => Output.warning_text(text)
-        case Kind.error_message => Output.error_message_text(text)
-      }
-
+    lazy val output_text: String = Output.make_text(kind, text)
     override def toString: String = output_text
   }
 
@@ -57,7 +49,8 @@ object Progress {
     override val status: Boolean = false
   ) extends Msg {
     override def message: Message =
-      Message(Kind.writeln, print_session + print_theory + print_percentage + print_cumulated_time,
+      Message(Output.Kind.writeln,
+        print_session + print_theory + print_percentage + print_cumulated_time,
         verbose = verbose, status = status)
 
     def print_session: String = if_proper(session, session + ": ")
@@ -124,8 +117,23 @@ object Progress {
             if_proper(session, session + ": ") +
               "command " + quote(run.name) + " running for " + run.time(now).message +
               " (line " + run.line + " of theory " + quote(name.theory) + ")"
-          Progress.Message(Progress.Kind.writeln, text, verbose = true, status = status)
+          Progress.Message(Output.Kind.writeln, text, verbose = true, status = status)
         })
+  }
+
+
+  /* interrupts */
+
+  trait Local_Interrupts extends Progress {
+    override def interrupt_handler[A](e: => A): A =
+      Isabelle_Thread.interrupt_handle(stop(), permissive = true) { e }
+  }
+
+  trait Global_Interrupts extends Progress {
+    override def interrupt_handler[A](e: => A): A =
+      Exn.Interrupt.signal_handler(stop()) {
+        Isabelle_Thread.interrupt_handle(stop(), permissive = true) { e }
+      }
   }
 
 
@@ -137,7 +145,7 @@ object Progress {
 
     def status_output(msgs: Progress.Output): Unit
 
-    def status_hide(status: Progress.Output): Unit = ()
+    def status_hide(msgs: Progress.Output): Unit = ()
 
     protected var _status: Progress.Session_Output = Nil
 
@@ -201,11 +209,11 @@ class Progress {
   }
 
   final def echo(msg: String, verbose: Boolean = false): Unit =
-    output(List(Progress.Message(Progress.Kind.writeln, msg, verbose = verbose)))
+    output(List(Progress.Message(Output.Kind.writeln, msg, verbose = verbose)))
   final def echo_warning(msg: String, verbose: Boolean = false): Unit =
-    output(List(Progress.Message(Progress.Kind.warning, msg, verbose = verbose)))
+    output(List(Progress.Message(Output.Kind.warning, msg, verbose = verbose)))
   final def echo_error_message(msg: String, verbose: Boolean = false): Unit =
-    output(List(Progress.Message(Progress.Kind.error_message, msg, verbose = verbose)))
+    output(List(Progress.Message(Output.Kind.error_message, msg, verbose = verbose)))
 
   final def echo_if(cond: Boolean, msg: String): Unit = if (cond) echo(msg)
 
@@ -221,18 +229,16 @@ class Progress {
 
   final def timeit[A](
     body: => A,
-    message: Exn.Result[A] => String = null,
+    message: Timing.Message[A] = Timing.no_message,
     enabled: Boolean = true
   ): A = Timing.timeit(body, message = message, enabled = enabled, output = echo(_))
 
   @volatile private var is_stopped = false
   def stop(): Unit = { is_stopped = true }
-  def stopped: Boolean = {
-    if (Thread.interrupted()) is_stopped = true
-    is_stopped
-  }
+  def stopped: Boolean = is_stopped
 
-  final def interrupt_handler[A](e: => A): A = POSIX_Interrupt.handler { stop() } { e }
+  def interrupt_handler[A](e: => A): A = e
+
   final def expose_interrupt(): Unit = if (stopped) throw Exn.Interrupt()
   override def toString: String = if (stopped) "Progress(stopped)" else "Progress"
 
@@ -255,17 +261,19 @@ class Progress {
   }
 }
 
+class Verbose_Progress extends Progress { override def verbose: Boolean = true }
+
 class Console_Progress(
   override val verbose: Boolean = false,
-  threshold: Time = Build.progress_threshold(Options.init0()),
+  threshold: Time = Build.progress_threshold(Options.defaults),
   detailed: Boolean = false,
   stderr: Boolean = false)
-extends Progress with Progress.Status {
+extends Progress with Progress.Global_Interrupts with Progress.Status {
   override def status_threshold: Time = threshold
   override def status_detailed: Boolean = detailed
 
-  override def status_hide(status: Progress.Output): Unit = synchronized {
-    val txt = output_text(status, terminate = true)
+  override def status_hide(msgs: Progress.Output): Unit = synchronized {
+    val txt = output_text(msgs, terminate = true)
     Output.delete_lines(Library.count_newlines(txt), stdout = !stderr)
   }
 
@@ -281,7 +289,7 @@ extends Progress with Progress.Status {
 }
 
 class File_Progress(path: Path, override val verbose: Boolean = false)
-extends Progress with Progress.Status {
+extends Progress with Progress.Local_Interrupts with Progress.Status {
   override def status_output(msgs: Progress.Output): Unit = synchronized {
     val txt = output_text(msgs, terminate = true)
     if (txt.nonEmpty) File.append(path, txt)

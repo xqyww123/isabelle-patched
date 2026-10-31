@@ -63,6 +63,7 @@ sig
   val unsafe_solver: solver
   val safe_solver_tac: Proof.context -> int -> tactic
   val safe_solver: solver
+  val prune_params_tac: Proof.context -> tactic
 end;
 
 structure Simplifier: SIMPLIFIER =
@@ -78,7 +79,7 @@ fun set_mksimps mk = set_mksimps_context (fn thm => fn ctxt => (mk ctxt thm, ctx
 
 (* attributes *)
 
-fun attrib f = Thm.declaration_attribute (map_ss o f);
+fun attrib f = Thm.declaration_attribute (map_simpset o f);
 
 val simp_add = attrib add_simp;
 val simp_del = attrib del_simp;
@@ -148,7 +149,7 @@ fun define_simproc {passive, name, kind, lhss, proc, identifier} lthy =
         in
           context
           |> Simprocs.map (#2 o Name_Space.define context true (name', simproc'))
-          |> not passive ? map_ss (add_proc simproc')
+          |> not passive ? map_simpset (add_proc simproc')
         end)
     |> pair simproc0
   end;
@@ -269,7 +270,7 @@ fun pretty_simpset verbose ctxt =
 
     fun pretty_simproc (name, lhss) =
       Pretty.block
-        (Pretty.mark_str name :: Pretty.str ":" :: Pretty.fbrk ::
+        (Pretty.marks_str name :: Pretty.str ":" :: Pretty.fbrk ::
           Pretty.fbreaks (map (Pretty.item o single o pretty_term) lhss));
 
     fun pretty_congproc (name, {lhss, proc}) =
@@ -280,7 +281,7 @@ fun pretty_simpset verbose ctxt =
           | NONE => []);
       in
         Pretty.block
-          (Pretty.mark_str name :: Pretty.str ":" :: Pretty.fbrk ::
+          (Pretty.marks_str name :: Pretty.str ":" :: Pretty.fbrk ::
             Pretty.fbreaks (map (Pretty.item o single o pretty_term) lhss) @ prt_rule)
       end;
 
@@ -291,8 +292,8 @@ fun pretty_simpset verbose ctxt =
 
     val ss = dest_ss (simpset_of ctxt);
     val simproc_space = Name_Space.space_of_table (get_simprocs ctxt);
-    val simprocs = Name_Space.markup_entries verbose ctxt simproc_space (#simprocs ss);
-    val congprocs = Name_Space.markup_entries verbose ctxt simproc_space (#congprocs ss);
+    val simprocs = Name_Space.markups_entries verbose ctxt simproc_space (#simprocs ss);
+    val congprocs = Name_Space.markups_entries verbose ctxt simproc_space (#congprocs ss);
   in
     [Pretty.big_list "simplification rules:" (map (pretty_thm_item o #2) (#simps ss)),
       Pretty.big_list "simplification procedures:" (map pretty_simproc simprocs),
@@ -359,6 +360,9 @@ val safe_full_simp_tac = generic_simp_tac true (true, false, false);
 val safe_asm_lr_simp_tac = generic_simp_tac true (true, true, false);
 val safe_asm_full_simp_tac = generic_simp_tac true (true, true, true);
 
+(*Prunes all redundant parameters from the proof state by rewriting.*)
+fun prune_params_tac ctxt = rewrite_goals_tac ctxt [Drule.triv_forall_equality];
+
 
 (* conversions *)
 
@@ -398,7 +402,7 @@ val add_del =
   (Args.del -- Args.colon >> K del_proc ||
     Scan.option (Args.add -- Args.colon) >> K add_proc)
   >> (fn f => fn simproc => Morphism.entity (fn phi => Thm.declaration_attribute
-      (K (map_ss (f (transform_simproc phi simproc))))));
+      (K (map_simpset (f (transform_simproc phi simproc))))));
 
 in
 
@@ -510,7 +514,7 @@ val safe_solver = mk_solver "Pure safe" safe_solver_tac;
 
 val _ =
   Theory.setup
-    (method_setup [] #> Context.theory_map (map_ss (
+    (method_setup [] #> Context.theory_map (map_simpset (
       empty_simpset
       #> set_safe_solver safe_solver
       #> set_unsafe_solver unsafe_solver

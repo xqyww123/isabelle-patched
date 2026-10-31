@@ -54,10 +54,60 @@ diff -Nru -- jedit5.7.0/jEdit/keymaps/German_Keyboard_keys.props jedit5.7.0-patc
 +vfs.browser.previous.shortcut=A+LEFT
 +vfs.browser.next.shortcut=A+RIGHT
  #}}}
-diff -Nru -- jedit5.7.0/jEdit/keymaps/jEdit_keys.props jedit5.7.0-patched/jEdit/keymaps/jEdit_keys.props
+diff -ru jedit5.7.0/jEdit/keymaps/jEdit_keys.props jedit5.7.0-patched/jEdit/keymaps/jEdit_keys.props
 --- jedit5.7.0/jEdit/keymaps/jEdit_keys.props	2024-08-03 19:53:29.000000000 +0200
-+++ jedit5.7.0-patched/jEdit/keymaps/jEdit_keys.props	2025-11-18 21:48:00.869789314 +0100
-@@ -225,7 +225,7 @@
++++ jedit5.7.0-patched/jEdit/keymaps/jEdit_keys.props	2026-05-15 15:19:52.613818441 +0200
+@@ -1,5 +1,5 @@
+ #{{{ Function keys
+-help.shortcut=F1
++#help.shortcut=F1
+ show-context-menu.shortcut=CONTEXT_MENU
+ #}}}
+ 
+@@ -10,7 +10,6 @@
+ delete-line.shortcut=C+d
+ # C+e is a prefix
+ find.shortcut=C+f
+-find-next.shortcut=F3
+ # C+h is not usable on MacOS X
+ indent-lines.shortcut=C+i
+ join-lines.shortcut=C+j
+@@ -104,6 +103,7 @@
+ top-docking-area.shortcut=C+e C+UP
+ right-docking-area.shortcut=C+e C+RIGHT
+ bottom-docking-area.shortcut=C+e C+DOWN
++focus-textarea.shortcut=S+F1
+ toggle-full-screen.shortcut=F11
+ toggle-dock-areas.shortcut=F12
+ combined-options.shortcut=C+F12
+@@ -120,7 +120,7 @@
+ collapse-all-folds.shortcut=C+e c
+ delete-paragraph.shortcut=C+e d
+ format-paragraph.shortcut=C+e f
+-find-previous.shortcut=C+e g
++find-prev.shortcut=C+e g
+ invert-selection.shortcut=C+e i
+ select-line.shortcut=C+e l
+ narrow-to-fold.shortcut=C+e n n
+@@ -162,7 +162,7 @@
+ shift-left.shortcut=A+LEFT
+ shift-right.shortcut=A+RIGHT
+ collapse-fold.shortcut=A+BACK_SPACE
+-expand-fold.shortcut=AS+ENTER
++expand-fold.shortcut=AS+END
+ expand-one-level.shortcut=A+ENTER
+ quick-search-word.shortcut=A+COMMA
+ hypersearch-word.shortcut=A+PERIOD
+@@ -176,6 +176,8 @@
+ #}}}
+ 
+ #{{{ Other keys
++find-next.shortcut=F3
++find-prev.shortcut2=S+F3
+ shift-left.shortcut2=S+TAB
+ select-none.shortcut=ESCAPE
+ backspace.shortcut=BACK_SPACE
+@@ -225,7 +227,7 @@
  vfs.browser.rename.shortcut=F2
  vfs.browser.roots.shortcut=/
  vfs.browser.synchronize.shortcut=-

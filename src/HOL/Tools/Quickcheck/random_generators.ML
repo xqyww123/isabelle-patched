@@ -78,10 +78,10 @@ val a_v =
   pt_random_aux |> Thm.ctyp_of_cterm |> Thm.dest_ctyp1
   |> Thm.typ_of |> dest_TVar;
 
-val rew_thms = map mk_meta_eq [@{thm natural_zero_minus_one},
-  @{thm Suc_natural_minus_one}, @{thm select_weight_cons_zero}, @{thm beyond_zero}];
+val rew_thms = map mk_meta_eq @{thms natural_zero_minus_one
+  Suc_natural_minus_one select_weight_cons_zero beyond_zero};
 val rew_ts = map (Logic.dest_equals o Thm.prop_of) rew_thms;
-val rew_ss = simpset_of (put_simpset HOL_ss \<^context> |> Simplifier.add_simps rew_thms);
+val rew_ss = HOL_ss |> Simplifier.simpset_map \<^context> (Simplifier.add_simps rew_thms);
 
 in
 
@@ -265,7 +265,7 @@ fun instantiate_random_datatype config descr vs tycos prfx (names, auxnames) (Ts
     |> random_aux_specification prfx random_auxN auxs_eqs
     |> `(fn lthy => map (Syntax.check_term lthy) random_defs)
     |-> (fn random_defs' => fold_map (fn random_def =>
-          Specification.definition NONE [] []
+          Specification.definition {verbose = false} NONE [] []
             ((Binding.concealed Binding.empty, []), random_def)) random_defs')
     |> snd
     |> Class.prove_instantiation_exit (fn ctxt => Class.intro_classes_tac ctxt [])

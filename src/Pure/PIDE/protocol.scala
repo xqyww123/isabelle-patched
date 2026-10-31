@@ -162,7 +162,7 @@ object Protocol {
   def is_exported(msg: XML.Tree): Boolean =
     is_writeln(msg) || is_warning(msg) || is_legacy(msg) || is_error(msg)
 
-  def message_heading(elem: XML.Elem, pos: Position.T): String = {
+  def message_heading(elem: XML.Elem, pos: Position.T = Position.none): String = {
     val h =
       if (is_warning_or_legacy(elem)) "Warning"
       else if (is_error(elem)) "Error"
@@ -181,7 +181,7 @@ object Protocol {
     breakgain: Double = Pretty.default_breakgain,
     metric: Pretty.Metric = Codepoint.Metric
   ): String = {
-    val text1 = if (heading) "\n" + recode(message_heading(elem, pos)) + ":\n" else ""
+    val text1 = if (heading) "\n" + recode(message_heading(elem, pos = pos)) + ":\n" else ""
 
     val body =
       Pretty.string_of(List(elem), recode = recode, margin = margin, breakgain = breakgain,
@@ -332,12 +332,6 @@ trait Protocol {
   def protocol_command(name: String, args: XML.Body*): Unit
 
 
-  /* options */
-
-  def options(opts: Options): Unit =
-    protocol_command("Prover.options", opts.encode)
-
-
   /* resources */
 
   def init_session(resources: Resources): Unit =
@@ -346,13 +340,13 @@ trait Protocol {
 
   /* interned items */
 
-  def define_blob(digest: SHA1.Digest, bytes: Bytes): Unit =
-    protocol_command_raw("Document.define_blob", List(Bytes(digest.toString), bytes))
+  def define_blob(digest: Message_Digest.T, bytes: Bytes): Unit =
+    protocol_command_raw("Document.define_blob", List(Bytes(digest.rep), bytes))
 
   private def encode_command(
     resources: Resources,
     command: Command
-  ) : (XML.Body, XML.Body, XML.Body, XML.Body, XML.Body, List[XML.Body]) = {
+  ) : (XML.Body, XML.Body, XML.Body, XML.Body, XML.Body, XML.Body, List[XML.Body]) = {
     import XML.Encode._
 
     val parents = command.theory_parents(resources).map(name => File.standard_url(name.node))
@@ -363,7 +357,7 @@ trait Protocol {
         variant(List(
           { case Exn.Res(Command.Blob(_, a, b, c)) =>
               (Nil, triple(string, string, option(string))(
-                (a.node, b.implode, c.map(p => p._1.toString)))) },
+                (a.node, b.implode, c.map(p => p._1.rep)))) },
           { case Exn.Exn(e) => (Nil, string(Exn.message(e))) }))
 
       pair(list(encode_blob), int)(command.blobs, command.blobs_index)
@@ -375,22 +369,24 @@ trait Protocol {
     }
     val toks_sources_xml: List[XML.Body] = command.span.content.map(tok => XML.string(tok.source))
 
-    (Document_ID.encode(command.id), XML.string(command.span.name),
+    val command_kind = command.span.kind.keyword_kind getOrElse ""
+
+    (Document_ID.encode(command.id), XML.string(command.span.name), XML.string(command_kind),
       parents_xml, blobs_xml, toks_xml, toks_sources_xml)
   }
 
   def define_command(resources: Resources, command: Command): Unit = {
-    val (a, b, c, d, e, rest) = encode_command(resources, command)
-    protocol_command_args("Document.define_command", a :: b :: c :: d :: e :: rest)
+    val (a, b, c, d, e, f, rest) = encode_command(resources, command)
+    protocol_command_args("Document.define_command", a :: b :: c :: d :: e :: f :: rest)
   }
 
   def define_commands(resources: Resources, commands: List[Command]): Unit =
     protocol_command_args("Document.define_commands",
       commands.map { command =>
         import XML.Encode._
-        val (a, b, c, d, e, rest) = encode_command(resources, command)
-        pair(self, pair(self, pair(self, pair(self, pair(self, list(self))))))(
-          a, (b, (c, (d, (e, rest)))))
+        val (a, b, c, d, e, f, rest) = encode_command(resources, command)
+        pair(self, pair(self, pair(self, pair(self, pair(self, pair(self, list(self)))))))(
+          a, (b, (c, (d, (e, (f, rest))))))
       })
 
   def define_commands_bulk(resources: Resources, commands: List[Command]): Unit = {
@@ -426,22 +422,14 @@ trait Protocol {
       import XML.Encode._
 
       def id: T[Command] = (cmd => long(cmd.id))
-      def encode_edit(name: Document.Node.Name)
-          : T[Document.Node.Edit[Command.Edit, Command.Perspective]] =
+      val encode_edit: T[Document.Node.Edit[Command.Edit, Command.Perspective]] =
         variant(List(
           { case Document.Node.Edits(a) => (Nil, list(pair(option(id), option(id)))(a)) },
-          { case Document.Node.Deps(header) =>
-              val master_dir = File.standard_url(name.master_dir)
-              val imports = header.imports.map(_.node)
-              val keywords = header.keywords.map({ case (a, spec) => (a, (spec.kind, spec.tags)) })
-              (Nil,
-                pair(string, pair(string, pair(list(string),
-                  pair(list(pair(string, pair(string, list(string)))), list(string)))))(
-                (master_dir, (name.theory, (imports, (keywords, header.errors)))))) },
+          { case Document.Node.Thy(a) => (Nil, Resources.Thy.encode(a)) },
           { case Document.Node.Perspective(a, b, c) =>
               (bool_atom(a) :: b.commands.map(cmd => long_atom(cmd.id)),
                 list(pair(id, pair(string, list(string))))(c.dest)) }))
-      edits.map({ case (name, edit) => pair(string, encode_edit(name))(name.node, edit) })
+      edits.map({ case (name, edit) => pair(string, encode_edit)(name.node, edit) })
     }
     protocol_command_args("Document.update",
       Document_ID.encode(old_id) :: Document_ID.encode(new_id) :: consolidate_xml :: edits_xml)

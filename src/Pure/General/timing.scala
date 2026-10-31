@@ -7,14 +7,14 @@ Support for time measurement.
 package isabelle
 
 
-import java.util.Locale
-
-
 object Timing {
   val zero: Timing = Timing(Time.zero, Time.zero, Time.zero)
 
+  type Message[A] = Exn.Result[A] => String
+  val no_message: Message[Any] = _ => ""
+
   def timeit[A](body: => A,
-    message: Exn.Result[A] => String = null,
+    message: Message[A] = no_message,
     enabled: Boolean = true,
     output: String => Unit = Output.warning(_)
   ): A = {
@@ -25,7 +25,7 @@ object Timing {
 
       val timing = stop - start
       if (timing.is_relevant) {
-        val msg = if (message == null) null else message(result)
+        val msg = message(result)
         output(if_proper(msg, msg + ": ") + timing.message + " elapsed time")
       }
 
@@ -35,7 +35,7 @@ object Timing {
   }
 
   def factor_format(f: Double): String =
-    String.format(Locale.ROOT, ", factor %.2f", java.lang.Double.valueOf(f))
+    Library.format(", factor %.2f", Value.Double.obj(f))
 
   def make(elapsed: Time, cpu: Time, gc: Time): Timing =
     if (elapsed.is_zero && cpu.is_zero && gc.is_zero) zero else Timing(elapsed, cpu, gc)

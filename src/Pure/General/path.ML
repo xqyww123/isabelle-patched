@@ -31,6 +31,7 @@ sig
   val dir: T -> T
   val base: T -> T
   val ext: string -> T -> T
+  val thy: T -> T
   val platform_exe: T -> T
   val split_ext: T -> T * string
   val drop_ext: T -> T
@@ -38,6 +39,7 @@ sig
   val is_xz: T -> bool
   val is_zst: T -> bool
   val expand: T -> T
+  val absolute: T -> T
   val file_name: T -> string
   eqtype binding
   val binding: T * Position.T -> binding
@@ -209,6 +211,8 @@ val base = split_path (fn (_, s) => Path [Basic s]);
 fun ext "" = I
   | ext e = split_path (fn (prfx, s) => append prfx (basic (s ^ "." ^ e)));
 
+val thy = ext "thy";
+
 val platform_exe = ML_System.platform_is_windows ? ext "exe";
 
 val split_ext = split_path (fn (prfx, s) => apfst (append prfx)
@@ -235,7 +239,19 @@ fun eval (Variable s) =
 
 val expand = rep #> maps eval #> norm #> Path;
 
-val file_name = implode_path o base o expand;
+val absolute =
+  expand #> (fn path =>
+    if is_absolute path then path
+    else append (explode_path (ML_System.standard_path (OS.FileSys.getDir ()))) path);
+
+fun file_name (Path (Basic b :: _)) = b
+  | file_name path =
+      let fun err bad = error ("Cannot determine file-name from " ^ print bad) in
+        (case try absolute path of
+          SOME (Path (Basic b :: _)) => b
+        | SOME p => err p
+        | NONE => err path)
+      end;
 
 
 (* binding: strictly monotonic path with position *)

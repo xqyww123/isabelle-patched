@@ -1496,6 +1496,14 @@ lemma [code]: "ntrancl (Suc n) r = (let r' = ntrancl n r in r' \<union> r' O r)"
 lemma finite_trancl_ntranl: "finite R \<Longrightarrow> trancl R = ntrancl (card R - 1) R"
   by (cases "card R") (auto simp: trancl_finite_eq_relpow relpow_empty ntrancl_def)
 
+text \<open>The two lemmas below make the reflexive transitive executable in certain contexts.\<close>
+
+lemma rtrancl_Image_code[code_unfold]: "R^* `` A = R^+ `` A \<union> A"
+unfolding rtrancl_trancl_reflcl Un_Image Image_Id ..
+
+lemma rtrancl_converse_code[code_unfold]: "(R^*)^-1 `` A = (R^+)^-1 `` A \<union> A"
+by(simp flip:  rtrancl_converse trancl_converse add: rtrancl_Image_code)
+
 
 subsection \<open>Acyclic relations\<close>
 
@@ -1599,11 +1607,11 @@ structure Tranclp_Tac = Trancl_Tac
 \<close>
 
 setup \<open>
-  map_theory_simpset (fn ctxt => ctxt
-    |> Simplifier.add_unsafe_solver (mk_solver "Trancl" Trancl_Tac.trancl_tac)
-    |> Simplifier.add_unsafe_solver (mk_solver "Rtrancl" Trancl_Tac.rtrancl_tac)
-    |> Simplifier.add_unsafe_solver (mk_solver "Tranclp" Tranclp_Tac.trancl_tac)
-    |> Simplifier.add_unsafe_solver (mk_solver "Rtranclp" Tranclp_Tac.rtrancl_tac))
+  Simplifier.map_theory_simpset
+    (Simplifier.add_unsafe_solver (Simplifier.mk_solver "Trancl" Trancl_Tac.trancl_tac)
+    #> Simplifier.add_unsafe_solver (Simplifier.mk_solver "Rtrancl" Trancl_Tac.rtrancl_tac)
+    #> Simplifier.add_unsafe_solver (Simplifier.mk_solver "Tranclp" Tranclp_Tac.trancl_tac)
+    #> Simplifier.add_unsafe_solver (Simplifier.mk_solver "Rtranclp" Tranclp_Tac.rtrancl_tac))
 \<close>
 
 lemma transp_rtranclp [simp]: "transp R\<^sup>*\<^sup>*"

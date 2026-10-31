@@ -7,12 +7,13 @@ Resources for theories and auxiliary files.
 signature RESOURCES =
 sig
   val default_qualifier: string
+  type scala_fun = {single: bool, bytes: bool, pos: Position.T}
   val init_session:
     {session_positions: (string * Properties.T) list,
      session_directories: (string * string) list,
      command_timings: Properties.T list,
      load_commands: (string * Position.T) list,
-     scala_functions: (string * ((bool * bool) * Position.T)) list,
+     scala_functions: (string * scala_fun) list,
      global_theories: (string * string) list,
      loaded_theories: string list} -> unit
   val init_session_yxml: Bytes.T -> unit
@@ -23,30 +24,40 @@ sig
   val check_session: Proof.context -> string * Position.T -> string
   val last_timing: Toplevel.transition -> Time.time
   val check_load_command: Proof.context -> string * Position.T -> string
-  val check_scala_function: Proof.context -> string * Position.T -> string * (bool * bool)
+  val check_scala_function: Proof.context -> string * Position.T -> string * scala_fun
   val master_directory: theory -> Path.T
-  val imports_of: theory -> (string * Position.T) list
-  val begin_theory: Path.T -> Thy_Header.header -> theory list -> theory
-  val thy_path: Path.T -> Path.T
+  type node_name = {node: string, master_dir: Path.T, theory: string}
+  val node_name: string -> node_name
+  val empty_node_name: node_name
+  val decode_node_name: node_name XML.Decode.T
+  type thy =
+   {name: node_name,
+    pos: Position.T,
+    imports: (node_name * Position.T) list,
+    options: Options.update_pos,
+    keywords: Thy_Header.keywords,
+    condition_bad: bool * string,
+    errors: string list,
+    initiators: node_name list}
+  val no_thy: thy
+  val decode_thy: thy XML.Decode.T
+  val map_thy_pos: (Position.T -> Position.T) -> thy -> thy
+  val map_thy_errors: (string list -> string list) -> thy -> thy
+  val check_thy_errors: thy -> thy
+  val skip_theory: thy -> bool
+  val skip_proofs: thy -> bool
+  val skipping_theory: (string -> unit) -> thy -> unit
+  val begin_theory: thy -> theory list -> theory
   val theory_qualifier: string -> string
   val find_theory_file: string -> Path.T option
   val import_name: string -> Path.T -> string ->
     {node_name: Path.T, master_dir: Path.T, theory_name: string}
-  val check_thy: Path.T -> string ->
-   {master: Path.T * SHA1.digest, text: string, theory_pos: Position.T,
-    imports: (string * Position.T) list, keywords: Thy_Header.keywords}
   val read_file_node: string -> Path.T -> Path.T * Position.T -> Token.file
   val read_file: Path.T -> Path.T * Position.T -> Token.file
   val parsed_files: (Path.T -> Path.T list) ->
     Token.file Exn.result list * Input.source -> theory -> Token.file list
   val parse_files: (Path.T -> Path.T list) -> (theory -> Token.file list) parser
   val parse_file: (theory -> Token.file) parser
-  val provide: Path.T * SHA1.digest -> theory -> theory
-  val provide_file: Token.file -> theory -> theory
-  val provide_file': Token.file -> theory -> Token.file * theory
-  val provide_parse_files: (Path.T -> Path.T list) -> (theory -> Token.file list * theory) parser
-  val provide_parse_file: (theory -> Token.file * theory) parser
-  val loaded_files_current: theory -> bool
   val check_path: Proof.context -> Path.T option -> Input.source -> Path.T
   val check_file: Proof.context -> Path.T option -> Input.source -> Path.T
   val check_dir: Proof.context -> Path.T option -> Input.source -> Path.T
@@ -93,6 +104,8 @@ fun get_timings timings tr =
 
 (* session base *)
 
+type scala_fun = {single: bool, bytes: bool, pos: Position.T};
+
 val default_qualifier = "Draft";
 
 type entry = {pos: Position.T, serial: serial};
@@ -105,7 +118,7 @@ val empty_session_base =
     session_directories = Symtab.empty: Path.T list Symtab.table,
     timings = empty_timings,
     load_commands = []: (string * Position.T) list,
-    scala_functions = Symtab.empty: ((bool * bool) * Position.T) Symtab.table},
+    scala_functions = Symtab.empty: scala_fun Symtab.table},
    {global_theories = Symtab.empty: string Symtab.table,
     loaded_theories = Symset.empty: Symset.T});
 
@@ -132,12 +145,17 @@ fun init_session_yxml yxml =
     val (session_positions, (session_directories, (command_timings,
         (load_commands, (scala_functions, (global_theories, loaded_theories)))))) =
       YXML.parse_body_bytes yxml |>
-        let open XML.Decode in
+        let
+          open XML.Decode;
+          val scala_fun =
+            triple bool bool properties #>
+            (fn (a, b, p) => {single = a, bytes = b, pos = Position.of_properties p});
+        in
           (pair (list (pair string properties))
             (pair (list (pair string string))
               (pair (list properties)
                 (pair (list (pair string properties))
-                  (pair (list (pair string (pair (pair bool bool) properties)))
+                  (pair (list (pair string scala_fun))
                     (pair (list (pair string string)) (list string)))))))
         end;
   in
@@ -146,7 +164,7 @@ fun init_session_yxml yxml =
        session_directories = session_directories,
        command_timings = command_timings,
        load_commands = (map o apsnd) Position.of_properties load_commands,
-       scala_functions = (map o apsnd o apsnd) Position.of_properties scala_functions,
+       scala_functions = scala_functions,
        global_theories = global_theories,
        loaded_theories = loaded_theories}
   end;
@@ -188,10 +206,9 @@ fun check_load_command ctxt arg =
 fun check_scala_function ctxt arg =
   let
     val table = get_session_base1 #scala_functions;
-    val funs = Symtab.fold (fn (a, (_, pos)) => cons (a, pos)) table [] |> sort_by #1;
+    val funs = Symtab.fold (fn (a, {pos, ...}) => cons (a, pos)) table [] |> sort_by #1;
     val name = Completion.check_entity Markup.scala_functionN funs ctxt arg;
-    val flags = #1 (the (Symtab.lookup table name));
-  in (name, flags) end;
+  in (name, the (Symtab.lookup table name)) end;
 
 val _ = Theory.setup
  (Document_Output.antiquotation_verbatim_embedded \<^binding>\<open>scala_function\<close>
@@ -202,45 +219,104 @@ val _ = Theory.setup
   ML_Antiquotation.value_embedded \<^binding>\<open>scala\<close>
     (Args.context -- Scan.lift Parse.embedded_position >> (fn (ctxt, arg) =>
       let
-        val (name, (single, bytes)) = check_scala_function ctxt arg;
+        val (name, {single, bytes, ...}) = check_scala_function ctxt arg;
         val func =
           (if single then "Scala.function1" else "Scala.function") ^
           (if bytes then "_bytes" else "");
       in ML_Syntax.atomic (func ^ " " ^ ML_Syntax.print_string name) end)));
 
 
-(* theory resources *)
-
-type data =
- {master_dir: Path.T,  (*master directory of theory source*)
-  imports: (string * Position.T) list,  (*source specification of imports*)
-  provided: (Path.T * SHA1.digest) list};  (*source path, digest*)
-
-fun make_data (master_dir, imports, provided): data =
- {master_dir = master_dir, imports = imports, provided = provided};
+(* theory resources and entries *)
 
 structure Data = Theory_Data
 (
-  type T = data;
-  val empty = make_data (Path.current, [], []);
-  fun merge ({master_dir, imports, provided = provided1}, {provided = provided2, ...}) =
-    let val provided' = Library.merge (op =) (provided1, provided2)
-    in make_data (master_dir, imports, provided') end
+  type T = Path.T;  (*master directory of theory source*)
+  val empty = Path.current;
+  val merge = fst;
 );
 
-fun map_data f =
-  Data.map (fn {master_dir, imports, provided} =>
-    make_data (f (master_dir, imports, provided)));
+val master_directory = Data.get;
 
 
-val master_directory = #master_dir o Data.get;
-val imports_of = #imports o Data.get;
+type node_name = {node: string, master_dir: Path.T, theory: string};
 
-fun begin_theory master_dir {name, imports, keywords} parents =
+fun node_name node : node_name = {node = node, master_dir = Path.current, theory = ""};
+val empty_node_name: node_name = {node = "", master_dir = Path.current, theory = ""};
+
+val decode_node_name: node_name XML.Decode.T =
+  let open XML.Decode
+  in triple string (Path.explode o string) string end
+  #> (fn (node, master_dir, theory) => {node = node, master_dir = master_dir, theory = theory});
+
+
+type thy =
+ {name: node_name,
+  pos: Position.T,
+  imports: (node_name * Position.T) list,
+  options: Options.update_pos,
+  keywords: Thy_Header.keywords,
+  condition_bad: bool * string,
+  errors: string list,
+  initiators: node_name list};
+
+val no_thy: thy =
+ {name = empty_node_name, pos = Position.none, imports = [], options = [],
+   keywords = [], condition_bad = (false, ""), errors = [], initiators = []};
+
+val decode_thy: thy XML.Decode.T =
   let
+    open XML.Decode;
+    val position = Position.of_properties o properties;
+    val string_none = rpair Position.none o string;
+    val keyword = pair string_none (Keyword.command_spec o pair string (list string));
+  in
+    pair decode_node_name
+      (pair position
+        (pair (list (pair decode_node_name position))
+          (pair (list (pair string_none (option string_none)))
+            (pair (list keyword) (pair (pair bool YXML.string_of_body)
+              ((pair (list YXML.string_of_body) (list decode_node_name))))))))
+  end
+  #> (fn (name, (pos, (imports, (options, (keywords, (condition_bad, (errors, initiators))))))) =>
+      {name = name, pos = pos, imports = imports, options = options, keywords = keywords,
+        condition_bad = condition_bad, errors = errors, initiators = initiators});
+
+fun map_thy_pos f
+  ({name, pos, imports, options, keywords, condition_bad, errors, initiators}: thy) : thy =
+   {name = name, pos = f pos, imports = map (apsnd f) imports,
+    options = map (fn (a, b) => (apsnd f a, Option.map (apsnd f) b)) options,
+    keywords = keywords, condition_bad = condition_bad, errors = errors, initiators = initiators};
+
+fun map_thy_errors f
+  ({name, pos, imports, options, keywords, condition_bad, errors, initiators}: thy) : thy =
+   {name = name, pos = pos, imports = imports, options = options, keywords = keywords,
+    condition_bad = condition_bad, errors = f errors, initiators = initiators};
+
+fun check_thy_errors (thy: thy) =
+  (case #errors thy of
+    [] => thy
+  | errs =>
+      error (Protocol_Message.command_positions_yxml (Position.thread_data ()) (cat_lines errs)));
+
+
+(* begin theory *)
+
+fun skip_theory ({condition_bad = (proofs, bad), ...}: thy) = bad <> "" andalso not proofs;
+fun skip_proofs ({condition_bad = (proofs, bad), ...}: thy) = bad <> "" andalso proofs;
+
+fun skipping_theory output (thy as {name = {theory, ...}, condition_bad = (_, bad), ...}: thy) =
+  let fun out msg = output (msg ^ " " ^ quote theory ^ " " ^ bad) in
+    if skip_theory thy then out "Skipping theory"
+    else if skip_proofs thy then out "Skipping proofs of theory"
+    else ()
+  end;
+
+fun begin_theory ({name, pos, keywords, ...}: thy) parents =
+  let
+    val master_dir = Path.explode (File.symbolic_path (#master_dir name));
     val thy =
-      Theory.begin_theory name parents
-      |> map_data (fn _ => (Path.explode (File.symbolic_path master_dir), imports, []))
+      Theory.begin_theory (#theory name, pos) parents
+      |> Data.put master_dir
       |> Thy_Header.add_keywords keywords;
     val ctxt = Proof_Context.init_global thy;
     val _ = List.app (ignore o check_load_command ctxt o #load_command o #2) keywords;
@@ -248,8 +324,6 @@ fun begin_theory master_dir {name, imports, keywords} parents =
 
 
 (* theory files *)
-
-val thy_path = Path.ext "thy";
 
 fun theory_qualifier theory =
   (case global_theory theory of
@@ -265,7 +339,7 @@ fun theory_name qualifier theory =
 
 fun find_theory_file thy_name =
   let
-    val thy_file = thy_path (Path.basic (Long_Name.base_name thy_name));
+    val thy_file = Path.thy (Path.basic (Long_Name.base_name thy_name));
     val session = theory_qualifier thy_name;
     val dirs = Symtab.lookup_list (get_session_base1 #session_directories) session;
   in
@@ -297,29 +371,7 @@ fun import_name qualifier dir s =
       | NONE =>
           if Thy_Header.is_base_name s andalso Long_Name.is_qualified s
           then loaded_theory_node theory
-          else theory_node (File.full_path dir (thy_path (Path.expand (Path.explode s)))))
-  end;
-
-fun check_file dir file = File.check_file (File.full_path dir file);
-
-fun check_thy dir thy_name =
-  let
-    val thy_base_name = Long_Name.base_name thy_name;
-    val master_file =
-      (case find_theory_file thy_name of
-        SOME path => check_file Path.current path
-      | NONE => check_file dir (thy_path (Path.basic thy_base_name)));
-    val text = File.read master_file;
-
-    val {name = (name, pos), imports, keywords} =
-      Thy_Header.read (Position.file (File.symbolic_path master_file)) text;
-    val _ =
-      thy_base_name <> name andalso
-        error ("Bad theory name " ^ quote name ^
-          " for file " ^ Path.print (Path.base master_file) ^ Position.here pos);
-  in
-   {master = (master_file, SHA1.digest text), text = text, theory_pos = pos,
-    imports = imports, keywords = keywords}
+          else theory_node (File.full_path dir (Path.thy (Path.expand (Path.explode s)))))
   end;
 
 
@@ -347,8 +399,7 @@ fun read_file_node file_node master_dir (src_path, pos) =
       | _ => read_remote ());
 
     val lines = split_lines text;
-    val digest = SHA1.digest text;
-  in {src_path = src_path, lines = lines, digest = digest, pos = Position.copy_id pos file_pos} end
+  in {src_path = src_path, lines = lines, pos = Position.copy_id pos file_pos} end
   handle ERROR msg => error (msg ^ Position.here pos);
 
 val read_file = read_file_node "";
@@ -376,36 +427,6 @@ fun parse_files make_paths =
   (Scan.ahead Parse.not_eof >> Token.get_files) -- Parse.path_input >> parsed_files make_paths;
 
 val parse_file = parse_files single >> (fn f => f #> the_single);
-
-
-fun provide (src_path, digest) =
-  map_data (fn (master_dir, imports, provided) =>
-    if AList.defined (op =) provided src_path then
-      error ("Duplicate use of source file: " ^ Path.print src_path)
-    else (master_dir, imports, (src_path, digest) :: provided));
-
-fun provide_file (file: Token.file) = provide (#src_path file, #digest file);
-fun provide_file' file thy = (file, provide_file file thy);
-
-fun provide_parse_files make_paths =
-  parse_files make_paths >> (fn files => fn thy => fold_map provide_file' (files thy) thy);
-
-val provide_parse_file = provide_parse_files single >> (fn f => f #>> the_single);
-
-
-fun load_file thy src_path =
-  let
-    val full_path = check_file (master_directory thy) src_path;
-    val text = File.read full_path;
-    val digest = SHA1.digest text;
-  in ((full_path, digest), text) end;
-
-fun loaded_files_current thy =
-  #provided (Data.get thy) |>
-    forall (fn (src_path, digest) =>
-      (case try (load_file thy) src_path of
-        NONE => false
-      | SOME ((_, digest'), _) => digest = digest'));
 
 
 (* formal check *)

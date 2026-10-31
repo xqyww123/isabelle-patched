@@ -6,6 +6,7 @@ Dockable window for Symbol Palette.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -26,7 +27,7 @@ class Symbols_Dockable(view: View, position: String) extends Dockable(view, posi
   private val abbrevs_panel = new Abbrevs_Panel
 
   private val abbrevs_refresh_delay =
-    Delay.last(PIDE.session.update_delay, gui = true) { abbrevs_panel.refresh() }
+    GUI.Delay.last(PIDE.session.update_delay) { abbrevs_panel.refresh() }
 
   private class Abbrev_Component(txt: String, abbrs: List[String]) extends Button {
     def update_font(): Unit = { font = GUI.font(size = font_size) }
@@ -37,7 +38,8 @@ class Symbols_Dockable(view: View, position: String) extends Dockable(view, posi
       Action(text) {
         val text_area = view.getTextArea
         val (s1, s2) =
-          Completion.split_template(Isabelle_Encoding.perhaps_decode(text_area.getBuffer, txt))
+          Completion.split_template(
+            Isabelle_Encoding.gui_style(buffer = text_area.getBuffer).output(txt))
         text_area.setSelectedText(s1 + s2)
         text_area.moveCaretPosition(text_area.getCaretPosition - s2.length)
         text_area.requestFocus()
@@ -94,7 +96,8 @@ class Symbols_Dockable(view: View, position: String) extends Dockable(view, posi
         if (is_control && HTML.is_control(symbol))
           Syntax_Style.edit_control_style(text_area, symbol)
         else
-          text_area.setSelectedText(Isabelle_Encoding.perhaps_decode(text_area.getBuffer, symbol))
+          text_area.setSelectedText(
+            Isabelle_Encoding.gui_style(buffer = text_area.getBuffer).output(symbol))
         text_area.requestFocus()
       }
     tooltip =
@@ -124,7 +127,7 @@ class Symbols_Dockable(view: View, position: String) extends Dockable(view, posi
       for (entry <- Symbol.symbols.entries if entry.code.isDefined)
         yield entry.symbol -> Word.lowercase(entry.symbol)
     val search_delay: Delay =
-      Delay.last(PIDE.session.input_delay, gui = true) {
+      GUI.Delay.last(PIDE.session.input_delay) {
         val search_words = Word.explode(Word.lowercase(search_field.text))
         val search_limit = PIDE.options.int("jedit_symbols_search_limit") max 0
         val results =
@@ -181,7 +184,7 @@ class Symbols_Dockable(view: View, position: String) extends Dockable(view, posi
     (_: EBMessage) => abbrevs_refresh_delay.invoke()
 
   private val main =
-    Session.Consumer[Any](getClass.getName) {
+    Session.Consumer[Session.Global_Options | Session.Commands_Changed](this.class_name) {
       case _: Session.Global_Options =>
         GUI_Thread.later {
           val comp = group_tabs.peer

@@ -13,6 +13,39 @@ import scala.collection.mutable
 
 
 object ML_Process {
+  /* Pure prelude */
+
+  def pure_prelude: String = {
+    val ml_pid =
+      if (Platform.is_windows) {
+        """Foreign.buildCall0 (Foreign.getSymbol (Foreign.loadLibrary "kernel32.dll") "GetCurrentProcessId", (), Foreign.cInt)"""
+      }
+      else """SysWord.toLargeInt o Posix.Process.pidToWord o Posix.ProcEnv.getpid"""
+
+    """
+fun chapter (_: string) = ();
+fun section (_: string) = ();
+fun subsection (_: string) = ();
+fun subsubsection (_: string) = ();
+fun paragraph (_: string) = ();
+fun subparagraph (_: string) = ();
+
+structure PolyML =
+struct
+  open PolyML
+  fun exit rc = OS.Process.exit (RunCall.unsafeCast (Word8.fromInt rc))
+  val ml_pid = """ + ml_pid + """
+end;
+
+val ML_file = PolyML.use;
+PolyML.Compiler.prompt1 := "Poly/ML> ";
+PolyML.Compiler.prompt2 := "Poly/ML# ";
+
+List.app PolyML.Compiler.forgetStructure ["CInterface", "Signal"];
+"""
+  }
+
+
   /* process */
 
   def apply(
@@ -27,31 +60,13 @@ object ML_Process {
     env: JMap[String, String] = Isabelle_System.Settings.env(),
     redirect: Boolean = false,
     cleanup: () => Unit = () => ()
-  ): Bash.Process = {
-    val ml_options = options.standard_ml()
+  ): (Options, Bash.Process) = {
+    val ml_options = options.ml_threads()
     val ml_settings = ML_Settings(ml_options)
+    val session_bootstrap = session_heaps.isEmpty
 
     val eval_init =
-      if (session_heaps.isEmpty) {
-        List(
-          """
-          fun chapter (_: string) = ();
-          fun section (_: string) = ();
-          fun subsection (_: string) = ();
-          fun subsubsection (_: string) = ();
-          fun paragraph (_: string) = ();
-          fun subparagraph (_: string) = ();
-          val ML_file = PolyML.use;
-          """,
-          if (Platform.is_windows)
-            "fun exit 0 = OS.Process.exit OS.Process.success" +
-            " | exit 1 = OS.Process.exit OS.Process.failure" +
-            " | exit rc = OS.Process.exit (RunCall.unsafeCast (Word8.fromInt rc))"
-          else
-            "fun exit rc = Posix.Process.exit (Word8.fromInt rc)",
-          "PolyML.Compiler.prompt1 := \"Poly/ML> \"",
-          "PolyML.Compiler.prompt2 := \"Poly/ML# \"")
-      }
+      if (session_bootstrap) List(pure_prelude)
       else {
         List(
           "(PolyML.SaveState.loadHierarchy " +
@@ -66,24 +81,26 @@ object ML_Process {
 
 
     // options
-    val eval_options = if (session_heaps.isEmpty) Nil else List("Options.load_default ()")
+    val eval_options = if (session_bootstrap) Nil else List("Options.load_process_default ()")
     val isabelle_process_options = Isabelle_System.tmp_file("options")
     File.restrict(File.path(isabelle_process_options))
-    File.write(isabelle_process_options, YXML.string_of_body(ml_options.encode))
+    File.write(isabelle_process_options, YXML.string_of_body(Options.encode(ml_options)))
 
     // session resources
-    val eval_init_session = if (session_heaps.isEmpty) Nil else List("Resources.init_session_env ()")
+    val eval_init_session = if (session_bootstrap) Nil else List("Resources.init_session_env ()")
     val init_session = Isabelle_System.tmp_file("init_session")
     File.restrict(File.path(init_session))
-    File.write(init_session, YXML.string_of_body(new Resources(session_background).init_session_xml))
+    File.write(init_session,
+      YXML.string_of_body(
+        new Resources(session_background, session_background, Logger.none).init_session_xml))
 
     // process
     val eval_process =
       proper_string(eval_main).getOrElse(
-        if (session_heaps.isEmpty) {
+        if (session_bootstrap) {
           "PolyML.print_depth " + ML_Syntax.print_int(ml_options.int("ML_print_depth"))
         }
-        else "Isabelle_Process.init ()")
+        else "Isabelle_Process.init_options ()")
 
     // ISABELLE_TMP
     val isabelle_tmp = Isabelle_System.tmp_dir("process")
@@ -115,18 +132,20 @@ object ML_Process {
 
     val process_policy = ml_options.string("process_policy")
     val process_prefix = if_proper(process_policy, process_policy + " ")
+    val process =
+      Bash.process(
+        process_prefix + File.bash_path(ml_settings.polyml_exe) + " -q " + Bash.strings(bash_args),
+        cwd = cwd,
+        env = bash_env,
+        redirect = redirect,
+        cleanup = { () =>
+          isabelle_process_options.delete
+          init_session.delete
+          Isabelle_System.rm_tree(isabelle_tmp)
+          cleanup()
+        })
 
-    Bash.process(
-      process_prefix + File.bash_path(ml_settings.polyml_exe) + " -q " + Bash.strings(bash_args),
-      cwd = cwd,
-      env = bash_env,
-      redirect = redirect,
-      cleanup = { () =>
-        isabelle_process_options.delete
-        init_session.delete
-        Isabelle_System.rm_tree(isabelle_tmp)
-        cleanup()
-      })
+    (ml_options, process)
   }
 
 
@@ -174,7 +193,7 @@ Usage: isabelle ML_process [OPTIONS]
 
     val process =
       ML_Process(options, session_background, session_heaps,
-        args = eval_args.toList, modes = modes, cwd = cwd, redirect = redirect)
+        args = eval_args.toList, modes = modes, cwd = cwd, redirect = redirect)._2
 
     if (internal) process.result()
     else {

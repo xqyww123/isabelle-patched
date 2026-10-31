@@ -43,8 +43,6 @@ object Build_Cluster {
 
     def is_parameter(spec: Options.Spec): Boolean = parameters.defined(spec.name)
 
-    lazy val test_options: Options = Options.init0()
-
     def apply(
       name: String = "",
       hostname: String = parameters.string(HOSTNAME),
@@ -56,7 +54,7 @@ object Build_Cluster {
       home: String = parameters.string(HOME),
       shared: Boolean = parameters.bool(SHARED),
       settings: List[String] = split_lines(parameters.string(SETTINGS)),
-      options: List[Options.Spec] = Nil
+      options: Options.Update = Nil
     ): Host = {
       new Host(name, hostname, user, port, jobs, numa, dirs, home, shared, settings, options)
     }
@@ -74,7 +72,7 @@ object Build_Cluster {
             if (m == n) n
             else if (str(m) == ':') m + 1
             else error("Missing \":\" after host name")
-          Options.Spec.parse(str.substring(l))
+          Options.Spec.parse(str.drop(l))
         }
         catch { case ERROR(msg) => err(msg) }
 
@@ -89,7 +87,7 @@ object Build_Cluster {
         val (params, options) =
           try {
             val (specs1, specs2) = (host_specs ::: more_specs).partition(is_parameter)
-            (parameters ++ specs1, { test_options ++ specs2; specs2 })
+            (parameters ++ specs1, { Options.defaults ++ specs2; specs2 })
           }
           catch { case ERROR(msg) => err(msg) }
 
@@ -122,7 +120,7 @@ object Build_Cluster {
     val home: String,
     val shared: Boolean,
     val settings: List[String],
-    val options: List[Options.Spec]
+    val options: Options.Update
   ) {
     host =>
 
@@ -186,15 +184,15 @@ object Build_Cluster {
         isabelle_identifier = build_cluster_identifier, ssh = ssh)
 
     def sync(): Other_Isabelle = {
-      val context = Rsync.Context(ssh = ssh)
+      val rsync_context = Rsync.Context(ssh = ssh)
       val target = build_cluster_isabelle_home
       if (Mercurial.Hg_Sync.ok(Path.ISABELLE_HOME)) {
         val source = File.standard_path(Path.ISABELLE_HOME)
-        Rsync.exec(context, clean = true,
-          args = List("--", Url.direct_path(source), context.target(target))).check
+        rsync_context.exec(clean = true,
+          args = List("--", Url.direct_path(source), rsync_context.target(target))).check
       }
       else {
-        Sync.sync(options, context, target,
+        Sync.sync(options, rsync_context, target,
           purge_heaps = true,
           preserve_jars = true,
           dirs = Sync.afp_dirs(build_context.afp_root))

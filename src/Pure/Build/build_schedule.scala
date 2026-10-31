@@ -370,7 +370,7 @@ object Build_Schedule {
     benchmark_score: Double,
     numa: Boolean = false,
     numa_nodes: List[Int] = Nil,
-    options: List[Options.Spec] = Nil)
+    options: Options.Update = Nil)
 
   object Host_Infos {
     def load(
@@ -986,7 +986,7 @@ object Build_Schedule {
     private var _build_tick: Long = 0L
 
     protected override def build_action(): Boolean =
-      Isabelle_Thread.interrupt_handler(_ => progress.stop()) {
+      Isabelle_Thread.interrupt_handle(progress.stop()) {
         val received = build_receive(n => n.channel == Build_Process.private_data.channel)
         val ready = received.contains(Build_Schedule.private_data.channel_ready(hostname))
 
@@ -1034,7 +1034,7 @@ object Build_Schedule {
       catch { case exn: Throwable => close(); throw exn }
 
     override def close(): Unit = {
-      Option(_log_database).foreach(_.close())
+      proper_value(_log_database).foreach(_.close())
       super.close()
     }
 
@@ -1092,7 +1092,7 @@ object Build_Schedule {
                 threads = Some(timing_data.host_infos.num_threads(result.node_info)),
                 start = Some(result.start_date - build_start),
                 timing = result.process_result.timing,
-                sources = Some(result.output_shasum.digest.toString),
+                sources = Some(SHA1.digest(result.output_shasum).rep),
                 status = Some(status))
             }
             else
@@ -1129,13 +1129,15 @@ object Build_Schedule {
     def is_current(state: Build_Process.State, session_name: String): Boolean =
       state.ancestor_results(session_name) match {
         case Some(ancestor_results) if ancestor_results.forall(_.current) =>
-          store.check_output(
-            _database_server, session_name,
+          store.check_output(session_name,
+            conditions = build_context.deps.eval_conditions(session_name).value,
+            opened_db = _database_server,
             sources_shasum = state.sessions(session_name).sources_shasum,
-            input_shasum = store.make_shasum(ancestor_results.map(_.output_shasum)),
+            input_shasum = store.make_shasum(ancestor_results.map(_.output_shasum))
+          ).current(
             build_thorough = build_context.sessions_structure(session_name).build_thorough,
             fresh_build = build_context.fresh_build,
-            store_heap = build_context.store_heap || state.sessions.store_heap(session_name))._1
+            store_heap = build_context.store_heap || state.sessions.store_heap(session_name))
         case _ => false
       }
 
@@ -1280,7 +1282,7 @@ object Build_Schedule {
           { res =>
             val build_uuid = res.string(Schedules.build_uuid)
             val generator = res.string(Schedules.generator)
-            val start = res.date(Schedules.start)
+            val start = res.the_date(Schedules.start)
             val serial = res.long(Schedules.serial)
             Schedule(build_uuid, generator, start, Graph.empty, serial)
           })
@@ -1335,7 +1337,7 @@ object Build_Schedule {
           val hostname = res.string(Nodes.hostname)
           val numa_node = res.get_int(Nodes.numa_node)
           val rel_cpus = res.string(Nodes.rel_cpus)
-          val start = res.date(Nodes.start)
+          val start = res.the_date(Nodes.start)
           val duration = Time.ms(res.long(Nodes.duration))
 
           val node_info = Node_Info(hostname, numa_node, isabelle.Host.Range.from(rel_cpus))
@@ -1488,7 +1490,7 @@ object Build_Schedule {
     select_dirs: List[Path] = Nil,
     infos: List[Sessions.Info] = Nil,
     numa_shuffling: Boolean = false,
-    augment_options: String => List[Options.Spec] = _ => Nil,
+    augment_options: String => Options.Update = _ => Nil,
     session_setup: (String, Session) => Unit = (_, _) => (),
     cache: Rich_Text.Cache = Rich_Text.Cache.make()
   ): Schedule = {
@@ -1728,7 +1730,7 @@ object Build_Schedule {
       var all_sessions = false
       val dirs = new mutable.ListBuffer[Path]
       val session_groups = new mutable.ListBuffer[String]
-      var options = Options.init(specs = Options.Spec.ISABELLE_BUILD_OPTIONS)
+      var options = Options.init(update = Options.Spec.ISABELLE_BUILD_OPTIONS)
       var verbose = false
       val exclude_sessions = new mutable.ListBuffer[String]
 
@@ -1792,7 +1794,7 @@ Usage: isabelle build_schedule [OPTIONS] [SESSIONS ...]
 
       output_file match {
         case Some(output_file) if !schedule.is_empty =>
-          if (File.is_pdf(output_file.file_name) || File.is_png(output_file.file_name))
+          if (File.is_pdf(output_file) || File.is_png(output_file))
             write_schedule_graphic(schedule, output_file)
           else Schedule.write(schedule, output_file)
         case _ =>

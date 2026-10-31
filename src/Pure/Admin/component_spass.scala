@@ -13,34 +13,72 @@ object Component_SPASS {
   val default_download_url = "https://www.cs.vu.nl/~jbe248/spass-3.8ds-src.tar.gz"
   val standard_version = "3.8ds"
 
+  private val source_patch = """diff -Nru src-orig/makefile src/makefile
+--- src-orig/makefile	2015-01-06 12:11:07.000000000 +0100
++++ src/makefile	2026-07-14 13:06:41.166559181 +0200
+@@ -77,7 +77,7 @@
+ # Enables catching of some common signals (segmentation fault ...)
+ 
+ 
+-WARNINGS = -pedantic -Wall -Wshadow -Wpointer-arith -Wwrite-strings -std=c99 #-Wconversion  
++WARNINGS = -Wno-error=implicit-function-declaration -pedantic -Wall -Wshadow -Wpointer-arith -Wwrite-strings -std=c99 #-Wconversion  
+ # Turn off some warnings for scanner files
+ SCANNERFLAGS=-Wno-implicit -Wno-uninitialized
+ 
+diff -Nru src-orig/misc.c src/misc.c
+--- src-orig/misc.c	2015-01-06 12:11:07.000000000 +0100
++++ src/misc.c	2026-07-14 12:58:56.588589600 +0200
+@@ -44,7 +44,9 @@
+ 
+ #include "misc.h"
+ #include "strings.h" /* Cannot be moved to misc.h as long as there is no separate type.h, e.g. for pointers */
++#ifndef __CYGWIN__
+ #include "execinfo.h" //backtrace and backtrade_symbols, for dump
++#endif
+ /**************************************************************/
+ /* Functions                                                  */
+ /**************************************************************/
+@@ -132,6 +134,7 @@
+   EFFECT:  Flushes the streams then dumps a core.
+ ***************************************************************/
+ {
++#ifndef __CYGWIN__
+ 	void *array[150];
+ 	size_t size;
+ 	char **strings;
+@@ -151,6 +154,7 @@
+   fflush(misc_ERROROUT);
+   fflush(stdout);
+   fflush(stderr);
++#endif
+   abort();
+ }
+ 
+
+"""
+
   def build_spass(
     download_url: String = default_download_url,
     progress: Progress = new Progress,
     target_dir: Path = Path.current
   ): Unit = {
     Isabelle_System.with_tmp_dir("build") { tmp_dir =>
+      Isabelle_System.require_patch()
       Isabelle_System.require_command("bison")
       Isabelle_System.require_command("flex")
 
 
       /* component */
 
-      val Archive_Name = """^.*?([^/]+)$""".r
-      val Component_Name = """^(.+)-src\.tar.gz$""".r
-      val Version = """^[^-]+-([^-]+)$""".r
-
       val archive_name =
-        download_url match {
-          case Archive_Name(name) => name
-          case _ => error("Failed to determine source archive name from " + quote(download_url))
-        }
+        Url.get_base_name(download_url)
+          .getOrElse(error("Failed to determine source archive name from " + quote(download_url)))
 
       val component_name =
-        archive_name match {
-          case Component_Name(name) => name
-          case _ => error("Failed to determine component name from " + quote(archive_name))
-        }
+        Library.try_unsuffix("-src.tar.gz", archive_name)
+          .getOrElse(error("Failed to determine component name from " + quote(archive_name)))
 
+      val Version = """^[^-]+-([^-]+)$""".r
       val version =
         component_name match {
           case Version(version) => version
@@ -54,7 +92,7 @@ object Component_SPASS {
       val component_dir =
         Components.Directory(target_dir + Path.basic(component_name)).create(progress = progress)
 
-      val platform_name = Isabelle_Platform.local.ISABELLE_PLATFORM()
+      val platform_name = Isabelle_Platform.local.ISABELLE_PLATFORM(apple = true)
       val platform_dir =
         Isabelle_System.make_directory(component_dir.path + Path.basic(platform_name))
 
@@ -64,43 +102,30 @@ object Component_SPASS {
       val archive_path = tmp_dir + Path.basic(archive_name)
       Isabelle_System.download_file(download_url, archive_path, progress = progress)
 
-      Isabelle_System.extract(archive_path, tmp_dir)
-      val source_dir = File.get_dir(tmp_dir, title = download_url)
+      val source_dir = Isabelle_System.new_directory(tmp_dir + Path.explode("src"))
 
-      Isabelle_System.extract(archive_path, component_dir.src, strip = true)
+      for (src <- List(source_dir, component_dir.src)) {
+        Isabelle_System.extract(archive_path, src, strip = true)
+        Isabelle_System.apply_patch(src, source_patch, progress = progress)
+      }
 
 
       /* build */
 
       progress.echo("Building SPASS for " + platform_name + " ...")
 
-      if (Platform.is_windows) {
-        File.change(source_dir + Path.basic("misc.c")) {
-          _.replace("""#include "execinfo.h" """, "")
-           .replaceAll("""void misc_DumpCore\(void\)[^}]+}""", "void misc_DumpCore(void) { abort(); }")
-        }
-      }
-
       Isabelle_System.bash("make", cwd = source_dir,
         progress_stdout = progress.echo(_, verbose = true),
         progress_stderr = progress.echo(_, verbose = true)).check
 
-
-      /* install */
-
+      Isabelle_System.copy_file(source_dir + Path.explode("SPASS").platform_exe, platform_dir)
       Isabelle_System.copy_file(source_dir + Path.basic("LICENCE"), component_dir.LICENSE)
-
-      val install_files = List("SPASS")
-      for (name <- install_files ::: install_files.map(_ + ".exe")) {
-        val path = source_dir + Path.basic(name)
-        if (path.is_file) Isabelle_System.copy_file(path, platform_dir)
-      }
 
 
       /* settings */
 
       component_dir.write_settings("""
-SPASS_HOME="$COMPONENT/$ISABELLE_PLATFORM64"
+SPASS_HOME="$COMPONENT/${ISABELLE_APPLE_PLATFORM64:-$ISABELLE_PLATFORM64}"
 SPASS_VERSION=""" + quote(version) + """
 """)
 
@@ -113,22 +138,13 @@ Weidenbach's ITP 2012 paper "More SPASS with Isabelle", has been compiled from
 sources available at """ + download_url + """
 via "make".
 
-The Windows/Cygwin compilation required commenting out the line
+For compatibility with current Isabelle platforms, these sources have been
+patched as follows:
 
-    #include "execinfo.h"
+""" + source_patch + """Note that regular SPASS sources can be downloaded from
+https://www.mpi-inf.mpg.de/departments/automation-of-logic/software/spass-workbench/classic-spass-theorem-prover
+--- but official SPASS releases do not work with Isabelle.
 
-in "misc.c" as well as most of the body of the "misc_DumpCore" function.
-
-The latest official SPASS sources can be downloaded from
-http://www.spass-prover.org/. Be aware, however, that the official SPASS
-releases are not compatible with Isabelle.
-
-
-Viel SPASS!
-
-
-        Jasmin Blanchette
-        16-May-2018
 
         Makarius
         """ + Date.Format.date(Date.now()) + "\n")

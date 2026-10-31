@@ -7,20 +7,29 @@ Isabelle-specific thread management.
 package isabelle
 
 
-import java.util.concurrent.{ThreadPoolExecutor, TimeUnit, LinkedBlockingQueue}
+import java.util.concurrent.{ThreadPoolExecutor, ThreadFactory, TimeUnit, LinkedBlockingQueue}
 
 
 object Isabelle_Thread {
   /* self-thread */
 
+  def current: Thread = Thread.currentThread().nn
+  def current_name: String =
+    current.getName match {
+      case null => ""
+      case name: String => name
+    }
+
+  def failure_prefix: String = "Failure of thread " + quote(current_name)
+
   def self: Isabelle_Thread =
-    Thread.currentThread match {
+    current match {
       case thread: Isabelle_Thread => thread
       case thread => error("Isabelle-specific thread required: " + thread)
     }
 
   def check_self: Boolean =
-    Thread.currentThread.isInstanceOf[Isabelle_Thread]
+    current.isInstanceOf[Isabelle_Thread]
 
 
   /* create threads */
@@ -33,15 +42,16 @@ object Isabelle_Thread {
     if (suffix.startsWith(prefix)) suffix else prefix + suffix
   }
 
-  def current_thread_group: ThreadGroup = Thread.currentThread.getThreadGroup
+  def current_thread_group: Option[ThreadGroup] =
+    proper_value(Isabelle_Thread.current.getThreadGroup)
 
   lazy val worker_thread_group: ThreadGroup =
-    new ThreadGroup(current_thread_group, "Isabelle worker")
+    new ThreadGroup(current_thread_group.orNull, "Isabelle worker")
 
   def create(
     main: Runnable,
     name: String = "",
-    group: ThreadGroup = current_thread_group,
+    group: Option[ThreadGroup] = current_thread_group,
     pri: Int = Thread.NORM_PRIORITY,
     daemon: Boolean = false,
     inherit_locals: Boolean = false
@@ -52,7 +62,7 @@ object Isabelle_Thread {
 
   def fork(
     name: String = "",
-    group: ThreadGroup = current_thread_group,
+    group: Option[ThreadGroup] = current_thread_group,
     pri: Int = Thread.NORM_PRIORITY,
     daemon: Boolean = false,
     inherit_locals: Boolean = false,
@@ -77,7 +87,10 @@ object Isabelle_Thread {
     val executor =
       new ThreadPoolExecutor(n, n, 2500L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue[Runnable])
     executor.setThreadFactory(
-      create(_, name = make_name(base = "worker"), group = worker_thread_group))
+      new ThreadFactory {
+        override def newThread(main: Runnable | Null): Thread =
+          create(main.nn, name = make_name(base = "worker"), group = Some(worker_thread_group))
+      })
     executor
   }
 
@@ -101,12 +114,12 @@ object Isabelle_Thread {
     override def toString: String = name
   }
 
-  def interrupt_handler[A](handler: Interrupt_Handler)(body: => A): A =
-    if (handler == null) body
+  def interrupt_handler[A](handler: Interrupt_Handler, permissive: Boolean = false)(body: => A): A =
+    if (permissive && !check_self) body
     else self.interrupt_handler(handler)(body)
 
-  def interrupt_handler[A](handle: Isabelle_Thread => Unit)(body: => A): A =
-    self.interrupt_handler(Interrupt_Handler(handle))(body)
+  def interrupt_handle[A](handle: => Unit, permissive: Boolean = false)(body: => A): A =
+    interrupt_handler(Interrupt_Handler(_ => handle), permissive = permissive)(body)
 
   def interruptible[A](body: => A): A =
     interrupt_handler(Interrupt_Handler.interruptible)(body)
@@ -114,19 +127,18 @@ object Isabelle_Thread {
   def uninterruptible[A](body: => A): A =
     interrupt_handler(Interrupt_Handler.uninterruptible)(body)
 
-  def try_uninterruptible[A](body: => A): A =
-    if (check_self) interrupt_handler(Interrupt_Handler.uninterruptible)(body)
-    else body
+  def perhaps_uninterruptible[A](body: => A): A =
+    interrupt_handler(Interrupt_Handler.uninterruptible, permissive = true)(body)
 }
 
 class Isabelle_Thread private(
   main: Runnable,
   name: String,
-  group: ThreadGroup,
+  group: Option[ThreadGroup],
   pri: Int,
   daemon: Boolean,
   inherit_locals: Boolean
-) extends Thread(group, null, name, 0L, inherit_locals) {
+) extends Thread(group.orNull, null, name, 0L, inherit_locals) {
   thread =>
 
   thread.setPriority(pri)
@@ -134,7 +146,7 @@ class Isabelle_Thread private(
 
   override def run(): Unit = main.run()
 
-  def is_self: Boolean = Thread.currentThread == thread
+  def is_self: Boolean = Isabelle_Thread.current == thread
 
 
   /* interrupt state */
@@ -163,24 +175,23 @@ class Isabelle_Thread private(
   /* interrupt handler */
 
   // non-synchronized, only changed on self-thread
-  @volatile private var handler = Isabelle_Thread.Interrupt_Handler.interruptible
+  @volatile private var handler: Isabelle_Thread.Interrupt_Handler =
+    Isabelle_Thread.Interrupt_Handler.interruptible
 
   override def interrupt(): Unit = handler(thread)
 
-  def interrupt_handler[A](new_handler: Isabelle_Thread.Interrupt_Handler)(body: => A): A =
-    if (new_handler == null) body
-    else {
-      require(is_self, "interrupt handler on other thread")
+  def interrupt_handler[A](new_handler: Isabelle_Thread.Interrupt_Handler)(body: => A): A = {
+    require(is_self, "interrupt handler on other thread")
 
-      val old_handler = handler
-      handler = new_handler
-      try {
-        if (clear_interrupt()) interrupt()
-        body
-      }
-      finally {
-        handler = old_handler
-        if (clear_interrupt()) interrupt()
-      }
+    val old_handler = handler
+    handler = new_handler
+    try {
+      if (clear_interrupt()) interrupt()
+      body
     }
+    finally {
+      handler = old_handler
+      if (clear_interrupt()) interrupt()
+    }
+  }
 }

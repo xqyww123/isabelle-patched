@@ -55,7 +55,7 @@ fun parse_bool_option option name s =
     end
 
 val has_junk =
-  exists (fn s => not (Symbol.is_digit s) andalso s <> ".") o raw_explode (* FIXME Symbol.explode (?) *)
+  exists (fn s => not (Symbol.is_digit s) andalso s <> ".") o explode_string (* FIXME Symbol.explode (?) *)
 
 fun parse_time name s =
   let val secs = if has_junk s then NONE else Real.fromString s in
@@ -141,7 +141,7 @@ fun spying false _ = ()
       val (state, i, tool, message) = f ()
       val ctxt = Proof.context_of state
       val goal = Logic.get_goal (Thm.prop_of (#goal (Proof.goal state))) i
-      val hash = String.substring (SHA1.rep (SHA1.digest (hackish_string_of_term ctxt goal)), 0, 12)
+      val hash = Message_Digest.rep_short (SHA1.digest (hackish_string_of_term ctxt goal))
     in
       File.append (Path.explode "$ISABELLE_HOME_USER/spy_sledgehammer")
         (spying_version ^ " " ^ timestamp () ^ ": " ^ hash ^ ": " ^ tool ^ ": " ^ message ^ "\n")

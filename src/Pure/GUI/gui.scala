@@ -6,14 +6,16 @@ Basic GUI tools (for AWT/Swing).
 
 package isabelle
 
+import scala.language.unsafeNulls
+
 import java.util.{Map => JMap}
 import java.awt.{Color, Component, Container, Font, Image, Insets, KeyboardFocusManager, Window,
   Point, Rectangle, Dimension, GraphicsEnvironment, MouseInfo, Toolkit}
-import java.awt.event.{KeyAdapter, KeyEvent}
+import java.awt.event.{InputEvent, KeyAdapter, KeyEvent}
 import java.awt.font.{FontRenderContext, LineMetrics, TextAttribute, TransformAttribute}
 import java.awt.geom.AffineTransform
-import javax.swing.{Icon, ImageIcon, JButton, JLabel, JLayeredPane, JOptionPane,
-  RootPaneContainer, JTextField, JComboBox, LookAndFeel, UIManager, SwingUtilities}
+import javax.swing.{Icon, ImageIcon, JButton, JLabel, JLayeredPane, JOptionPane, KeyStroke,
+  RootPaneContainer, JTextField, JComboBox, LookAndFeel, UIManager, SwingUtilities, JComponent}
 
 import scala.swing.{Alignment, CheckBox, ComboBox, ScrollPane, TextArea, ListView, Separator}
 import scala.swing.Swing.EmptyIcon
@@ -24,9 +26,18 @@ import com.formdev.flatlaf.FlatLaf
 
 
 object GUI {
+  /* logger */
+
+  def log: Logger = Logger.console
+
+  object Delay extends Delay_Ops(log) {
+    override protected def app(body: => Unit): Unit = GUI_Thread.later { body }
+  }
+
+
   /* Swing look-and-feel */
 
-  def current_laf(): String = UIManager.getLookAndFeel.getClass.getName()
+  def current_laf(): String = UIManager.getLookAndFeel.class_name
 
   def is_macos_laf(): Boolean =
     Platform.is_macos && UIManager.getSystemLookAndFeelClassName() == current_laf()
@@ -37,9 +48,9 @@ object GUI {
   def default_background_color(): Color = if (is_dark_laf()) Color.BLACK else Color.WHITE
   def default_intermediate_color(): Color = if (is_dark_laf()) Color.LIGHT_GRAY else Color.GRAY
 
-  class Look_And_Feel(laf: LookAndFeel) extends Isabelle_System.Service {
-    def info: UIManager.LookAndFeelInfo =
-      new UIManager.LookAndFeelInfo(laf.getName, laf.getClass.getName)
+  class Look_And_Feel(lafs: LookAndFeel*) extends Isabelle_System.Service {
+    def infos: List[UIManager.LookAndFeelInfo] =
+      lafs.toList.map(laf => new UIManager.LookAndFeelInfo(laf.getName, laf.class_name))
   }
 
   lazy val look_and_feels: List[Look_And_Feel] =
@@ -53,7 +64,7 @@ object GUI {
     val lafs =
       UIManager.getInstalledLookAndFeels().toList
         .filterNot(info => old_lafs(info.getClassName))
-    val more_lafs = look_and_feels.map(_.info)
+    val more_lafs = look_and_feels.flatMap(_.infos)
     UIManager.setInstalledLookAndFeels((more_lafs ::: lafs).toArray)
 
     // see https://www.formdev.com/flatlaf/customizing
@@ -119,9 +130,12 @@ object GUI {
   }
 
   abstract class Style_Symbol extends Style {
+    def output(str: String): String
+    override def make_text(str: String): String = output(str)
+
     def bold: String
     override def make_bold(str: String): String =
-      Symbol.iterator(str)
+      Symbol.iterator(output(str))
         .flatMap(s => if (Symbol.is_controllable(s)) List(bold, s) else List(s))
         .mkString
   }
@@ -132,12 +146,19 @@ object GUI {
 
   object Style_Symbol_Encoded extends Style_Symbol {
     override def toString: String = "symbol_encoded"
+    override def output(str: String): String = Symbol.encode(str)
     override def bold: String = Symbol.bold
   }
 
   object Style_Symbol_Decoded extends Style_Symbol {
     override def toString: String = "symbol_decoded"
+    override def output(str: String): String = Symbol.decode(str)
     override def bold: String = Symbol.bold_decoded
+  }
+
+  object Style_Symbol_Recoded {
+    def apply(unicode_symbols: Boolean): Style_Symbol =
+      if (unicode_symbols) Style_Symbol_Decoded else Style_Symbol_Encoded
   }
 
 
@@ -156,7 +177,7 @@ object GUI {
       val b = name.nonEmpty
       style.make_text(prefix) +
         if_proper(a || b,
-          if_proper(prefix, ": ") + if_proper(kind, style.make_text(kind)) +
+          if_proper(prefix, ": ") + if_proper(a, style.make_text(kind)) +
           if_proper(a && b, " ") + if_proper(b, style.make_text(quote(name))))
     }
   }
@@ -178,37 +199,59 @@ object GUI {
     new ScrollPane(text)
   }
 
-  private def simple_dialog(
-    kind: Int,
-    default_title: String,
-    parent: Component,
-    title: String,
-    message: Iterable[Any]
+  private def java_message(message: Seq[AnyRef]): Array[AnyRef] =
+    message.iterator.map({ case x: scala.swing.Component => x.peer case x => x }).
+      toArray.asInstanceOf[Array[AnyRef]]
+
+  private def java_title(title: String, kind: Int): String =
+    proper_string(title) getOrElse {
+      kind match {
+        case JOptionPane.WARNING_MESSAGE => "Warning"
+        case JOptionPane.ERROR_MESSAGE => "Error"
+        case JOptionPane.INFORMATION_MESSAGE => "Information"
+        case JOptionPane.QUESTION_MESSAGE => "Question"
+        case _ => "Dialog"
+      }
+    }
+
+  def dialog(
+    kind: Int = JOptionPane.PLAIN_MESSAGE,
+    title: String = "",
+    message: Seq[AnyRef] = Seq.empty,
+    parent: Option[Component] = None
   ): Unit = {
     GUI_Thread.now {
-      val java_message =
-        message.iterator.map({ case x: scala.swing.Component => x.peer case x => x }).
-          toArray.asInstanceOf[Array[AnyRef]]
-      JOptionPane.showMessageDialog(parent, java_message,
-        if (title == null) default_title else title, kind)
+      JOptionPane.showMessageDialog(
+        parent.orNull, java_message(message), java_title(title, kind), kind)
     }
   }
 
-  def dialog(parent: Component, title: String, message: Any*): Unit =
-    simple_dialog(JOptionPane.PLAIN_MESSAGE, null, parent, title, message)
+  def warning_dialog(
+    title: String = "",
+    message: Seq[AnyRef] = Seq.empty,
+    parent: Option[Component] = None
+  ): Unit = {
+    dialog(kind = JOptionPane.WARNING_MESSAGE, title = title, message = message, parent = parent)
+  }
 
-  def warning_dialog(parent: Component, title: String, message: Any*): Unit =
-    simple_dialog(JOptionPane.WARNING_MESSAGE, "Warning", parent, title, message)
+  def error_dialog(
+    title: String = "",
+    message: Seq[AnyRef] = Seq.empty,
+    parent: Option[Component] = None
+  ): Unit = {
+    dialog(kind = JOptionPane.ERROR_MESSAGE, title = title, message = message, parent = parent)
+  }
 
-  def error_dialog(parent: Component, title: String, message: Any*): Unit =
-    simple_dialog(JOptionPane.ERROR_MESSAGE, "Error", parent, title, message)
-
-  def confirm_dialog(parent: Component, title: String, option_type: Int, message: Any*): Int =
+  def confirm_dialog(
+    option_type: Int = JOptionPane.DEFAULT_OPTION,
+    title: String = "",
+    message: Seq[AnyRef] = Seq.empty,
+    parent: Option[Component] = None
+  ): Int =
     GUI_Thread.now {
-      val java_message = message map { case x: scala.swing.Component => x.peer case x => x }
-      JOptionPane.showConfirmDialog(parent,
-        java_message.toArray.asInstanceOf[Array[AnyRef]], title,
-          option_type, JOptionPane.QUESTION_MESSAGE)
+      val kind = JOptionPane.QUESTION_MESSAGE
+      JOptionPane.showConfirmDialog(
+        parent.orNull, java_message(message), java_title(title, kind), option_type, kind)
     }
 
 
@@ -356,7 +399,7 @@ object GUI {
     private def parse(text: String): Int =
       text match {
         case Percent(s) =>
-          val i = Integer.parseInt(s)
+          val i = Value.Int.parse(s)
           if (10 <= i && i < 1000) i else 100
         case _ => 100
       }
@@ -470,6 +513,58 @@ object GUI {
   }
 
 
+  /* key event handling */
+
+  private val key_modifier_mask: Int = // NB: excludes ALT_GRAPH_DOWN_MASK
+    InputEvent.CTRL_DOWN_MASK |
+    InputEvent.ALT_DOWN_MASK |
+    InputEvent.META_DOWN_MASK |
+    InputEvent.SHIFT_DOWN_MASK
+
+  def no_modifier(evt: InputEvent): Boolean =
+    (evt.getModifiersEx & key_modifier_mask) == 0
+
+  def key_modifier(evt: InputEvent, mask: Int, only: Boolean = false): Boolean = {
+    val mods = evt.getModifiersEx & key_modifier_mask
+    (mods & mask) != 0 && (!only || (mods & ~mask) == 0)
+  }
+
+  def command_modifier(evt: InputEvent, only: Boolean = false): Boolean =
+    key_modifier(evt, Toolkit.getDefaultToolkit.getMenuShortcutKeyMaskEx, only = only)
+
+  def shift_modifier(evt: InputEvent, only: Boolean = false): Boolean =
+    key_modifier(evt, InputEvent.SHIFT_DOWN_MASK, only = only)
+
+  def alt_modifier(evt: InputEvent, only: Boolean = false): Boolean =
+    key_modifier(evt, InputEvent.ALT_DOWN_MASK, only = only)
+
+  def plain_enter(evt: KeyEvent): Boolean =
+    evt.getKeyCode == KeyEvent.VK_ENTER && no_modifier(evt)
+
+  def plain_escape(evt: KeyEvent): Boolean =
+    evt.getKeyCode == KeyEvent.VK_ESCAPE && no_modifier(evt)
+
+
+  /* component input maps */
+
+  val input_maps: List[Int] =
+    List(
+      JComponent.WHEN_FOCUSED,
+      JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT,
+      JComponent.WHEN_IN_FOCUSED_WINDOW)
+
+  def suppress_input(component: JComponent, pred: KeyStroke => Boolean): Unit =
+    for {
+      i <- input_maps.iterator
+      input <- proper_value(component.getInputMap(i))
+      keys <- proper_value(input.allKeys)
+      key <- keys if pred(key)
+    } input.put(key, "none")
+
+  def reset_input(component: JComponent): Unit =
+    for (i <- input_maps) component.setInputMap(i, null)
+
+
   /* component hierachy */
 
   def get_parent(component: Component): Option[Container] =
@@ -577,7 +672,10 @@ object GUI {
   }
 }
 
-class FlatLightLaf extends GUI.Look_And_Feel(new flatlaf.FlatLightLaf)
-class FlatDarkLaf extends GUI.Look_And_Feel(new flatlaf.FlatDarkLaf)
-class FlatMacLightLaf extends GUI.Look_And_Feel(new flatlaf.themes.FlatMacLightLaf)
-class FlatMacDarkLaf extends GUI.Look_And_Feel(new flatlaf.themes.FlatMacDarkLaf)
+class FlatLafs extends GUI.Look_And_Feel(
+  new flatlaf.FlatLightLaf,
+  new flatlaf.FlatIntelliJLaf,
+  new flatlaf.FlatDarkLaf,
+  new flatlaf.FlatDarculaLaf,
+  new flatlaf.themes.FlatMacLightLaf,
+  new flatlaf.themes.FlatMacDarkLaf)

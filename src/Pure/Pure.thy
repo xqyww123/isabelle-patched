@@ -5,6 +5,7 @@ The Pure theory, with definitions of Isar commands and some lemmas.
 *)
 
 theory Pure
+options [condition = true]
 keywords
     "!!" "!" "+" ":" ";" "<" "<=" "==" "=>" "?" "[" "\<comment>" "\<equiv>" "\<leftharpoondown>" "\<rightharpoonup>" "\<rightleftharpoons>"
     "\<subseteq>" "]" "binder" "by" "congproc" "identifier" "in" "infix" "infixl" "infixr" "is" "open"
@@ -92,7 +93,6 @@ keywords
     "prop" "term" "typ" "print_codesetup" "print_context_tracing" "unused_thms" :: diag
   and "print_state" :: diag
   and "welcome" :: diag
-  and "end" :: thy_end
   and "realizers" :: thy_decl
   and "realizability" :: thy_decl
   and "extract_type" "extract" :: thy_decl
@@ -115,25 +115,25 @@ ML \<open>
 local
   val _ =
     Outer_Syntax.command \<^command_keyword>\<open>external_file\<close> "formal dependency on external file"
-      (Resources.provide_parse_file >> (fn get_file => Toplevel.theory (#2 o get_file)));
+      (Resources.parse_file >> (fn get_file => Toplevel.theory (tap get_file)));
 
   val _ =
     Outer_Syntax.command \<^command_keyword>\<open>bibtex_file\<close> "check bibtex database file in Prover IDE"
-      (Resources.provide_parse_file >> (fn get_file =>
+      (Resources.parse_file >> (fn get_file =>
         Toplevel.theory (fn thy =>
           let
-            val ({lines, pos, ...}, thy') = get_file thy;
+            val {lines, pos, ...} = get_file thy;
             val _ = Bibtex.check_database_output pos (cat_lines lines);
-          in thy' end)));
+          in thy end)));
 
   val _ =
     Outer_Syntax.command \<^command_keyword>\<open>ROOTS_file\<close> "session ROOTS file"
-      (Resources.provide_parse_file >> (fn get_file =>
+      (Resources.parse_file >> (fn get_file =>
         Toplevel.theory (fn thy =>
           let
-            val ({src_path, lines, pos = pos0, ...}, thy') = get_file thy;
-            val ctxt = Proof_Context.init_global thy';
-            val dir = Path.dir (Path.expand (Resources.master_directory thy' + src_path));
+            val {src_path, lines, pos = pos0, ...} = get_file thy;
+            val ctxt = Proof_Context.init_global thy;
+            val dir = Path.dir (Path.expand (Resources.master_directory thy + src_path));
             val _ =
               (lines, pos0) |-> fold (fn line => fn pos1 =>
                 let
@@ -148,7 +148,7 @@ local
                       (ignore (Resources.check_session_dir ctxt (SOME dir) source)
                         handle ERROR msg => Output.error_message msg);
                 in pos2 |> Position.symbol "\n" end);
-          in thy' end)));
+          in thy end)));
 
   val _ =
     Outer_Syntax.local_theory \<^command_keyword>\<open>generate_file\<close>
@@ -480,15 +480,16 @@ ML \<open>
 local
 
 val _ =
-  Outer_Syntax.local_theory' \<^command_keyword>\<open>definition\<close> "constant definition"
+  Outer_Syntax.local_theory \<^command_keyword>\<open>definition\<close> "constant definition"
     (Scan.option Parse_Spec.constdecl -- (Parse_Spec.opt_thm_name ":" -- Parse.prop) --
       Parse_Spec.if_assumes -- Parse.for_fixes >> (fn (((decl, spec), prems), params) =>
-        #2 oo Specification.definition_cmd decl params prems spec));
+        #2 o Specification.definition_cmd {verbose = true} decl params prems spec));
 
 val _ =
-  Outer_Syntax.local_theory' \<^command_keyword>\<open>abbreviation\<close> "constant abbreviation"
+  Outer_Syntax.local_theory \<^command_keyword>\<open>abbreviation\<close> "constant abbreviation"
     (Parse.syntax_mode -- Scan.option Parse_Spec.constdecl -- Parse.prop -- Parse.for_fixes
-      >> (fn (((mode, decl), spec), params) => Specification.abbreviation_cmd mode decl params spec));
+      >> (fn (((mode, decl), spec), params) =>
+        Specification.abbreviation_cmd {verbose = true} mode decl params spec));
 
 val axiomatization =
   Parse.and_list1 (Parse_Spec.thm_name ":" -- Parse.prop) --
@@ -566,10 +567,10 @@ val short_statement =
         Element.Shows shows));
 
 fun theorem spec schematic descr =
-  Outer_Syntax.local_theory_to_proof' spec ("state " ^ descr)
+  Outer_Syntax.local_theory_to_proof spec ("state " ^ descr)
     ((long_statement || short_statement) >> (fn (long, binding, includes, elems, concl) =>
       ((if schematic then Specification.schematic_theorem_cmd else Specification.theorem_cmd)
-        long Thm.theoremK NONE (K I) binding includes elems concl)));
+        {verbose = true, long = long, kind = Thm.theoremK} NONE (K I) binding includes elems concl)));
 
 val _ = theorem \<^command_keyword>\<open>theorem\<close> false "theorem";
 val _ = theorem \<^command_keyword>\<open>lemma\<close> false "lemma";
@@ -583,15 +584,17 @@ ML \<open>
 local
 
 val _ =
-  Outer_Syntax.local_theory' \<^command_keyword>\<open>lemmas\<close> "define theorems"
+  Outer_Syntax.local_theory \<^command_keyword>\<open>lemmas\<close> "define theorems"
     (Parse_Spec.name_facts -- Parse.for_fixes >>
-      (fn (facts, fixes) => #2 oo Specification.theorems_cmd Thm.theoremK facts fixes));
+      (fn (facts, fixes) =>
+        #2 o Specification.theorems_cmd {verbose = true, kind = Thm.theoremK} facts fixes));
 
 val _ =
-  Outer_Syntax.local_theory' \<^command_keyword>\<open>declare\<close> "declare theorems"
+  Outer_Syntax.local_theory \<^command_keyword>\<open>declare\<close> "declare theorems"
     (Parse.and_list1 Parse.thms1 -- Parse.for_fixes
       >> (fn (facts, fixes) =>
-          #2 oo Specification.theorems_cmd "" [(Binding.empty_atts, flat facts)] fixes));
+          #2 o Specification.theorems_cmd {verbose = true, kind = ""}
+            [(Binding.empty_atts, flat facts)] fixes));
 
 val _ =
   Outer_Syntax.local_theory \<^command_keyword>\<open>named_theorems\<close>
@@ -687,12 +690,6 @@ val _ =
       Scan.optional Parse_Spec.includes [] -- Scan.repeat Parse_Spec.context_element
         >> (fn (incls, elems) => Toplevel.begin_nested_target (Target_Context.context_begin_nested_cmd incls elems)))
       --| Parse.begin);
-
-val _ =
-  Outer_Syntax.command \<^command_keyword>\<open>end\<close> "end context"
-    (Scan.succeed
-      (Toplevel.exit o Toplevel.end_main_target o Toplevel.end_nested_target o
-        Toplevel.end_proof (K Proof.end_notepad)));
 
 in end\<close>
 
@@ -822,8 +819,8 @@ ML \<open>
 local
 
 val _ =
-  Outer_Syntax.local_theory_to_proof \<^command_keyword>\<open>notepad\<close> "begin proof context"
-    (Parse.begin >> K Proof.begin_notepad);
+  Outer_Syntax.begin_notepad \<^command_keyword>\<open>notepad\<close> "begin proof context"
+    (Parse.begin >> K ());
 
 in end\<close>
 
@@ -840,22 +837,22 @@ val structured_statement =
 val _ =
   Outer_Syntax.command \<^command_keyword>\<open>have\<close> "state local goal"
     (structured_statement >> (fn (a, b, c, d) =>
-      Toplevel.proof' (fn int => Proof.have_cmd a NONE (K I) b c d int #> #2)));
+      Toplevel.proof (Proof.have_cmd a NONE (K I) b c d #> #2)));
 
 val _ =
   Outer_Syntax.command \<^command_keyword>\<open>show\<close> "state local goal, to refine pending subgoals"
     (structured_statement >> (fn (a, b, c, d) =>
-      Toplevel.proof' (fn int => Proof.show_cmd a NONE (K I) b c d int #> #2)));
+      Toplevel.proof (Proof.show_cmd a NONE (K I) b c d #> #2)));
 
 val _ =
   Outer_Syntax.command \<^command_keyword>\<open>hence\<close> "old-style alias of \"then have\""
     (structured_statement >> (fn (a, b, c, d) =>
-      Toplevel.proof' (fn int => Proof.chain #> Proof.have_cmd a NONE (K I) b c d int #> #2)));
+      Toplevel.proof (Proof.chain #> Proof.have_cmd a NONE (K I) b c d #> #2)));
 
 val _ =
   Outer_Syntax.command \<^command_keyword>\<open>thus\<close> "old-style alias of  \"then show\""
     (structured_statement >> (fn (a, b, c, d) =>
-      Toplevel.proof' (fn int => Proof.chain #> Proof.show_cmd a NONE (K I) b c d int #> #2)));
+      Toplevel.proof (Proof.chain #> Proof.show_cmd a NONE (K I) b c d #> #2)));
 
 in end\<close>
 
@@ -926,12 +923,12 @@ val _ =
 
 val _ =
   Outer_Syntax.command \<^command_keyword>\<open>consider\<close> "state cases rule"
-    (Parse_Spec.obtains >> (Toplevel.proof' o Obtain.consider_cmd));
+    (Parse_Spec.obtains >> (Toplevel.proof o Obtain.consider_cmd));
 
 val _ =
   Outer_Syntax.command \<^command_keyword>\<open>obtain\<close> "generalized elimination"
     (Parse.parbinding -- Scan.optional (Parse.vars --| Parse.where_) [] -- structured_statement
-      >> (fn ((a, b), (c, d, e)) => Toplevel.proof' (Obtain.obtain_cmd a b c d e)));
+      >> (fn ((a, b), (c, d, e)) => Toplevel.proof (Obtain.obtain_cmd a b c d e)));
 
 val _ =
   Outer_Syntax.command \<^command_keyword>\<open>let\<close> "bind text variables"
@@ -1090,21 +1087,21 @@ val calculation_args =
 
 val _ =
   Outer_Syntax.command \<^command_keyword>\<open>also\<close> "combine calculation and current facts"
-    (calculation_args >> (Toplevel.proofs' o Calculation.also_cmd));
+    (calculation_args >> (Toplevel.proofs o Calculation.also_cmd));
 
 val _ =
   Outer_Syntax.command \<^command_keyword>\<open>finally\<close>
     "combine calculation and current facts, exhibit result"
-    (calculation_args >> (Toplevel.proofs' o Calculation.finally_cmd));
+    (calculation_args >> (Toplevel.proofs o Calculation.finally_cmd));
 
 val _ =
   Outer_Syntax.command \<^command_keyword>\<open>moreover\<close> "augment calculation by current facts"
-    (Scan.succeed (Toplevel.proof' Calculation.moreover));
+    (Scan.succeed (Toplevel.proof Calculation.moreover));
 
 val _ =
   Outer_Syntax.command \<^command_keyword>\<open>ultimately\<close>
     "augment calculation by current facts, exhibit result"
-    (Scan.succeed (Toplevel.proof' Calculation.ultimately));
+    (Scan.succeed (Toplevel.proof Calculation.ultimately));
 
 val _ =
   Outer_Syntax.command \<^command_keyword>\<open>print_trans_rules\<close> "print transitivity rules"
@@ -1332,7 +1329,7 @@ val _ =
           else
             let
               val ctxt = Toplevel.context_of st;
-              val insert = Symset.insert o Context.theory_long_name o Thy_Info.check_theory ctxt;
+              val insert = Symset.insert o Context.theory_long_name o Build.check_theory ctxt;
               val names = Symset.build (fold insert raw_names);
             in Symset.member names o Context.theory_long_name o Context.theory_of end;
       in Session.print_context_tracing pred end)));
@@ -1620,8 +1617,29 @@ syntax (output)
   "_constrain" :: "prop' \<Rightarrow> type \<Rightarrow> prop'"  (\<open>_ :: _\<close> [4, 0] 3)
 end
 
+ML \<open>
+structure OS =
+struct
+  open OS;
+  structure IO = struct end;
+  structure Process =
+  struct
+    val getEnv = OS.Process.getEnv;
+  end;
+  structure FileSys = OS.FileSys;
+  structure Path = OS.Path;
+end;
 
-declare [[ML_write_global = false]]
+structure Posix = struct end;
+
+structure PolyML =
+struct
+  open PolyML;
+  fun exit (_: int) = raise Fail "Cannot exit process from Isabelle/ML"
+end;
+\<close>
+
+declare [[ML_write_global = false, ML_check_strings = true]]
 
 ML_command \<open>\<^assert> (not (can ML_command \<open>() handle _ => ()\<close>))\<close>
 ML_command \<open>\<^assert> (not (can ML_command \<open>() handle Interrupt => ()\<close>))\<close>

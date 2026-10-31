@@ -626,11 +626,11 @@ fun prepare_free_constructors kind prep_plugins prep_term
                 else if Binding.eq_name (b, equal_binding) then
                   pair (Term.lambda u exist_xs_u_eq_ctr, refl)
                 else
-                  Specification.definition (SOME (b, NONE, NoSyn)) [] []
+                  Specification.definition {verbose = false} (SOME (b, NONE, NoSyn)) [] []
                     ((Thm.def_binding b, []), disc_spec b exist_xs_u_eq_ctr) #>> apsnd snd)
               ks exist_xs_u_eq_ctrs disc_bindings
             ||>> apfst split_list o fold_map (fn (b, proto_sels) =>
-              Specification.definition (SOME (b, NONE, NoSyn)) [] []
+              Specification.definition {verbose = false} (SOME (b, NONE, NoSyn)) [] []
                 ((Thm.def_binding b, []), sel_spec b proto_sels) #>> apsnd snd) sel_infos
             ||> `Local_Theory.end_nested;
 
@@ -1240,7 +1240,7 @@ end;
 (* theory export *)
 
 val _ =
-  (Theory.setup o Thy_Info.add_presentation) (fn context => fn thy =>
+  (Theory.setup o Thy_Presentation.add_hook) (fn context => fn thy =>
     if Export_Theory.export_enabled context then
       let
         val parents = map (Data.get o Context.Theory) (Theory.parents_of thy);
@@ -1250,7 +1250,7 @@ val _ =
               if kind = Record orelse exists (fn tab => Symtab.defined tab name) parents then I
               else
                 let
-                  val pos_properties = Thy_Info.adjust_pos_properties context pos;
+                  val pos_properties = Thy_Presentation.adjust_pos_properties context pos;
                   val typ = Logic.unvarifyT_global T;
                   val constrs = map Logic.unvarify_global ctrs;
                   val typargs = rev (fold Term.add_tfrees (Logic.mk_type typ :: constrs) []);

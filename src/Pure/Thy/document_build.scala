@@ -30,10 +30,10 @@ object Document_Build {
     def print: String = if (tags.toString.isEmpty) name else name + "=" + tags.toString
   }
 
-  sealed case class Document_Input(name: String, sources: SHA1.Shasum)
+  sealed case class Document_Input(name: String, sources: Shasum)
   extends Document_Name { override def toString: String = name }
 
-  sealed case class Document_Output(name: String, sources: SHA1.Shasum, log_xz: Bytes, pdf: Bytes)
+  sealed case class Document_Output(name: String, sources: Shasum, log_xz: Bytes, pdf: Bytes)
   extends Document_Name {
     override def toString: String = name
 
@@ -87,7 +87,7 @@ object Document_Build {
           val sources = res.string(Base.sources)
           val log_xz = res.bytes(Base.log_xz)
           val pdf = res.bytes(Base.pdf)
-          Document_Output(name, SHA1.fake_shasum(sources), log_xz, pdf)
+          Document_Output(name, Shasum.fake(sources), log_xz, pdf)
         }
       )
     }
@@ -314,14 +314,14 @@ object Document_Build {
       val document_prefs = latex_output.options.make_prefs(filter = _.for_document)
 
       val meta_info =
-        SHA1.shasum_meta_info(
+        Shasum.make_meta_info(
           SHA1.digest(
             List(doc.print, document_logo.toString, document_build, document_prefs).toString))
 
       val manifest =
-        SHA1.shasum_sorted(
-          for (file <- File.find_files(doc_dir.file, follow_links = true))
-            yield SHA1.digest(file) -> File.path(doc_dir.java_path.relativize(file.toPath)).implode)
+        Shasum.make_sorted(
+          File.find_files(doc_dir, follow_links = true, relative = true)
+            .map(path => SHA1.digest(doc_dir + path) -> path.implode))
 
       val sources = meta_info ::: manifest
 
@@ -355,7 +355,7 @@ object Document_Build {
     doc_dir: Path,
     doc: Document_Variant,
     root_name: String,
-    sources: SHA1.Shasum
+    sources: Shasum
   ) {
     def root_name_script(ext: String = ""): String =
       Bash.string(if (ext.isEmpty) root_name else root_name + "." + ext)
@@ -517,12 +517,14 @@ object Document_Build {
       for (doc <- context.documents)
       yield {
         Isabelle_System.with_tmp_dir("document") { tmp_dir =>
+          progress.expose_interrupt()
           progress.echo("Preparing " + context.session + "/" + doc.name + " ...")
           val start = Time.now()
 
           output_sources.foreach(engine.prepare_directory(context, _, doc, false))
           val directory = engine.prepare_directory(context, tmp_dir, doc, verbose)
 
+          progress.expose_interrupt()
           val document =
             context.old_document(directory) getOrElse
               engine.build_document(context, directory, verbose)
@@ -530,6 +532,7 @@ object Document_Build {
           val stop = Time.now()
           val timing = stop - start
 
+          progress.expose_interrupt()
           progress.echo("Finished " + context.session + "/" + doc.name +
             " (" + timing.message_hms + " elapsed time)")
 

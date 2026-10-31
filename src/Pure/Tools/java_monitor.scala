@@ -16,19 +16,19 @@ object Java_Monitor {
   /* Java classes */
 
   object ClassOf {
-    val Component: Class[_ <: AnyRef] = Class.forName("java.awt.Component")
-    val JConsole: Class[_ <: AnyRef] = Class.forName("sun.tools.jconsole.JConsole")
-    val LocalVirtualMachine: Class[_ <: AnyRef] = Class.forName("sun.tools.jconsole.LocalVirtualMachine")
-    val Messages: Class[_ <: AnyRef] = Class.forName("sun.tools.jconsole.Messages")
-    val ProxyClient: Class[_ <: AnyRef] = Class.forName("sun.tools.jconsole.ProxyClient")
-    val Resources: Class[_ <: AnyRef] = Class.forName("sun.tools.jconsole.Resources")
-    val VMPanel: Class[_ <: AnyRef] = Class.forName("sun.tools.jconsole.VMPanel")
+    val Component = Classpath.the_class("java.awt.Component")
+    val JConsole = Classpath.the_class("sun.tools.jconsole.JConsole")
+    val LocalVirtualMachine = Classpath.the_class("sun.tools.jconsole.LocalVirtualMachine")
+    val Messages = Classpath.the_class("sun.tools.jconsole.Messages")
+    val ProxyClient = Classpath.the_class("sun.tools.jconsole.ProxyClient")
+    val Resources = Classpath.the_class("sun.tools.jconsole.Resources")
+    val VMPanel = Classpath.the_class("sun.tools.jconsole.VMPanel")
   }
 
 
   /* default arguments */
 
-  def default_pid: Long = ProcessHandle.current().pid
+  def default_pid: Long = ProcessHandle.current().nn.pid
   val default_update_interval: Time = Time.seconds(3)
 
 
@@ -56,11 +56,12 @@ object Java_Monitor {
       }
 
       Desktop_App.about_handler {
-        GUI.dialog(null, "Java Monitor",
-          Untyped.the_method(ClassOf.Resources, "format").
-            invoke(null,
-              Untyped.get_static(ClassOf.Messages, "JCONSOLE_VERSION"),
-                System.getProperty("java.runtime.version")))
+        GUI.dialog(title = "Java Monitor",
+          message = Seq(
+            Untyped.the_method(ClassOf.Resources, "format").
+              invoke(null,
+                Untyped.get_static(ClassOf.Messages, "JCONSOLE_VERSION"),
+                  Isabelle_System.get_property("java.runtime.version")).nn))
       }
 
       val jconsole =
@@ -89,7 +90,7 @@ object Java_Monitor {
             try {
               val vm_panel =
                 Untyped.constructor(ClassOf.VMPanel, ClassOf.ProxyClient, Integer.TYPE)
-                  .newInstance(proxy_client, java.lang.Integer.valueOf(update_interval.ms.toInt))
+                  .newInstance(proxy_client, Value.Int.obj(update_interval.ms.toInt)).nn
 
               Untyped.field(vm_panel, "shouldUseSSL").setBoolean(vm_panel, false)
 
@@ -104,13 +105,15 @@ object Java_Monitor {
             }
             catch {
               case exn: Throwable =>
-                GUI.error_dialog(jconsole, "Error", GUI.scrollable_text(Exn.message(exn)))
+                GUI.error_dialog(
+                  message = Seq(GUI.scrollable_text(Exn.message(exn))), parent = Some(jconsole))
             }
           }
         }
         catch {
           case exn: Throwable =>
-            GUI.error_dialog(jconsole, "Error", GUI.scrollable_text(Exn.message(exn)))
+            GUI.error_dialog(
+              message = Seq(GUI.scrollable_text(Exn.message(exn))), parent = Some(jconsole))
         }
       }
     }
@@ -120,7 +123,7 @@ object Java_Monitor {
   /* java monitor on new JVM: asynchronous process */
 
   def java_monitor_external(
-    parent: Component,
+    parent: Option[Component] = None,
     pid: Long = default_pid,
     look_and_feel: String = "",
     update_interval: Time = default_update_interval
@@ -136,7 +139,10 @@ object Java_Monitor {
       catch {
         case exn: Throwable =>
           GUI_Thread.later {
-            GUI.error_dialog(parent, "System error", GUI.scrollable_text(Exn.message(exn)))
+            GUI.error_dialog(
+              title = "System error",
+              message = Seq(GUI.scrollable_text(Exn.message(exn))),
+              parent = parent)
           }
       }
     }

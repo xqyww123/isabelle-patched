@@ -122,7 +122,7 @@ object Web_App {
           val text_i = text.indexOf(sep)
           if (text_i >= 0 && sep.nonEmpty) {
             val (before_text, at_text) = text.splitAt(text_i)
-            val after_text = at_text.substring(sep.length)
+            val after_text = at_text.drop(sep.length)
 
             // text might be shorter than bytes because of misinterpreted characters
             var found = false
@@ -346,7 +346,7 @@ object Web_App {
     paths: Paths,
     port: Int = 0,
     verbose: Boolean = false,
-    progress: Progress = new Progress(),
+    progress: Progress = new Progress,
   ) {
     def render(model: A): XML.Body
     val error_model: A
@@ -394,8 +394,8 @@ object Web_App {
 }).call(this)"""
 
         val set_src = """
-const base = '""" + paths.frontend.toString.replace("/", "\\/") + """'
-document.getElementById('iframe').src = base + '""" + paths.api_route(path).replace("/", "\\/") + """' + window.location.search"""
+const base = '""" + paths.frontend.toString.replacing("/" -> "\\/") + """'
+document.getElementById('iframe').src = base + '""" + paths.api_route(path).replacing("/" -> "\\/") + """' + window.location.search"""
 
         html(
           XML.elem("head", HTML.head_meta :: head),
@@ -540,7 +540,7 @@ window.addEventListener("resize", (event) => { post_height() })
         loop()
       }
 
-      Isabelle_Thread.interrupt_handler(_ => server.stop()) { loop() }
+      Isabelle_Thread.interrupt_handle(server.stop()) { loop() }
     }
 
     def start(): Unit = {

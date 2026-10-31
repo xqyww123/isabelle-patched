@@ -6,6 +6,7 @@ Dockable window for Isabelle documentation.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -17,13 +18,15 @@ import org.gjt.sp.jedit.View
 
 
 class Documentation_Dockable(view: View, position: String) extends Dockable(view, position) {
-  private val doc_contents = Doc.contents(PIDE.ml_settings)
+  private val doc_contents = PIDE.session.doc_contents
 
   private val tree =
     new Tree_View(single_selection_mode = true, accessible_name = "Documentation") {
+      override def handle_escape(): Unit = view.getTextArea.requestFocus()
+
       override def handle_selection(path: TreePath): Unit =
         for (entry <- get_selection(path, { case x: Doc.Entry => x })) {
-          PIDE.editor.goto_doc(view, entry.path, focus = true)
+          JEdit_Editor.goto_doc(editor_context, entry.path, focus = true)
         }
     }
 

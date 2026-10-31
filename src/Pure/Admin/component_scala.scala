@@ -18,7 +18,7 @@ object Component_Scala {
     base_version: String = "3"
   ) {
     def make_url(template: String): String =
-      template.replace("{V}", version).replace("{B}", base_version)
+      template.replacing("{V}" -> version, "{B}" -> base_version)
 
     def proper_url: String = make_url(proper_string(physical_url).getOrElse(url))
 
@@ -33,8 +33,11 @@ object Component_Scala {
         ":\n    " + make_url(url)
   }
 
+  val scala_version = "3.3.8"
+  val scalajs_version = "1.21.0"
+
   val main_download: Download =
-    Download("scala", "3.3.5", base_version = "",
+    Download("scala", scala_version, base_version = "",
       url = "https://github.com/lampepfl/dotty/releases/download/{V}/scala3-{V}.tar.gz")
 
   val lib_downloads: List[Download] = List(
@@ -44,16 +47,91 @@ object Component_Scala {
     Download("scala-parser-combinators", "2.4.0",
       "https://mvnrepository.com/artifact/org.scala-lang.modules/scala-parser-combinators_{B}/{V}",
       physical_url = "https://repo1.maven.org/maven2/org/scala-lang/modules/scala-parser-combinators_{B}/{V}/scala-parser-combinators_{B}-{V}.jar"),
+    Download("scala-parser-combinators", "2.4.0",
+      "https://mvnrepository.com/artifact/org.scala-lang.modules/scala-parser-combinators_{B}/{V}",
+      physical_url = "https://repo1.maven.org/maven2/org/scala-lang/modules/scala-parser-combinators_{B}/{V}/scala-parser-combinators_{B}-{V}.jar",
+      base_version = "sjs1_3"),
     Download("scala-swing", "3.0.0",
       "https://mvnrepository.com/artifact/org.scala-lang.modules/scala-swing_{B}/{V}",
       physical_url = "https://repo1.maven.org/maven2/org/scala-lang/modules/scala-swing_{B}/{V}/scala-swing_{B}-{V}.jar"),
-    Download("scala-xml", "2.3.0",
+    Download("scala-xml", "2.4.0",
       "https://mvnrepository.com/artifact/org.scala-lang.modules/scala-xml_{B}/{V}",
-      physical_url = "https://repo1.maven.org/maven2/org/scala-lang/modules/scala-xml_{B}/{V}/scala-xml_{B}-{V}.jar")
+      physical_url = "https://repo1.maven.org/maven2/org/scala-lang/modules/scala-xml_{B}/{V}/scala-xml_{B}-{V}.jar"),
+    Download("scalajs-linker", scalajs_version,
+       "https://mvnrepository.com/artifact/org.scala-js/scalajs-linker_{B}/{V}",
+       physical_url = "https://repo1.maven.org/maven2/org/scala-js/scalajs-linker_{B}/{V}/scalajs-linker_{B}-{V}.jar",
+       base_version = "2.13"),
+    Download("scalajs-linker-interface", scalajs_version,
+      "https://mvnrepository.com/artifact/org.scala-js/scalajs-linker-interface_{B}/{V}",
+      physical_url = "https://repo1.maven.org/maven2/org/scala-js/scalajs-linker-interface_{B}/{V}/scalajs-linker-interface_{B}-{V}.jar",
+      base_version = "2.13"),
+    Download("scalajs-ir", scalajs_version,
+      "https://mvnrepository.com/artifact/org.scala-js/scalajs-ir_{B}/{V}",
+      physical_url = "https://repo1.maven.org/maven2/org/scala-js/scalajs-ir_{B}/{V}/scalajs-ir_{B}-{V}.jar",
+      base_version = "2.13"),
+    Download("scalajs-logging", "1.2.0",
+      "https://mvnrepository.com/artifact/org.scala-js/scalajs-logging_{B}/{V}",
+      physical_url = "https://repo1.maven.org/maven2/org/scala-js/scalajs-logging_{B}/{V}/scalajs-logging_{B}-{V}.jar",
+      base_version = "2.13"),
+    Download("scala-parallel-collections", "0.2.0",
+      "https://mvnrepository.com/artifact/org.scala-lang.modules/scala-parallel-collections_{B}/{V}",
+      physical_url = "https://repo1.maven.org/maven2/org/scala-lang/modules/scala-parallel-collections_{B}/{V}/scala-parallel-collections_{B}-{V}.jar",
+      base_version = "2.13"),
+    Download("scalajs-library", scalajs_version,
+      "https://mvnrepository.com/artifact/org.scala-js/scalajs-library_{B}/{V}",
+      physical_url = "https://repo1.maven.org/maven2/org/scala-js/scalajs-library_{B}/{V}/scalajs-library_{B}-{V}.jar",
+      base_version = "2.13"),
+    Download("scalajs-javalib", scalajs_version,
+      "https://mvnrepository.com/artifact/org.scala-js/scalajs-javalib/{V}",
+      physical_url = "https://repo1.maven.org/maven2/org/scala-js/scalajs-javalib/{V}/scalajs-javalib-{V}.jar",
+      base_version = ""),
+    Download("scalajs-scalalib", "2.13.18+1.21.0",
+      "https://mvnrepository.com/artifact/org.scala-js/scalajs-scalalib_{B}/{V}",
+      physical_url = "https://repo1.maven.org/maven2/org/scala-js/scalajs-scalalib_{B}/{V}/scalajs-scalalib_{B}-{V}.jar",
+      base_version = "2.13"),
+    Download("scala3-library", scala_version,
+      "https://mvnrepository.com/artifact/org.scala-lang/scala3-library_{B}/{V}",
+      physical_url = "https://repo1.maven.org/maven2/org/scala-lang/scala3-library_{B}/{V}/scala3-library_{B}-{V}.jar",
+      base_version = "sjs1_3"),
+    Download("scalajs-dom_sjs1", "2.8.1",
+      "https://mvnrepository.com/artifact/org.scala-js/scalajs-dom_{B}/{V}",
+      physical_url = "https://repo1.maven.org/maven2/org/scala-js/scalajs-dom_{B}/{V}/scalajs-dom_{B}-{V}.jar",
+      base_version = "sjs1_3"),
+    Download("scala-java-time", "2.7.0",
+      "https://mvnrepository.com/artifact/io.github.cquiroz/scala-java-time_{B}/{V}",
+      physical_url = "https://repo1.maven.org/maven2/io/github/cquiroz/scala-java-time_{B}/{V}/scala-java-time_{B}-{V}.jar",
+      base_version = "sjs1_3"),
+    Download("scala-java-locales", "1.5.4",
+      "https://mvnrepository.com/artifact/io.github.cquiroz/scala-java-locales_{B}/{V}",
+      physical_url = "https://repo1.maven.org/maven2/io/github/cquiroz/scala-java-locales_{B}/{V}/scala-java-locales_{B}-{V}.jar",
+      base_version = "sjs1_3"),
+    Download("cldr-api", "4.5.0",
+      "https://mvnrepository.com/artifact/io.github.cquiroz/cldr-api_{B}/{V}",
+      physical_url = "https://repo1.maven.org/maven2/io/github/cquiroz/cldr-api_{B}/{V}/cldr-api_{B}-{V}.jar",
+      base_version = "sjs1_3"),
+    Download("portable-scala-reflect", "1.1.3",
+      "https://mvnrepository.com/artifact/org.portable-scala/portable-scala-reflect_{B}/{V}",
+      physical_url = "https://repo1.maven.org/maven2/org/portable-scala/portable-scala-reflect_{B}/{V}/portable-scala-reflect_{B}-{V}.jar",
+      base_version = "sjs1_2.13"),
   )
 
 
   /* build Scala component */
+
+  val build_patch =
+"""
+diff -Nru scala-3.3.8/bin/common scala-3.3.8-patched/bin/common
+--- scala-3.3.8/bin/common	2026-06-10 15:56:37.327000000 +0200
++++ scala-3.3.8-patched/bin/common	2026-06-27 13:46:48.804966864 +0200
+@@ -55,7 +55,6 @@
+            if [ -z "$JAVA_HOME" ] ; then
+              JAVA_HOME=/System/Library/Frameworks/JavaVM.framework/Versions/${JAVA_VERSION}/Home
+            fi
+-           JAVACMD="`which java`"
+            ;;
+ esac
+ 
+"""
 
   def build_scala(
     target_dir: Path = Path.current,
@@ -71,6 +149,7 @@ object Component_Scala {
     Isabelle_System.with_tmp_file("archive", ext = "tar.gz") { archive_path =>
       main_download.get(archive_path, progress = progress)
       Isabelle_System.extract(archive_path, component_dir.path, strip = true)
+      Isabelle_System.apply_patch(component_dir.path, build_patch, progress = progress)
     }
 
     lib_downloads.foreach(download =>
@@ -90,7 +169,7 @@ object Component_Scala {
           no_function("tput"),
           "PROG_HOME=" + File.bash_path(component_dir.path),
           File.read(component_dir.path + Path.explode("bin/common"))
-            .replace("scala_exit_status=127", "scala_exit_status=0"),
+            .replacing("scala_exit_status=127" -> "scala_exit_status=0"),
           "compilerJavaClasspathArgs",
           "echo \"$jvm_cp_args\""))
 
@@ -113,24 +192,14 @@ SCALA_INTERFACES="$SCALA_HOME/lib/""" + interfaces + """"
 """ + terminate_lines(classpath.map(jar => "classpath \"$SCALA_HOME/lib/" + jar + "\"")))
 
 
-    /* adhoc changes */
-
-    val patched_scripts = List("bin/scala", "bin/scalac")
-    for (name <- patched_scripts) {
-      File.change(component_dir.path + Path.explode(name)) {
-        _.replace(""""-Dscala.home=$PROG_HOME"""", """"-Dscala.home=\"$PROG_HOME\""""")
-      }
-    }
-
-
     /* README */
 
     File.write(component_dir.README,
       "This distribution of Scala integrates the following parts:\n\n" +
       (main_download :: lib_downloads).map(_.print).mkString("\n\n") + """
 
-Minor changes to """ + patched_scripts.mkString(" and ") + """ allow an installation location
-with spaces in the directory name.
+The following patch has been applied:
+""" + build_patch + """
 
 
         Makarius

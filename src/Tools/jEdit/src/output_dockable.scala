@@ -6,6 +6,7 @@ Dockable window with result message output.
 
 package isabelle.jedit
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -27,7 +28,7 @@ class Output_Dockable(view: View, position: String) extends Dockable(view, posit
   /* output area */
 
   val output: Output_Area =
-    new Output_Area(view) {
+    new Output_Area(editor_context) {
       override def handle_update(): Unit = dockable.handle_update()
       override def handle_shown(): Unit = split_pane_layout()
     }
@@ -37,9 +38,9 @@ class Output_Dockable(view: View, position: String) extends Dockable(view, posit
 
   private def handle_update(restriction: Option[Set[Command]] = None): Unit =
     GUI_Thread.require {
-      val caret_offset = view.getTextArea.getCaretPosition
-      for (snapshot <- PIDE.editor.current_node_snapshot(view)) {
-        val output = PIDE.editor.output(snapshot, caret_offset, restriction = restriction)
+      val caret_offset = editor_context.caret_offset
+      for (snapshot <- JEdit_Editor.current_node_snapshot(editor_context)) {
+        val output = JEdit_Editor.output(snapshot, caret_offset, restriction = restriction)
         if (output.defined && current_output != output.messages) {
           dockable.output.pretty_text_area.update_output(output)
           current_output = output.messages
@@ -81,7 +82,8 @@ class Output_Dockable(view: View, position: String) extends Dockable(view, posit
   /* main */
 
   private val main =
-    Session.Consumer[Any](getClass.getName) {
+    Session.Consumer[Session.Global_Options | Session.Commands_Changed |
+        Session.Caret_Focus.type](this.class_name) {
       case _: Session.Global_Options =>
         GUI_Thread.later {
           output.handle_resize()

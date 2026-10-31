@@ -31,7 +31,7 @@ object Scala_Project {
           case Some(name) => Path.explode(space_explode('.', name).mkString("/"))
           case None => error("Failed to guess package from " + source_file)
         }
-      (if (source_file.is_java) java_src_dir else scala_src_dir) + dir
+      (if (File.is_java(source_file)) java_src_dir else scala_src_dir) + dir
     }
   }
 
@@ -66,7 +66,7 @@ repositories {
 }
 
 dependencies {
-  implementation 'org.scala-lang:scala3-library_3:scala-library:""" + scala_version + """'
+  implementation 'org.scala-lang:scala3-library_3:""" + scala_version + """'
   compileOnly files(
     """ + jars.map(jar => groovy_string(File.platform_path(jar))).mkString("", ",\n    ", ")") +
 """
@@ -83,9 +83,15 @@ dependencies {
 
     override val project_root: Path = Path.explode("pom.xml")
 
+    def replace_special(c: Char): String =
+      if (Symbol.is_ascii_letter(c) || Symbol.is_ascii_digit(c) || "_-.".contains(c)) c.toString
+      else "_"
+
+    def sanitize_name(name: String): String = name.iterator.map(replace_special).mkString
+
     override def init_project(dir: Path, jars: List[Path]): Unit = {
       def dependency(jar: Path): String = {
-        val name = jar.expand.drop_ext.base.implode
+        val name = sanitize_name(jar.expand.drop_ext.base.implode)
         val system_path = File.platform_path(jar.absolute)
         """  <dependency>
     <groupId>classpath</groupId>
@@ -156,8 +162,8 @@ dependencies {
       (for {
         context <- contexts.iterator
         path <- context.sources.iterator
-        if path.is_scala || path.is_java
-      } yield path).toList
+        if File.is_scala(path) || File.is_java(path)
+      } yield path).toList.distinct
 
     (jars, sources)
   }
@@ -166,7 +172,7 @@ dependencies {
     Scala_Build.context(Path.ISABELLE_HOME, component = true)
       .sources.iterator.foldLeft(Map.empty[String, Path]) {
         case (map, path) =>
-          if (path.is_scala) {
+          if (File.is_scala(path)) {
           val base = path.base.implode
             map.get(base) match {
               case None => map + (base -> path)
@@ -181,10 +187,10 @@ dependencies {
 
   def here: Here = {
     val exn = new Exception
-    exn.getStackTrace.toList match {
+    exn.getStackTrace.nn.toList match {
       case _ :: caller :: _ =>
-        val name = proper_string(caller.getFileName).getOrElse("")
-        val line = caller.getLineNumber
+        val name = proper_string(caller.nn.getFileName).getOrElse("")
+        val line = caller.nn.getLineNumber
         new Here(name, line)
       case _ => new Here("", 0)
     }

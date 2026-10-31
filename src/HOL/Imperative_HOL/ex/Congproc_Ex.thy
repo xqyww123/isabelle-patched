@@ -502,7 +502,7 @@ let
 in
   Context.theory_map (fn context =>
     let val old_mksimps = Simplifier.get_mksimps_context (Context.proof_of context)
-    in context |> Simplifier.map_ss (Simplifier.set_mksimps_context (my_mksimps old_mksimps)) end)
+    in context |> Simplifier.map_simpset (Simplifier.set_mksimps_context (my_mksimps old_mksimps)) end)
 end
 \<close>
 
@@ -512,7 +512,7 @@ simproc_setup UNPROTECT (\<open>UNPROTECT P\<close>) = \<open>fn _ => fn ctxt =>
   let
     val thms = Named_Theorems.get ctxt @{named_theorems my_theorems}
     val _ = tracing ("my_theorems: " ^ @{make_string} thms)
-    val eq = Simplifier.rewrite (ctxt addsimps thms) ct
+    val eq = Simplifier.rewrite (ctxt |> Simplifier.add_simps thms) ct
   in if Thm.is_reflexive eq then NONE else SOME eq end\<close>
 
 lemma "EXTRACT P \<Longrightarrow> UNPROTECT P"

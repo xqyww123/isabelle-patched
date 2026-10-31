@@ -399,7 +399,7 @@ end;
 open Simpdata;
 \<close>
 
-declaration \<open>fn _ => Simplifier.map_ss (Simplifier.set_mksimps (mksimps mksimps_pairs))\<close>
+declaration \<open>fn _ => Simplifier.map_simpset (Simplifier.set_mksimps (mksimps mksimps_pairs))\<close>
 
 lemma ballE [elim]: "\<forall>x\<in>A. P x \<Longrightarrow> (P x \<Longrightarrow> Q) \<Longrightarrow> (x \<notin> A \<Longrightarrow> Q) \<Longrightarrow> Q"
   unfolding Ball_def by blast
@@ -736,6 +736,10 @@ lemma insert_def: "insert a B = {x. x = a} \<union> B"
 
 subsubsection \<open>Set difference\<close>
 
+text \<open>The minus-sign syntax continues to be the default\<close>
+abbreviation (input) set_difference :: "['a set, 'a set] \<Rightarrow> 'a set" 
+  (infixl "\<setminus>" 65) where "A \<setminus> B \<equiv> A-B"
+
 lemma Diff_iff [simp]: "c \<in> A - B \<longleftrightarrow> c \<in> A \<and> c \<notin> B"
   by (simp add: minus_set_def fun_diff_def)
 
@@ -758,7 +762,7 @@ lemma Compl_eq_Diff_UNIV: "- A = (UNIV - A)"
   by blast
 
 abbreviation sym_diff :: "'a set \<Rightarrow> 'a set \<Rightarrow> 'a set" where
-  "sym_diff A B \<equiv> ((A - B) \<union> (B-A))"
+  "sym_diff A B \<equiv> ((A - B) \<union> (B - A))"
 
 
 subsubsection \<open>Augmenting a set -- \<^const>\<open>insert\<close>\<close>

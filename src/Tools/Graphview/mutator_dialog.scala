@@ -7,6 +7,7 @@ Mutator selection and configuration dialog.
 
 package isabelle.graphview
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -47,7 +48,7 @@ class Mutator_Dialog(
 
   minimumSize = new Dimension(700, 200)
   preferredSize = new Dimension(1000, 300)
-  peer.setFocusTraversalPolicy(Focus_Traveral_Policy)
+  peer.setFocusTraversalPolicy(Focus_Traversal_Policy)
 
   private def get_panels(m: List[Mutator.Info]): List[Mutator_Panel] =
     m.filter({ case Mutator.Info(_, _, Mutator.Identity()) => false case _ => true })
@@ -85,18 +86,18 @@ class Mutator_Dialog(
   }
 
   def paint_panels(): Unit = {
-    Focus_Traveral_Policy.clear()
+    Focus_Traversal_Policy.clear()
     filter_panel.contents.clear()
     panels.map { x =>
       filter_panel.contents += x
-      Focus_Traveral_Policy.addAll(x.focusList)
+      Focus_Traversal_Policy.addAll(x.focusList)
     }
     filter_panel.contents += Swing.VGlue
 
-    Focus_Traveral_Policy.add(mutator_box.peer.asInstanceOf[java.awt.Component])
-    Focus_Traveral_Policy.add(add_button.peer)
-    Focus_Traveral_Policy.add(apply_button.peer)
-    Focus_Traveral_Policy.add(cancel_button.peer)
+    Focus_Traversal_Policy.add(mutator_box.peer.asInstanceOf[java.awt.Component])
+    Focus_Traversal_Policy.add(add_button.peer)
+    Focus_Traversal_Policy.add(apply_button.peer)
+    Focus_Traversal_Policy.add(cancel_button.peer)
     filter_panel.revalidate()
     filter_panel.repaint()
   }
@@ -163,7 +164,7 @@ class Mutator_Dialog(
     contents += new Label(initials.mutator.name) {
       preferredSize = new Dimension(175, 20)
       horizontalAlignment = Alignment.Left
-      if (initials.mutator.description != "") tooltip = initials.mutator.description
+      if (initials.mutator.description.nonEmpty) tooltip = initials.mutator.description
     }
     contents += Swing.RigidBox(new Dimension(10, 0))
     contents += enabledBox
@@ -172,7 +173,7 @@ class Mutator_Dialog(
     inputs.map({
       case (n, c) =>
         contents += Swing.RigidBox(new Dimension(10, 0))
-        if (n != "") {
+        if (n.nonEmpty) {
           contents += new Label(n)
           contents += Swing.RigidBox(new Dimension(5, 0))
         }
@@ -334,7 +335,7 @@ class Mutator_Dialog(
     def bool = selected
   }
 
-  private object Focus_Traveral_Policy extends FocusTraversalPolicy {
+  private object Focus_Traversal_Policy extends FocusTraversalPolicy {
     private var items = Vector.empty[java.awt.Component]
 
     def add(c: java.awt.Component): Unit = { items = items :+ c }

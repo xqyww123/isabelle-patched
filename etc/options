@@ -85,18 +85,21 @@ option names_unique : bool = true for content
 option eta_contract : bool = true for content
   -- "print terms in eta-contracted form"
 
-option print_mode : string = "" for content
+option print_mode : string = "" for content ML_process
   -- "additional print modes for prover output (separated by commas)"
 
 
 section "Parallel Processing and Timing"
 
-public option threads : int = 0 for build
+public option threads : int = 0 for build ML_process
   -- "maximum number of worker threads for prover process (0 = guess from hardware)"
-option threads_trace : int = 0
+option threads_trace : int = 0 for ML_process
   -- "level of tracing information for multithreading"
-option threads_stack_limit : real = 0.25
+option threads_stack_limit : real = 0.25 for ML_process
   -- "maximum stack size for worker threads (in giga words, 0 = unlimited)"
+
+option interactive : bool = false
+  -- "interactive mode (implicitly provided by the PIDE session)"
 
 public option parallel_limit : int = 0 for build
   -- "approximative limit for parallel tasks (0 = unlimited)"
@@ -113,13 +116,13 @@ option build_timing_threshold : real = 0.1 for build
 public option timeout_scale : real = 1.0 for build
   -- "scale factor for timeout in Isabelle/ML and session build"
 
-option context_data_timing : bool = false for build
+option context_data_timing : bool = false for build ML_process
   -- "timing for context data operations"
 
-option context_theory_tracing : bool = false for build
+option context_theory_tracing : bool = false for build ML_process
   -- "tracing of persistent theory values within ML heap"
 
-option context_proof_tracing : bool = false for build
+option context_proof_tracing : bool = false for build ML_process
   -- "tracing of persistent Proof.context values within ML heap"
 
 
@@ -128,7 +131,7 @@ section "Detail of Theory and Proof Processing"
 option record_theories : bool = false for content
   -- "record intermediate theory commands and results"
 
-option record_proofs : int = -1 for content
+option record_proofs : int = -1 for content ML_process
   -- "set level of proofterm recording: 0, 1, 2, negative means unchanged"
 option quick_and_dirty : bool = false for content
   -- "if true then some tools will OMIT some proofs"
@@ -144,7 +147,10 @@ option context : string = "" for content
   -- "free-form information for session content (to be interpreted in Isabelle/ML)"
 
 option condition : string = "" for content
-  -- "required environment variables for subsequent theories (separated by commas)"
+  -- "pre-conditions to evaluate theory body (separated by commas)"
+
+option condition_proofs : string = "" for content
+  -- "pre-conditions to check proofs within theory body (separated by commas)"
 
 option timeout : real = 0 for build
   -- "timeout for session build job (seconds > 0)"
@@ -158,22 +164,31 @@ option process_policy : string = ""
 option process_output_tail : int = 40 for build
   -- "build process output tail shown to user (in lines, 0 = unlimited)"
 
-option profiling : string = "" (standard "time") for build
+option profiling : string = "" (standard "time") for build ML_process
   -- "ML profiling (possible values: time, time_thread, allocations)"
 
 option profiling_dir : string = ""
   -- "auxiliary directory for \"isabelle profiling\" tool"
 
-option system_log : string = "" (standard "-") for build
-  -- "output for system messages (log file or \"-\" for console progress)"
+option system_log : string = "-" (standard "-") for build
+  -- "output for system log messages (log file or \"-\" for console progress)"
 
 option system_heaps : bool = false for build
   -- "store session heaps in $ISABELLE_HEAPS_SYSTEM, not $ISABELLE_HEAPS"
 
+option pide_prover_verbose : bool = false for build
+  -- "output verbose messages for PIDE prover operations"
+
+option pide_editor_verbose : bool = false for build
+  -- "output verbose messages for PIDE editor operations"
+
+option pide_editor_timing : bool = false for build
+  -- "output timing messages for PIDE editor operations"
+
 
 section "ML System"
 
-option ML_print_depth : int = 20 for content
+option ML_print_depth : int = 20 for content ML_process
   -- "ML print depth for toplevel pretty-printing"
 
 public option ML_exception_trace : bool = false
@@ -197,8 +212,14 @@ public option ML_system_apple : bool = true for build
 
 section "Build Process"
 
+option build_debug : bool = false
+  -- "print details about differing sources and heaps"
+
 option build_thorough : bool = false
   -- "observe dependencies on options with tag 'content' or 'document'"
+
+public option build_everything : bool = false for build build_sync
+  -- "build everything, including guarded benchmark theories"
 
 option build_hostname : string = ""
   -- "alternative hostname for build process (default $ISABELLE_HOSTNAME)"
@@ -452,7 +473,7 @@ section "Theory Export"
 option export_theory : bool = false for content
   -- "export theory content to Isabelle/Scala"
 
-option export_standard_proofs : bool = false for content
+option export_standard_proofs : bool = false for content ML_process
   -- "export standardized proof terms to Isabelle/Scala (not scalable)"
 
 option export_proofs : bool = false for content
@@ -537,17 +558,11 @@ option build_manager_database_ssh_user : string = "" for connection
 option build_manager_database_ssh_port : int = 0 for connection
 
 
-section "Isabelle/Scala/ML system channel"
-
-option system_channel_address : string = "" for connection
-option system_channel_password : string = "" for connection
-
-
 section "Bash process execution server"
 
 option bash_process_debugging : bool = false for connection
-option bash_process_address : string = "" for connection
-option bash_process_password : string = "" for connection
+option bash_process_address : string = "" for connection ML_process
+option bash_process_password : string = "" for connection ML_process
 
 
 section "Continuous integration"

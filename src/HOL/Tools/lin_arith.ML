@@ -105,7 +105,7 @@ val neq_limit = Attrib.setup_config_int \<^binding>\<open>linarith_neq_limit\<cl
 val trace = Attrib.setup_config_bool \<^binding>\<open>linarith_trace\<close> (K false);
 
 fun nnf_simpset ctxt =
-  empty_simpset ctxt
+  Simplifier.empty_simpset ctxt
   |> Simplifier.set_mkeqTrue mk_eq_True
   |> Simplifier.set_mksimps (mksimps mksimps_pairs)
   |> Simplifier.add_simps @{thms imp_conv_disj iff_conv_conj_imp de_Morgan_disj
@@ -865,8 +865,8 @@ val init_arith_data =
     inj_thms = inj_thms,
     lessD = lessD,
     neqE = map Thm.trim_context @{thms linorder_neqE_nat linorder_neqE_linordered_idom} @ neqE,
-    simpset =
-      put_simpset HOL_basic_ss \<^context> |> Simplifier.add_cong @{thm if_weak_cong} |> simpset_of,
+    simpset = HOL_basic_ss
+      |> Simplifier.simpset_map \<^context> (Simplifier.add_cong @{thm if_weak_cong}),
     number_of = number_of});
 
 (* FIXME !?? *)
@@ -945,8 +945,8 @@ end;
 (* context setup *)
 
 val global_setup =
-  map_theory_simpset (fn ctxt => ctxt
-    |> Simplifier.add_unsafe_solver (mk_solver "lin_arith" (add_arith_facts #> Fast_Arith.prems_lin_arith_tac))) #>
+  Simplifier.map_theory_simpset
+    (Simplifier.add_unsafe_solver (Simplifier.mk_solver "lin_arith" (add_arith_facts #> Fast_Arith.prems_lin_arith_tac))) #>
   Attrib.setup \<^binding>\<open>linarith_split\<close> (Scan.succeed (Thm.declaration_attribute add_split))
     "declaration of split rules for arithmetic procedure" #>
   Method.setup \<^binding>\<open>linarith\<close>

@@ -15,6 +15,13 @@ import scala.jdk.CollectionConverters._
 
 
 object Classpath {
+  /** class environment **/
+
+  def the_class(name: String): Class[_ <: AnyRef] = Class.forName(name).nn
+
+
+  /** classpath entries **/
+
   abstract class Service
   type Service_Class = Class[Service]
 
@@ -24,18 +31,18 @@ object Classpath {
   {
     val jar_files0 =
       for {
-        s <- space_explode(JFile.pathSeparatorChar, System.getProperty("java.class.path", ""))
+        s <- space_explode(JFile.pathSeparatorChar, Isabelle_System.get_property("java.class.path"))
         if s.nonEmpty
       } yield File.absolute(new JFile(s))
 
     val jar_files1 =
       jar_files.flatMap(start =>
-          File.find_files(start, file => File.is_jar(file.getName)).sortBy(_.getName))
-        .map(File.absolute)
+          File.find_files(File.path(start), pred = File.is_jar).sortBy(_.file_name))
+        .map(_.absolute_file)
 
     val tmp_jars =
       for (jar <- jar_contents) yield {
-        val tmp_jar = Files.createTempFile("jar", "jar").toFile
+        val tmp_jar = Files.createTempFile("jar", "jar").nn.java_file
         tmp_jar.deleteOnExit()
         Bytes.write(tmp_jar, jar.content)
         tmp_jar
@@ -48,11 +55,11 @@ class Classpath private(static_jars: List[JFile], dynamic_jars: List[JFile]) {
   def jars: List[JFile] = static_jars ::: dynamic_jars
   override def toString: String = jars.mkString("Classpath(", ", ", ")")
 
-  def platform_path: String = jars.map(_.getPath).mkString(JFile.pathSeparator)
+  def platform_path: String = jars.map(_.getPath.nn).mkString(JFile.pathSeparator.nn)
 
   val class_loader: ClassLoader =
   {
-    val this_class_loader = this.getClass.getClassLoader
+    val this_class_loader = this.getClass.nn.getClassLoader.nn
     if (dynamic_jars.isEmpty) this_class_loader
     else {
       val dynamic_jars_url = dynamic_jars.map(file => File.url(file).java_url)
@@ -87,11 +94,11 @@ class Classpath private(static_jars: List[JFile], dynamic_jars: List[JFile]) {
     val services_jars =
       jars.flatMap(jar =>
         init_services(File.standard_path(jar),
-          isabelle.setup.Build.get_services(jar.toPath).asScala.toList))
+          isabelle.setup.Build.get_services(jar.java_path).nn.asScala.toList))
     services_env ::: services_jars
   }
 
   def make_services[C](c: Class[C]): List[C] =
     for { c1 <- services if Library.is_subclass(c1, c) }
-      yield c1.getDeclaredConstructor().newInstance().asInstanceOf[C]
+      yield c1.getDeclaredConstructor().nn.newInstance().nn.asInstanceOf[C]
 }

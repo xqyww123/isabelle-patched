@@ -6,6 +6,7 @@ Tree view on graph nodes.
 
 package isabelle.graphview
 
+import scala.language.unsafeNulls
 
 import isabelle._
 
@@ -61,14 +62,14 @@ extends BorderPanel {
 
   tree.addKeyListener(new KeyAdapter {
     override def keyPressed(e: KeyEvent): Unit =
-      if (!e.isConsumed() && e.getKeyCode == KeyEvent.VK_ENTER) {
+      if (!e.isConsumed() && GUI.plain_enter(e)) {
         e.consume()
         selection_action()
       }
   })
   tree.addMouseListener(new MouseAdapter {
     override def mousePressed(e: MouseEvent): Unit =
-      if (!e.isConsumed() && e.getClickCount == 2) {
+      if (!e.isConsumed() && e.getClickCount == 2 && GUI.no_modifier(e)) {
         e.consume()
         point_action(tree.getPathForLocation(e.getX, e.getY))
       }
@@ -98,7 +99,7 @@ extends BorderPanel {
     new GUI.Label("Selection:", selection_field) { tooltip = selection_tooltip }
 
   private val selection_delay =
-    Delay.last(graphview.options.seconds("editor_input_delay"), gui = true) {
+    GUI.Delay.last(graphview.options.seconds("editor_input_delay")) {
       val (pattern, ok) =
         selection_field.text match {
           case null | "" => (None, true)

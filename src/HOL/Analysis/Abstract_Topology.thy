@@ -99,8 +99,8 @@ lemma openin_INT2 [intro]:
 proof -
   have "(\<Inter>i \<in> I. U i) \<subseteq> topspace T"
     using \<open>I \<noteq> {}\<close> openin_subset[OF assms(3)] by auto
-  then show ?thesis
-    using openin_INT[of _ _ U, OF assms(1) assms(3)] by (simp add: inf.absorb2 inf_commute)
+  with assms show ?thesis
+    by (metis inf.orderE openin_INT)
 qed
 
 lemma openin_Inter [intro]:
@@ -252,7 +252,7 @@ proof -
       by blast
   qed
   ultimately show ?thesis
- unfolding istopology_def by force
+    unfolding istopology_def by force
 qed
 
 lemma openin_subtopology: "openin (subtopology U V) S \<longleftrightarrow> (\<exists>T. openin U T \<and> S = T \<inter> V)"
@@ -1082,7 +1082,7 @@ proof -
     by (metis Diff_Diff_Int disj closure_of_eq_topspace closure_of_restrict interior_of_closure_of)
   then show ?thesis
     unfolding interior_of_closure_of
-    by (metis Diff_Un Diff_subset assms(1) closedin_def closure_of_openin_Int_superset)
+    by (metis Diff_Un Diff_subset \<open>closedin X S\<close> closedin_def closure_of_openin_Int_superset)
 qed
 
 lemma interior_of_union_eq_empty:
@@ -1516,7 +1516,7 @@ lemma openin_continuous_map_preimage_gen:
   shows "openin X {x \<in> U. f x \<in> V}"
 proof -
   have eq: "{x \<in> U. f x \<in> V} = U \<inter> {x \<in> topspace X. f x \<in> V}"
-    using assms(2) openin_closedin_eq by fastforce
+    using \<open>openin X U\<close> openin_subset by fastforce
   show ?thesis
     unfolding eq
     using assms openin_continuous_map_preimage by fastforce
@@ -1527,7 +1527,7 @@ lemma closedin_continuous_map_preimage_gen:
   shows "closedin X {x \<in> U. f x \<in> V}"
 proof -
   have eq: "{x \<in> U. f x \<in> V} = U \<inter> {x \<in> topspace X. f x \<in> V}"
-    using assms(2) closedin_def by fastforce
+    using \<open>closedin X U\<close> closedin_subset by fastforce
   show ?thesis
     unfolding eq
     using assms closedin_continuous_map_preimage by fastforce
@@ -2954,23 +2954,20 @@ lemma homeomorphic_map_interior_of:
   assumes hom: "homeomorphic_map X Y f" and S: "S \<subseteq> topspace X"
   shows "Y interior_of (f ` S) = f ` (X interior_of S)"
 proof -
-  { fix y
-    assume "y \<in> topspace Y" and "y \<notin> Y closure_of (topspace Y - f ` S)"
-    then have "y \<in> f ` (topspace X - X closure_of (topspace X - S))"
-      using homeomorphic_eq_everything_map [THEN iffD1, OF hom] homeomorphic_map_closure_of [OF hom]
-      by (metis DiffI Diff_subset S closure_of_subset_topspace inj_on_image_set_diff) }
+  have "y \<in> f ` (topspace X - X closure_of (topspace X - S))"
+    if "y \<in> topspace Y" and "y \<notin> Y closure_of (topspace Y - f ` S)" for y
+    using that and homeomorphic_eq_everything_map [THEN iffD1, OF hom] homeomorphic_map_closure_of [OF hom]
+    by (metis DiffI Diff_subset S closure_of_subset_topspace inj_on_image_set_diff)
   moreover
   have "f x \<in> topspace Y" if "x \<in> topspace X" for x
     using that hom homeomorphic_imp_surjective_map by blast 
   moreover
-  { fix x
-    assume "x \<in> topspace X" and "f x \<in> Y closure_of (topspace Y - f ` S)"
-    then have "x \<in> X closure_of (topspace X - S)"
-      using homeomorphic_map_closure_of [OF hom] hom
-      unfolding homeomorphic_eq_everything_map
-      by (metis Diff_subset S closure_of_subset_topspace inj_on_image_mem_iff inj_on_image_set_diff)
-  }
-  ultimately  show ?thesis
+  have "x \<in> X closure_of (topspace X - S)"
+    if "x \<in> topspace X" and "f x \<in> Y closure_of (topspace Y - f ` S)" for x
+    using that and homeomorphic_map_closure_of [OF hom] hom
+    unfolding homeomorphic_eq_everything_map
+    by (metis Diff_subset S closure_of_subset_topspace inj_on_image_mem_iff inj_on_image_set_diff)
+  ultimately show ?thesis
     by (auto simp: interior_of_closure_of)
 qed
 
@@ -3371,12 +3368,8 @@ lemma connectedin_Int_frontier_of:
   assumes "connectedin X S" "S \<inter> T \<noteq> {}" "S - T \<noteq> {}"
   shows "S \<inter> X frontier_of T \<noteq> {}"
 proof -
-  have "S \<subseteq> topspace X" and *:
-    "\<And>E1 E2. openin X E1 \<longrightarrow> openin X E2 \<longrightarrow> E1 \<inter> E2 \<inter> S = {} \<longrightarrow> S \<subseteq> E1 \<union> E2 \<longrightarrow> E1 \<inter> S = {} \<or> E2 \<inter> S = {}"
-    using \<open>connectedin X S\<close> by (auto simp: connectedin)
-  moreover
-  have "S - (topspace X \<inter> T) \<noteq> {}"
-    using assms(3) by blast
+  obtain "S \<subseteq> topspace X" "S - (topspace X \<inter> T) \<noteq> {}" "S \<inter> topspace X \<inter> T \<noteq> {}"
+    by (metis Diff_Int assms connectedin inf.orderE sup_eq_bot_iff)
   moreover
   have "S \<inter> topspace X \<inter> T \<noteq> {}"
     using assms connectedin by fastforce
@@ -3390,9 +3383,9 @@ proof -
     moreover have "S \<subseteq> X interior_of T \<union> (topspace X - X closure_of T)"
       using that \<open>S \<subseteq> topspace X\<close> null by auto
     moreover have "S \<inter> X interior_of T \<noteq> {}"
-      using closure_of_subset that(1) that(3) null by fastforce
+      using closure_of_subset null that(1,3) by fastforce
     ultimately have "S \<inter> X interior_of (topspace X - T) = {}"
-      by (metis "*" inf_commute interior_of_complement openin_interior_of)
+      by (metis \<open>connectedin X S\<close> connectedin inf_commute interior_of_complement openin_interior_of)
     then have "topspace (subtopology X S) \<inter> X interior_of T = S"
       using \<open>S \<subseteq> topspace X\<close> interior_of_complement null by fastforce
     then show ?thesis
@@ -4067,15 +4060,7 @@ qed
 lemma continuous_closedin_preimage:
   assumes "continuous_on S f" and "closed T"
   shows "closedin (top_of_set S) (S \<inter> f -` T)"
-proof -
-  have *: "(S \<inter> f -` T) = (S \<inter> f -` (T \<inter> f ` S))"
-    by auto
-  have "closedin (top_of_set (f ` S)) (T \<inter> f ` S)"
-    using closedin_closed_Int[of T "f ` S", OF assms(2)]
-    by (simp add: Int_commute)
-  then show ?thesis
-    by (metis "*" assms(1) continuous_on_closed)
-qed
+  by (metis (no_types, lifting) Int_commute assms closedin_closed continuous_on_closed_invariant)
 
 lemma continuous_openin_preimage_eq:
    "continuous_on S f \<longleftrightarrow> (\<forall>T. open T \<longrightarrow> openin (top_of_set S) (S \<inter> f -` T))"
@@ -4285,11 +4270,12 @@ using openin_topology_generated_by_iff by auto
 lemma topology_generated_by_topspace [simp]:
   "topspace (topology_generated_by \<S>) = (\<Union>\<S>)"
 proof
-  {
-    fix S assume "openin (topology_generated_by \<S>) S"
-    then have "generate_topology_on \<S> S" by (rule openin_topology_generated_by)
-    then have "S \<subseteq> (\<Union>\<S>)" by (induct, auto)
-  }
+  have "S \<subseteq> (\<Union>\<S>)" if "openin (topology_generated_by \<S>) S" for S
+  proof -
+    from that have "generate_topology_on \<S> S"
+      by (rule openin_topology_generated_by)
+    then show ?thesis by induct auto
+  qed
   then show "topspace (topology_generated_by \<S>) \<subseteq> (\<Union>\<S>)"
     unfolding topspace_def by auto
 next
