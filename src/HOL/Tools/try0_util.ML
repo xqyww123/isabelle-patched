@@ -29,17 +29,18 @@ end
 
 structure Try0_Util : TRY0_UTIL = struct
 
+(*the inverse of Parse.thm*)
 fun string_of_xref' ctxt ((xref, args) : Try0.xref) =
   let
-    (*the anonymous fact "[attributes]" has the empty name*)
-    fun print_name name = if name = "" then "" else Thy_Header.print_name' ctxt name
+    val attribs =
+      Pretty.block (Attrib.pretty_attribs ctxt args)
+      |> Pretty.unformatted_string_of |> Protocol_Message.clean_output
   in
     (case xref of
-      Facts.Fact literal => literal |> Symbol_Pos.explode0 |> Symbol_Pos.implode |> cartouche
-    | _ =>
-        Facts.string_of_ref (Facts.map_ref_name print_name xref)) ^ implode
-          (map (enclose "[" "]" o Protocol_Message.clean_output o Pretty.unformatted_string_of o
-            Token.pretty_src ctxt) args)
+      Facts.Named (("", _), NONE) => enclose "[" "]" (if null args then "[]" else attribs)
+    | Facts.Fact literal =>
+        (literal |> Symbol_Pos.explode0 |> Symbol_Pos.implode |> cartouche) ^ attribs
+    | _ => Facts.string_of_ref (Facts.map_ref_name (Thy_Header.print_name' ctxt) xref) ^ attribs)
   end
 
 val string_of_xref = string_of_xref' \<^context>
