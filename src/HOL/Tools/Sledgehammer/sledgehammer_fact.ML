@@ -23,6 +23,7 @@ sig
 
   val fact_of_ref : Proof.context -> Keyword.keywords -> thm list -> status Termtab.table ->
     Facts.ref * Token.src list -> ((string * stature) * thm) list
+  val normalize_vars : term -> term
   val cartouche_thm : Proof.context -> thm -> string
   val is_blacklisted_or_something : string -> bool
   val clasimpset_rule_table_of : Proof.context -> status Termtab.table
