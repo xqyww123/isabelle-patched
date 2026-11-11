@@ -10,6 +10,7 @@ signature TRY0_UTIL =
 sig
   val string_of_xref : Try0.xref -> string
   val string_of_xref' : Proof.context -> Try0.xref -> string
+  val indexes_of_selection : int -> Facts.interval list -> int list
 
   type facts_config =
     {allows_directs : bool,
@@ -29,20 +30,25 @@ end
 
 structure Try0_Util : TRY0_UTIL = struct
 
+(*the inverse of Parse.thm*)
 fun string_of_xref' ctxt ((xref, args) : Try0.xref) =
   let
-    (*the anonymous fact "[attributes]" has the empty name*)
-    fun print_name name = if name = "" then "" else Thy_Header.print_name' ctxt name
+    val attribs =
+      Pretty.block (Attrib.pretty_attribs ctxt args)
+      |> Pretty.unformatted_string_of |> Protocol_Message.clean_output
   in
     (case xref of
-      Facts.Fact literal => literal |> Symbol_Pos.explode0 |> Symbol_Pos.implode |> cartouche
-    | _ =>
-        Facts.string_of_ref (Facts.map_ref_name print_name xref)) ^ implode
-          (map (enclose "[" "]" o Protocol_Message.clean_output o Pretty.unformatted_string_of o
-            Token.pretty_src ctxt) args)
+      Facts.Named (("", _), NONE) => enclose "[" "]" (if null args then "[]" else attribs)
+    | Facts.Fact literal =>
+        cartouche (Input.string_of (Syntax.read_input literal)) ^ attribs
+    | _ => Facts.string_of_ref (Facts.map_ref_name (Thy_Header.print_name' ctxt) xref) ^ attribs)
   end
 
 val string_of_xref = string_of_xref' \<^context>
+
+(*the indexes that a selection denotes in a fact of n theorems, in the order of the selection*)
+fun indexes_of_selection n =
+  maps (fn Facts.FromTo (i, j) => i upto j | Facts.From i => i upto n | Facts.Single i => [i])
 
 type facts_config =
   {allows_directs : bool,
