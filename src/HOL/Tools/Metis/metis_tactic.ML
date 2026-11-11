@@ -322,7 +322,7 @@ local
 
 val punctuation = ["[", "]", "(", ")", ":", ","]
 
-(*no space next to punctuation, and none inside a token*)
+(*a space between two tokens unless one of them is punctuation; the text of a token is kept*)
 fun text_of_tokens toks =
   let
     fun text (tok1 :: (toks as tok2 :: _)) =
@@ -420,7 +420,7 @@ fun metis_method' th_name ((override_type_encs, lam_trans), ths) ctxt facts =
 (* Metis method without theorem name, therefore won't suggest instantiations *)
 val metis_method = metis_method' no_th_name
 
-(* Metis method with input strings for better theorem names in of-instantiations *)
+(* Metis method with input tokens for better theorem names in of-instantiations *)
 fun metis_method_multi_thms (opts, multi_ths) ctxt =
   metis_method' (th_name_of_multi_thms ctxt multi_ths) (opts, maps fst multi_ths) ctxt
 
