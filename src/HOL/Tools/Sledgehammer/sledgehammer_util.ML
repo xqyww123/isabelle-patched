@@ -19,6 +19,7 @@ sig
     string list option
   val thms_of_name : Proof.context -> string -> thm list
   val xref_of_name : Proof.context -> string -> Facts.ref * Token.src list
+  val add_attribs_to_name : Proof.context -> string -> string -> string
   val one_day : Time.time
   val one_year : Time.time
   val hackish_string_of_term : Proof.context -> term -> string
@@ -124,10 +125,25 @@ fun thms_of_name ctxt name =
   |> Source.source' (Context.Proof ctxt) Token.stopper Attrib.multi_thm
   |> Source.exhaust
 
-fun xref_of_name ctxt name =
+fun parse_name parser ctxt name =
   tokens_of_name ctxt name
-  |> Scan.error (Scan.finite Token.stopper (Parse.!!! (Parse.thm --| Scan.ahead Parse.eof)))
+  |> Scan.error (Scan.finite Token.stopper (Parse.!!! (parser --| Scan.ahead Parse.eof)))
   |> fst
+
+val xref_of_name = parse_name Parse.thm
+
+(*name is the text of a fact reference, attribs the text of attributes without brackets; a name
+  without attributes keeps its text*)
+fun add_attribs_to_name ctxt attribs name =
+  let val appended = name ^ enclose "[" "]" attribs in
+    \<^try>\<open>
+      (case xref_of_name ctxt name of
+        (_, []) => appended
+      | (xref, srcs) =>
+          let val srcs' = parse_name Parse.attribs ctxt (enclose "[" "]" attribs)
+          in Try0_Util.string_of_xref' ctxt (xref, srcs @ srcs') end)
+      catch _ => appended\<close>
+  end
 
 val one_day = seconds (24.0 * 60.0 * 60.0)
 val one_year = seconds (365.0 * 24.0 * 60.0 * 60.0)

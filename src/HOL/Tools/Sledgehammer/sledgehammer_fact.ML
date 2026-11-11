@@ -77,10 +77,6 @@ fun make_name keywords multi j name =
   (name |> needs_quoting keywords name ? quote) ^
   (if multi then "(" ^ string_of_int j ^ ")" else "")
 
-fun explode_interval _ (Facts.FromTo (i, j)) = i upto j
-  | explode_interval max (Facts.From i) = i upto i + max - 1
-  | explode_interval _ (Facts.Single i) = [i]
-
 fun is_rec_eq lhs = Term.exists_subterm (curry (op =) (head_of lhs))
 
 fun is_rec_def \<^Const_>\<open>Trueprop for t\<close> = is_rec_def t
@@ -155,27 +151,22 @@ fun status_of_thm css name th =
 fun stature_of_thm global assms chained css name th =
   (scope_of_thm global assms chained th, status_of_thm css name th)
 
-fun fact_of_ref ctxt keywords chained css (xthm as (xref, args)) =
+(*the name of each theorem is a reference to it alone, printed as Parse.thm reads it*)
+fun fact_of_ref ctxt _ chained css (xthm as (xref, args)) =
   let
     val ths = Attrib.eval_thms ctxt [xthm]
-    val bracket =
-      implode (map (enclose "[" "]" o content_of_pretty o Token.pretty_src ctxt) args)
-
-    fun nth_name j =
+    val xrefs =
       (case xref of
-        Facts.Fact s => cartouche (simplify_spaces (Protocol_Message.clean_output s)) ^ bracket
-      | Facts.Named (("", _), _) => "[" ^ bracket ^ "]"
-      | Facts.Named ((name, _), NONE) => make_name keywords (length ths > 1) (j + 1) name ^ bracket
-      | Facts.Named ((name, _), SOME intervals) =>
-        make_name keywords true
-          (nth (maps (explode_interval (length ths)) intervals) j) name ^ bracket)
-
-    fun add_nth th (j, rest) =
-      let val name = nth_name j in
-        (j + 1, ((name, stature_of_thm false [] chained css name th), th) :: rest)
-      end
+        Facts.Named ((name, _), NONE) => map #1 (Facts.selections (name, ths))
+      | Facts.Named (name_pos, SOME intervals) =>
+          Try0_Util.indexes_of_selection
+            (length (Proof_Context.get_fact ctxt (Facts.Named (name_pos, NONE)))) intervals
+          |> map (fn i => Facts.Named (name_pos, SOME [Facts.Single i]))
+      | Facts.Fact _ => map (K xref) ths)
   in
-    (0, []) |> fold add_nth ths |> snd
+    map2 (fn xref' => fn th =>
+      let val name = Try0_Util.string_of_xref' ctxt (xref', args)
+      in ((name, stature_of_thm false [] chained css name th), th) end) xrefs ths
   end
 
 (* Reject theorems with names like "List.filter.filter_list_def" or "Accessible_Part.acc.defs", as
@@ -406,7 +397,8 @@ fun instantiate_induct_rule ctxt concl_prop p_name ((name, stature), th) ind_x =
       |> lambda (Free ind_x)
       |> hackish_string_of_term ctxt
   in
-    ((fn () => name () ^ "[where " ^ p_name ^ " = " ^ quote p_inst ^ "]", stature),
+    ((fn () => add_attribs_to_name ctxt ("where " ^ p_name ^ " = " ^ quote p_inst) (name ()),
+      stature),
      th |> Rule_Insts.read_instantiate ctxt [(((p_name, 0), Position.none), p_inst)] [])
   end
 
