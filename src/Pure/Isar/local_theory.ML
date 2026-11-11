@@ -86,6 +86,9 @@ sig
   val begin_nested: local_theory -> Binding.scope * local_theory
   val end_nested: local_theory -> local_theory
   val end_nested_result: (morphism -> 'a -> 'b) ->  'a * local_theory -> 'b * local_theory
+  val global_form_result: (local_theory -> 'a * local_theory) ->
+    local_theory -> 'a * local_theory
+  val global_form: (local_theory -> local_theory) -> local_theory -> local_theory
 end;
 
 signature PRIVATE_LOCAL_THEORY =
@@ -460,5 +463,15 @@ fun end_nested_result decl (x, lthy) =
     val outer_lthy = end_nested lthy;
     val phi = Proof_Context.export_morphism lthy outer_lthy;
   in (decl phi x, outer_lthy) end;
+
+
+(* global form *)
+
+(*f runs without the assumptions of the context, definitions stay: its results are
+  stored as in a theory target; f must not depend on the assumptions*)
+fun global_form_result f =
+  assert #> Assumption.suspend_result Local_Defs.is_def_assms (map_contexts o K) f;
+
+fun global_form f = #2 o global_form_result (f #> pair ());
 
 end;
