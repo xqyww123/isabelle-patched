@@ -8,7 +8,8 @@ General-purpose functions used by Try0.
 
 signature TRY0_UTIL =
 sig
-  val string_of_xref : Proof.context -> Try0.xref -> string
+  val string_of_xref : Try0.xref -> string
+  val string_of_xref' : Proof.context -> Try0.xref -> string
 
   type facts_config =
     {allows_directs : bool,
@@ -28,7 +29,7 @@ end
 
 structure Try0_Util : TRY0_UTIL = struct
 
-fun string_of_xref ctxt ((xref, args) : Try0.xref) =
+fun string_of_xref' ctxt ((xref, args) : Try0.xref) =
   let
     (*the anonymous fact "[attributes]" has the empty name*)
     fun print_name name = if name = "" then "" else Thy_Header.print_name' ctxt name
@@ -40,6 +41,8 @@ fun string_of_xref ctxt ((xref, args) : Try0.xref) =
           (map (enclose "[" "]" o Protocol_Message.clean_output o Pretty.unformatted_string_of o
             Token.pretty_src ctxt) args)
   end
+
+val string_of_xref = string_of_xref' \<^context>
 
 type facts_config =
   {allows_directs : bool,
@@ -125,7 +128,7 @@ fun apply_raw_named_method (name : string) all_goals (facts_config: facts_config
       else
         (case #allows_directs facts_config of
           false => (#directs facts, "")
-        | true => ([], " " ^ implode_space (map (string_of_xref ctxt) (#directs facts))))
+        | true => ([], " " ^ implode_space (map (string_of_xref' ctxt) (#directs facts))))
 
     val (unused_simps, simps_attrs) =
       if null (#simps facts) then
@@ -134,7 +137,7 @@ fun apply_raw_named_method (name : string) all_goals (facts_config: facts_config
         (case #simps_prefix facts_config of
           NONE => (#simps facts, "")
         | SOME prefix =>
-            ([], " " ^ prefix ^ implode_space (map (string_of_xref ctxt) (#simps facts))))
+            ([], " " ^ prefix ^ implode_space (map (string_of_xref' ctxt) (#simps facts))))
 
     val (unused_intros, intros_attrs) =
       if null (#intros facts) then
@@ -143,7 +146,7 @@ fun apply_raw_named_method (name : string) all_goals (facts_config: facts_config
         (case #intros_prefix facts_config of
           NONE => (#intros facts, "")
         | SOME prefix =>
-            ([], " " ^ prefix ^ implode_space (map (string_of_xref ctxt) (#intros facts))))
+            ([], " " ^ prefix ^ implode_space (map (string_of_xref' ctxt) (#intros facts))))
 
     val (unused_elims, elims_attrs) =
       if null (#elims facts) then
@@ -152,7 +155,7 @@ fun apply_raw_named_method (name : string) all_goals (facts_config: facts_config
         (case #elims_prefix facts_config of
           NONE => (#elims facts, "")
         | SOME prefix =>
-            ([], " " ^ prefix ^ implode_space (map (string_of_xref ctxt) (#elims facts))))
+            ([], " " ^ prefix ^ implode_space (map (string_of_xref' ctxt) (#elims facts))))
 
     val (unused_dests, dests_attrs) =
       if null (#dests facts) then
@@ -161,7 +164,7 @@ fun apply_raw_named_method (name : string) all_goals (facts_config: facts_config
         (case #dests_prefix facts_config of
           NONE => (#dests facts, "")
         | SOME prefix =>
-            ([], " " ^ prefix ^ implode_space (map (string_of_xref ctxt) (#dests facts))))
+            ([], " " ^ prefix ^ implode_space (map (string_of_xref' ctxt) (#dests facts))))
 
     val (unused_usings, using_attrs) =
       if null (#usings facts) then
@@ -189,7 +192,7 @@ fun apply_raw_named_method (name : string) all_goals (facts_config: facts_config
     val num_after = num_goals st'
     val command =
       let
-        val unused = map (Pretty.str o string_of_xref ctxt) unused
+        val unused = map (Pretty.str o string_of_xref' ctxt) unused
         val using_clause = if null unused then [] else Pretty.str "using" :: unused
         val select = "[" ^ string_of_int (num_before - num_after)  ^ "]"
         val command_clause =
