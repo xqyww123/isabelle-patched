@@ -67,6 +67,9 @@ sig
   val background_theory_result: (theory -> 'a * theory) -> Proof.context -> 'a * Proof.context
   val facts_of: Proof.context -> Facts.T
   val facts_of_fact: Proof.context -> string -> Facts.T
+  val default_fact_qualifiers: Proof.context -> string list
+  val put_default_fact_qualifiers: string list -> Proof.context -> Proof.context
+  val resolve_default_fact_qualifiers: Proof.context -> xstring -> xstring
   val markup_extern_fact: Proof.context -> string -> Markup.T list * xstring
   val pretty_thm_name: Proof.context -> Thm_Name.T -> Pretty.T
   val print_thm_name: Proof.context -> Thm_Name.T -> string
@@ -474,18 +477,98 @@ fun facts_of_fact ctxt name =
     then local_facts else global_facts
   end;
 
+
+(* default fact qualifiers *)
+
+structure Default_Fact_Qualifiers = Proof_Data
+(
+  type T = string list;
+  fun init _ = [];
+);
+
+val default_fact_qualifiers = Default_Fact_Qualifiers.get;
+val put_default_fact_qualifiers = Default_Fact_Qualifiers.put;
+
+(*names that are read without any lookup*)
+fun special_fact "" = SOME [Drule.dummy_thm]
+  | special_fact "_" = SOME [Drule.asm_rl]
+  | special_fact "nothing" = SOME []
+  | special_fact _ = NONE;
+
+(*the internal name found by lookup: context facts first, then theory facts*)
+fun find_fact ctxt xname =
+  let
+    fun find facts =
+      let val name = Facts.intern facts xname
+      in if Facts.defined facts name then SOME name else NONE end;
+  in
+    (case find (facts_of ctxt) of
+      NONE => find (Global_Theory.facts_of (theory_of ctxt))
+    | some => some)
+  end;
+
+fun resolve_default_fact_qualifiers ctxt xname =
+  (case default_fact_qualifiers ctxt of
+    [] => xname
+  | qualifiers =>
+      if is_some (special_fact xname) orelse
+        (case find_fact ctxt xname of
+          SOME name => is_some (Long_Name.dest_local name)
+        | NONE => false)
+      then xname
+      else
+        (case find_first (is_some o find_fact ctxt)
+            (map (fn q => Long_Name.append q xname) qualifiers) of
+          SOME xname' => xname'
+        | NONE => xname));
+
+(*in the default printing mode: an external name that is read back as the same fact*)
+fun extern_fact ctxt facts name =
+  let
+    val space = Facts.space_of facts;
+    val qualifiers = default_fact_qualifiers ctxt;
+  in
+    if null qualifiers then Name_Space.extern ctxt space name
+    else
+      let
+        fun reads_back xname =
+          is_none (special_fact xname) andalso
+          find_fact ctxt (resolve_default_fact_qualifiers ctxt xname) = SOME name;
+        val xname = Name_Space.extern_if reads_back ctxt space name;
+        val shortened =
+          if Config.get ctxt Name_Space.names_long orelse Config.get ctxt Name_Space.names_short
+          then []
+          else
+            qualifiers
+            |> map_filter (fn q => try (unprefix (q ^ Long_Name.separator)) name)
+            |> filter reads_back
+            |> sort (int_ord o apply2 Long_Name.count);
+      in
+        (case shortened of
+          xname' :: _ => if Long_Name.count xname' < Long_Name.count xname then xname' else xname
+        | [] => xname)
+      end
+  end;
+
+fun markups_extern_fact ctxt facts name =
+  (Name_Space.markups (Facts.space_of facts) name, extern_fact ctxt facts name);
+
 fun markup_extern_fact _ "" = ([], "")
   | markup_extern_fact ctxt name =
       let
         val facts = facts_of_fact ctxt name;
-        val (markups, xname) = Facts.markups_extern ctxt facts name;
+        val (markups, xname) = markups_extern_fact ctxt facts name;
         val markups' =
           if Facts.is_dynamic facts name then markups @ [Markup.dynamic_fact name]
           else markups;
       in (markups', xname) end;
 
 fun pretty_thm_name ctxt (name, i) =
-  Facts.pretty_thm_name ctxt (facts_of_fact ctxt name) (name, i);
+  let
+    val prfx =
+      if name = "" then ([], "")
+      else markups_extern_fact ctxt (facts_of_fact ctxt name) name;
+  in Pretty.block [Pretty.marks_str prfx, Pretty.str (Thm_Name.print_suffix (name, i))] end;
 
 val print_thm_name = Pretty.string_of oo pretty_thm_name;
 
@@ -1041,9 +1124,11 @@ local
 fun retrieve_global context =
   Facts.retrieve context (Global_Theory.facts_of (Context.theory_of context));
 
-fun retrieve_generic (context as Context.Proof ctxt) arg =
-      (Facts.retrieve context (facts_of ctxt) arg handle ERROR local_msg =>
-        (retrieve_global context arg handle ERROR _ => error local_msg))
+fun retrieve_generic (context as Context.Proof ctxt) (xname, pos) =
+      let val arg = (resolve_default_fact_qualifiers ctxt xname, pos) in
+        Facts.retrieve context (facts_of ctxt) arg handle ERROR local_msg =>
+          (retrieve_global context arg handle ERROR _ => error local_msg)
+      end
   | retrieve_generic context arg = retrieve_global context arg;
 
 fun retrieve pick context (Facts.Fact s) =
@@ -1073,11 +1158,9 @@ fun retrieve pick context (Facts.Fact s) =
         val thy = Context.theory_of context;
         fun immediate thms = {name = xname, dynamic = false, thms = map (Thm.transfer thy) thms};
         val {name, dynamic, thms} =
-          (case xname of
-            "" => immediate [Drule.dummy_thm]
-          | "_" => immediate [Drule.asm_rl]
-          | "nothing" => immediate []
-          | _ => retrieve_generic context (xname, pos));
+          (case special_fact xname of
+            SOME thms => immediate thms
+          | NONE => retrieve_generic context (xname, pos));
         val thms' =
           if dynamic andalso Config.get_generic context dynamic_facts_dummy
           then [Drule.free_dummy_thm]
