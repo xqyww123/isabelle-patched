@@ -102,25 +102,44 @@ fun mk_meta_cong ctxt rl =
       else error "Conclusion of congruence rules must be =-equality"
   end |> zero_var_indexes;
 
+local
+
+(*one destruct step of mk_atomize; exception THM*)
+fun res_fixed ctxt rls thm =
+  let
+    fun res th = map (fn rl => th RS rl);
+  in
+    if Thm.maxidx_of (Thm.adjust_maxidx_thm ~1 thm) = ~1 then res thm rls
+    else Variable.trade (K (fn [thm'] => res thm' rls)) (Variable.declare_thm thm ctxt) [thm]
+  end;
+
+in
+
 fun mk_atomize ctxt pairs =
   let
     fun atoms thm =
-      let
-        fun res th = map (fn rl => th RS rl);   (*exception THM*)
-        val thm_ctxt = Variable.declare_thm thm ctxt;
-        fun res_fixed rls =
-          if Thm.maxidx_of (Thm.adjust_maxidx_thm ~1 thm) = ~1 then res thm rls
-          else Variable.trade (K (fn [thm'] => res thm' rls)) thm_ctxt [thm];
-      in
-        case Thm.concl_of thm
-          of Const (\<^const_name>\<open>Trueprop\<close>, _) $ p => (case head_of p
-            of Const (a, _) => (case AList.lookup (op =) pairs a
-              of SOME rls => (maps atoms (res_fixed rls) handle THM _ => [thm])
-              | NONE => [thm])
-            | _ => [thm])
-          | _ => [thm]
-      end;
+      (case Thm.concl_of thm
+        of Const (\<^const_name>\<open>Trueprop\<close>, _) $ p => (case head_of p
+          of Const (a, _) => (case AList.lookup (op =) pairs a
+            of SOME rls => (maps atoms (res_fixed ctxt rls thm) handle THM _ => [thm])
+            | NONE => [thm])
+          | _ => [thm])
+        | _ => [thm]);
   in atoms end;
+
+(*mksimps handler for a connective of mksimps_pairs: one destruct step of mk_atomize, then
+  mksimps_context on each part; NONE if the destruct fails*)
+fun add_connective_handler (_, []) = I
+  | add_connective_handler (name, rls as rl :: _) =
+      Simplifier.add_mksimps_handler (name, Simplifier.make_mksimps_handler
+       {patterns = [hd (Thm.prems_of rl)],
+        priority = 0,
+        kept_by_clear_simpset = true,
+        handler = fn ctxt => fn thm =>
+          (SOME (res_fixed ctxt rls thm) handle THM _ => NONE)
+          |> Option.map (fn thms => fold_map Simplifier.mksimps_context thms ctxt |>> flat)});
+
+end;
 
 fun mksimps pairs ctxt = map_filter (try mk_eq) o mk_atomize ctxt pairs o Variable.gen_all ctxt;
 
@@ -199,7 +218,8 @@ val HOL_basic_ss =
     #> Simplifier.set_subgoaler asm_simp_tac
     #> Simplifier.set_mksimps (mksimps mksimps_pairs)
     #> Simplifier.set_mkeqTrue mk_eq_True
-    #> Simplifier.set_mkcong mk_meta_cong);
+    #> Simplifier.set_mkcong mk_meta_cong
+    #> fold add_connective_handler mksimps_pairs);
 
 fun hol_simplify ctxt rews =
   full_simplify (ctxt |> Simplifier.put_simpset HOL_basic_ss |> Simplifier.add_simps rews);

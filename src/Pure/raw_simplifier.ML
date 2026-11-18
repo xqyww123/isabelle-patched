@@ -34,7 +34,9 @@ sig
     weak_congs: cong_name list,
     loopers: string list,
     unsafe_solvers: string list,
-    safe_solvers: string list}
+    safe_solvers: string list,
+    mksimps_handlers:
+      (string * {patterns: term list, priority: int, kept_by_clear_simpset: bool}) list}
   val dest_simps: simpset -> (Thm_Name.T * thm) list
   val dest_congs: simpset -> (cong_name * thm) list
   val simpset_map: Proof.context -> (Proof.context -> Proof.context) -> simpset -> simpset
@@ -49,6 +51,59 @@ sig
   val get_mksimps_context: Proof.context -> (thm -> Proof.context -> thm list * Proof.context)
   val set_mksimps_context: (thm -> Proof.context -> thm list * Proof.context) ->
     Proof.context -> Proof.context
+  type mksimps_handler
+  val make_mksimps_handler: {patterns: term list, priority: int, kept_by_clear_simpset: bool,
+    handler: Proof.context -> thm -> (thm list * Proof.context) option} -> mksimps_handler
+  (*Before a theorem becomes rewrite rules (a simp rule given explicitly, or a premise
+    assumed while simplifying), mksimps_context matches the conclusion of the theorem after
+    Variable.gen_all against the patterns of the handlers in the simpset, and calls the
+    matching handlers by decreasing priority, equal priorities by name.  The first that
+    returns SOME (rules, ctxt') gives all rules of the theorem; NONE passes to the next.  If
+    none matches or all return NONE, the mksimps function of the simpset
+    (get_mksimps_context) gets the original theorem.  Handlers are identified by name: add
+    replaces a handler of the same name; merge keeps the one of the first simpset.
+    Pitfalls:
+    (1) Patterns are propositions (with Trueprop), written with free variables like simproc
+      lhss (\<^prop> rejects ?x).  As in Simplifier.make_simproc, free variables not fixed and
+      type variables not declared in the context of add_mksimps_handler become schematic,
+      except in a proof body (Variable.is_body: Isar goals, Goal.prove, the context a handler
+      or simproc gets during simplification), where unfixed free variables and the type
+      variables of their types stay as written; fixed variables always stay.  So register
+      from a theory or local theory context.  The handler gets the whole theorem after
+      Variable.gen_all, possibly with premises and schematic variables; its maxidx is exact,
+      so Thm.maxidx_of th >= 0 iff it has schematic (type) variables.
+    (2) SOME means the handler gives all rules of the theorem: the mksimps function is not
+      run.  To keep the default rules, call get_mksimps_context ctxt th ctxt yourself.  That
+      function does not consult the handlers (HOL's mksimps function splits conjunctions etc.
+      internally), so call it only on a theorem not to be split further; otherwise split it
+      and call mksimps_context on each part.  Context changes of a handler returning NONE
+      are lost.
+    (3) After a handler returns SOME, those of lower priority are not called.  Priorities
+      are arbitrary integers, higher first; HOL's connective handlers have priority 0.
+    (4) clear_simpset (simp only:, the simplified attribute with arguments) keeps only
+      handlers with kept_by_clear_simpset = true; set it only for handlers giving no more
+      rules than the mksimps function would.  empty_simpset removes all handlers.
+    (5) Call mksimps_context recursively only on smaller theorems, or it loops.
+    (6) Explicit simp rules (simp add:, [simp], add_simps, del_simps, mksimps) go through the
+      handlers too, but their context changes are lost.  del_simps calls the handlers again,
+      so a handler must give the same rules for the same theorem.
+    (7) In mutual mode (asm_full_simp_tac: simp, auto, clarsimp), context data written while
+      assuming premise P stays visible but must not be used while P itself is simplified,
+      after P is rewritten, and when P \<Longrightarrow> C is rebuilt.  Code taking theorems from such
+      data (simprocs, solvers, loopers, subgoalers) must check simproc_can_use_thm first;
+      within one simplification it always holds in sequential mode (asm_lr_simp_tac).*)
+  val add_mksimps_handler: string (*name*) * mksimps_handler -> Proof.context -> Proof.context
+  val del_mksimps_handler: string (*name*) -> Proof.context -> Proof.context
+  val mksimps_context: thm -> Proof.context -> thm list * Proof.context
+  (*simproc_can_use_thm ctxt th: every hypothesis of th is the proposition of a theorem in
+    prems_of ctxt (pitfall 7 above).
+    (8) Only for theorems whose hypotheses all come from simplifier premises: hypotheses from
+      elsewhere (e.g. Isar assume) make it false.
+    (9) A nested simplification with another simpset (put_simpset, clear_simpset,
+      empty_simpset) has its own prems_of, usually empty, so outer premises fail the check;
+      to keep them, add_prems (prems_of outer_ctxt) after the switch, which also hands them
+      to the nested solver.*)
+  val simproc_can_use_thm: Proof.context -> thm -> bool
   val default_mk_sym: Proof.context -> thm -> thm option
   val set_mksym: (Proof.context -> thm -> thm option) -> Proof.context -> Proof.context
   val set_mkeqTrue: (Proof.context -> thm -> thm option) -> Proof.context -> Proof.context
@@ -253,6 +308,55 @@ fun solver ctxt (Solver {solver = tac, ...}) = tac ctxt;
 fun eq_solver (Solver {id = id1, ...}, Solver {id = id2, ...}) = (id1 = id2);
 
 
+(* mksimps handlers *)
+
+datatype mksimps_handler =
+  Mksimps_Handler of
+   {patterns: term list,
+    priority: int,
+    kept_by_clear_simpset: bool,
+    handler: Proof.context -> thm -> (thm list * Proof.context) option};
+
+val make_mksimps_handler = Mksimps_Handler;
+
+(*one per pattern; the entries of one handler share its name*)
+type mksimps_entry =
+ {name: string,
+  pattern: term,
+  priority: int,
+  kept_by_clear_simpset: bool,
+  handler: Proof.context -> thm -> (thm list * Proof.context) option};
+
+fun eq_mksimps_entry ({name = name1, pattern = pattern1, ...}: mksimps_entry,
+    {name = name2, pattern = pattern2, ...}: mksimps_entry) =
+  name1 = name2 andalso pattern1 aconv pattern2;
+
+(*calling order: decreasing priority, then name; equal for the entries of one handler*)
+fun mksimps_entry_ord ({name = name1, priority = priority1, ...}: mksimps_entry,
+    {name = name2, priority = priority2, ...}: mksimps_entry) =
+  (case int_ord (priority2, priority1) of
+    EQUAL => string_ord (name1, name2)
+  | ord => ord);
+
+fun remove_mksimps_entries pred (handlers: mksimps_entry Net.net) =
+  fold (fn entry as {pattern, ...}: mksimps_entry =>
+      Net.delete_term eq_mksimps_entry (pattern, entry))
+    (filter pred (Net.entries handlers)) handlers;
+
+fun has_mk_handler name (handlers: mksimps_entry Net.net) =
+  exists (fn {name = name', ...}: mksimps_entry => name = name') (Net.entries handlers);
+
+(*the handlers of the first net win for names present in both*)
+fun merge_mk_handlers (handlers1: mksimps_entry Net.net, handlers2) =
+  if pointer_eq (handlers1, handlers2) then handlers1
+  else
+    let val names1 = Symtab.make_set (map #name (Net.entries handlers1))
+    in
+      Net.merge eq_mksimps_entry
+        (handlers1, remove_mksimps_entries (Symtab.defined names1 o #name) handlers2)
+    end;
+
+
 (* simplification sets *)
 
 (*A simpset contains data required during conversion:
@@ -267,6 +371,7 @@ fun eq_solver (Solver {id = id1, ...}, Solver {id = id2, ...}) = (id1 = id2);
       congprocs: functions that prove congruence rules on the fly;
     mk_rews:
       mk: turn simplification thms into rewrite rules (and update context);
+      mk_handlers: mksimps handlers indexed via discrimination net, tried before mk;
       mk_cong: prepare congruence rules;
       mk_sym: turn \<equiv> around;
       mk_eq_True: turn P into P \<equiv> True;
@@ -281,6 +386,7 @@ datatype simpset =
     procs: term procedure Net.net * term procedure Net.net,
     mk_rews:
      {mk: thm -> Proof.context -> thm list * Proof.context,
+      mk_handlers: mksimps_entry Net.net,
       mk_cong: Proof.context -> thm -> thm,
       mk_sym: Proof.context -> thm -> thm option,
       mk_eq_True: Proof.context -> thm -> thm option,
@@ -305,6 +411,10 @@ fun map_ss2 f {congs, procs, mk_rews, term_ord, subgoal_tac, loop_tacs, solvers}
 
 fun make_simpset (args1, args2) = Simpset (make_ss1 args1, make_ss2 args2);
 
+fun map_mk_handlers f {mk, mk_handlers, mk_cong, mk_sym, mk_eq_True, reorient} =
+  {mk = mk, mk_handlers = f mk_handlers, mk_cong = mk_cong, mk_sym = mk_sym,
+    mk_eq_True = mk_eq_True, reorient = reorient};
+
 fun dest_simps (Simpset ({rules, ...}, _)) =
   Net.entries rules
   |> map (fn {name, thm, ...} => (name, thm));
@@ -317,7 +427,16 @@ fun dest_procs procs =
   |> map (fn ps as Procedure {name, proc, ...} :: _ =>
       (name, {lhss = map (fn Procedure {lhs, ...} => lhs) ps, proc = proc}));
 
-fun dest_ss (ss as Simpset (_, {congs, procs = (simprocs, congprocs), loop_tacs, solvers, ...})) =
+fun dest_mk_handlers handlers =
+  Net.entries handlers
+  |> sort mksimps_entry_ord
+  |> partition_eq (fn ({name = name1, ...}: mksimps_entry, {name = name2, ...}) => name1 = name2)
+  |> map (fn hs as {name, priority, kept_by_clear_simpset, ...} :: _ =>
+      (name, {patterns = map #pattern hs, priority = priority,
+        kept_by_clear_simpset = kept_by_clear_simpset}));
+
+fun dest_ss (ss as Simpset (_,
+    {congs, procs = (simprocs, congprocs), mk_rews, loop_tacs, solvers, ...})) =
  {simps = dest_simps ss,
   simprocs = map (apsnd #lhss) (dest_procs simprocs),
   congprocs = dest_procs congprocs,
@@ -325,7 +444,8 @@ fun dest_ss (ss as Simpset (_, {congs, procs = (simprocs, congprocs), loop_tacs,
   weak_congs = #2 congs,
   loopers = map fst loop_tacs,
   unsafe_solvers = map solver_name (#1 solvers),
-  safe_solvers = map solver_name (#2 solvers)};
+  safe_solvers = map solver_name (#2 solvers),
+  mksimps_handlers = dest_mk_handlers (#mk_handlers mk_rews)};
 
 
 (* empty *)
@@ -339,6 +459,7 @@ fun default_mk_sym _ th = SOME (th RS Drule.symmetric_thm);
 val empty_ss =
   init_ss (0, Unsynchronized.ref false)
     {mk = fn th => pair (if can Logic.dest_equals (Thm.concl_of th) then [th] else []),
+      mk_handlers = Net.empty,
       mk_cong = K I,
       mk_sym = default_mk_sym,
       mk_eq_True = K (K NONE),
@@ -353,10 +474,10 @@ fun merge_ss (ss1, ss2) =
   else
     let
       val Simpset ({rules = rules1, prems = prems1, depth = depth1},
-       {congs = (congs1, weak1), procs = (simprocs1, congprocs1), mk_rews, term_ord, subgoal_tac,
-        loop_tacs = loop_tacs1, solvers = (unsafe_solvers1, solvers1)}) = ss1;
+       {congs = (congs1, weak1), procs = (simprocs1, congprocs1), mk_rews = mk_rews1, term_ord,
+        subgoal_tac, loop_tacs = loop_tacs1, solvers = (unsafe_solvers1, solvers1)}) = ss1;
       val Simpset ({rules = rules2, prems = prems2, depth = depth2},
-       {congs = (congs2, weak2), procs = (simprocs2, congprocs2),
+       {congs = (congs2, weak2), procs = (simprocs2, congprocs2), mk_rews = mk_rews2,
         loop_tacs = loop_tacs2, solvers = (unsafe_solvers2, solvers2), ...}) = ss2;
 
       val rules' = Net.merge eq_rrule (rules1, rules2);
@@ -369,9 +490,12 @@ fun merge_ss (ss1, ss2) =
       val loop_tacs' = AList.merge (op =) (K true) (loop_tacs1, loop_tacs2);
       val unsafe_solvers' = merge eq_solver (unsafe_solvers1, unsafe_solvers2);
       val solvers' = merge eq_solver (solvers1, solvers2);
+      val mk_rews' =
+        mk_rews1 |> map_mk_handlers (fn handlers1 =>
+          merge_mk_handlers (handlers1, #mk_handlers mk_rews2));
     in
       make_simpset ((rules', prems', depth'), ((congs', weak'), (simprocs', congprocs'),
-        mk_rews, term_ord, subgoal_tac, loop_tacs', (unsafe_solvers', solvers')))
+        mk_rews', term_ord, subgoal_tac, loop_tacs', (unsafe_solvers', solvers')))
     end;
 
 
@@ -407,7 +531,11 @@ fun map_simpset f = Context.mapping (map_theory_simpset (f o Context_Position.no
 
 val clear_simpset =
   map_ss' (fn Simpset ({depth, ...}, {mk_rews, term_ord, subgoal_tac, solvers, ...}) =>
-    init_ss depth mk_rews term_ord subgoal_tac solvers);
+    let
+      val mk_rews' =
+        mk_rews |> map_mk_handlers
+          (remove_mksimps_entries (fn {kept_by_clear_simpset, ...} => not kept_by_clear_simpset));
+    in init_ss depth mk_rews' term_ord subgoal_tac solvers end);
 
 val get_mk_rews = simpset_of #> (fn Simpset (_, {mk_rews, ...}) => mk_rews);
 
@@ -492,6 +620,10 @@ fun prems_of ctxt =
 
 fun add_prems ths =
   map_ss1' (fn (rules, prems, depth) => (rules, ths @ prems, depth));
+
+fun simproc_can_use_thm ctxt th =
+  let val prems = map Thm.prop_of (prems_of ctxt)
+  in forall (member (op aconv) prems) (Thm.hyps_of th) end;
 
 
 (* maintain simp rules *)
@@ -596,10 +728,33 @@ fun orient_rrule ctxt (thm, name) =
     else rrule_eq_True ctxt thm name lhs elhs rhs thm
   end;
 
+(*the first matching handler returning SOME gives the rules, otherwise the mksimps function*)
+fun mksimps_context thm ctxt =
+  let val {mk, mk_handlers, ...} = get_mk_rews ctxt in
+    if Net.is_empty mk_handlers then mk thm ctxt
+    else
+      let
+        val thy = Proof_Context.theory_of ctxt;
+        val thm' = Variable.gen_all ctxt thm;
+        val concl = Envir.eta_contract (Thm.concl_of thm');
+        fun call [] = NONE
+          | call entries =
+              let val thm'' = Thm.adjust_maxidx_thm ~1 thm'
+              in get_first (fn {handler, ...}: mksimps_entry => handler ctxt thm'') entries end;
+      in
+        (case
+          Net.match_term mk_handlers concl
+          |> filter (fn {pattern, ...}: mksimps_entry => Pattern.matches thy (pattern, concl))
+          |> sort_distinct mksimps_entry_ord
+          |> call of
+          SOME res => res
+        | NONE => mk thm ctxt)
+      end
+  end;
+
 fun extract_rews {sym} thm ctxt =
   let
-    val mk = #mk (get_mk_rews ctxt);
-    val (rews, ctxt') = mk thm ctxt;
+    val (rews, ctxt') = mksimps_context thm ctxt;
     val rews' = if sym then rews RL [Drule.symmetric_thm] else rews;
   in (map (rpair (Thm.get_name_hint thm)) rews', ctxt') end;
 
@@ -812,20 +967,49 @@ end;
 
 local
 
-fun map_mk_rews f =
+fun map_mk_rews' f =
   map_ss2' (fn (congs, procs, mk_rews, term_ord, subgoal_tac, loop_tacs, solvers) =>
+    (congs, procs, f mk_rews, term_ord, subgoal_tac, loop_tacs, solvers));
+
+fun map_mk_rews f =
+  map_mk_rews' (fn {mk, mk_handlers, mk_cong, mk_sym, mk_eq_True, reorient} =>
     let
-      val {mk, mk_cong, mk_sym, mk_eq_True, reorient} = mk_rews;
       val (mk', mk_cong', mk_sym', mk_eq_True', reorient') =
         f (mk, mk_cong, mk_sym, mk_eq_True, reorient);
-      val mk_rews' = {mk = mk', mk_cong = mk_cong', mk_sym = mk_sym', mk_eq_True = mk_eq_True',
-        reorient = reorient'};
-    in (congs, procs, mk_rews', term_ord, subgoal_tac, loop_tacs, solvers) end);
+    in
+      {mk = mk', mk_handlers = mk_handlers, mk_cong = mk_cong', mk_sym = mk_sym',
+        mk_eq_True = mk_eq_True', reorient = reorient'}
+    end);
+
+fun remove_mk_handlers_named name =
+  remove_mksimps_entries (fn {name = name', ...} => name = name');
 
 in
 
 val get_mksimps_context = #mk o get_mk_rews;
-fun mksimps ctxt thm = #1 (get_mksimps_context ctxt thm ctxt);
+fun mksimps ctxt thm = #1 (mksimps_context thm ctxt);
+
+(*patterns generalized as in Simplifier.make_simproc*)
+fun add_mksimps_handler
+    (name, Mksimps_Handler {patterns, priority, kept_by_clear_simpset, handler}) ctxt =
+  let
+    val thy = Proof_Context.theory_of ctxt;
+    val ctxt' =
+      fold (fn t => Variable.add_fixes_implicit t #> Variable.declare_term t) patterns ctxt;
+    val patterns' = map (Sign.cert_prop thy) (Variable.export_terms ctxt' ctxt patterns);
+    fun add_entry pattern =
+      Net.insert_term_safe eq_mksimps_entry (pattern,
+        {name = name, pattern = pattern, priority = priority,
+          kept_by_clear_simpset = kept_by_clear_simpset, handler = handler});
+  in
+    ctxt |> map_mk_rews' (map_mk_handlers
+      (remove_mk_handlers_named name #> fold add_entry patterns'))
+  end;
+
+fun del_mksimps_handler name ctxt =
+  if has_mk_handler name (#mk_handlers (get_mk_rews ctxt)) then
+    ctxt |> map_mk_rews' (map_mk_handlers (remove_mk_handlers_named name))
+  else (cond_warning ctxt (fn () => "No such mksimps handler in simpset: " ^ quote name); ctxt);
 
 fun set_mksimps_context mk = map_mk_rews (fn (_, mk_cong, mk_sym, mk_eq_True, reorient) =>
   (mk, mk_cong, mk_sym, mk_eq_True, reorient));

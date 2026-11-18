@@ -290,6 +290,13 @@ fun pretty_simpset verbose ctxt =
     fun pretty_cong (name, thm) =
       Pretty.block [pretty_cong_name name, Pretty.str ":", Pretty.brk 1, pretty_thm thm];
 
+    fun pretty_mksimps_handler (name, {patterns, priority, kept_by_clear_simpset}) =
+      Pretty.block
+        (Pretty.str name :: Pretty.str ":" :: Pretty.brk 1 ::
+          Pretty.str ("priority " ^ string_of_int priority ^
+            ", kept_by_clear_simpset " ^ Bool.toString kept_by_clear_simpset) :: Pretty.fbrk ::
+          Pretty.fbreaks (map (Pretty.item o single o pretty_term) patterns));
+
     val ss = dest_ss (simpset_of ctxt);
     val simproc_space = Name_Space.space_of_table (get_simprocs ctxt);
     val simprocs = Name_Space.markups_entries verbose ctxt simproc_space (#simprocs ss);
@@ -299,6 +306,7 @@ fun pretty_simpset verbose ctxt =
       Pretty.big_list "simplification procedures:" (map pretty_simproc simprocs),
       Pretty.big_list "congruence procedures:" (map pretty_congproc congprocs),
       Pretty.big_list "congruences:" (map pretty_cong (#congs ss)),
+      Pretty.big_list "mksimps handlers:" (map pretty_mksimps_handler (#mksimps_handlers ss)),
       Pretty.strs ("loopers:" :: map quote (#loopers ss)),
       Pretty.strs ("unsafe solvers:" :: map quote (#unsafe_solvers ss)),
       Pretty.strs ("safe solvers:" :: map quote (#safe_solvers ss))]
