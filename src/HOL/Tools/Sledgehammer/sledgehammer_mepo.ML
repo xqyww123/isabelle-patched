@@ -422,14 +422,15 @@ fun stature_of_item (Pool_Fact ((_, stature), _)) = stature
 fun const_tab_of_item const_tab (Pool_Fact _) = const_tab
   | const_tab_of_item _ (Generated (_, _, const_tab)) = const_tab
 
-(* The theorem of a generated candidate is evaluated only here, when MePo accepts it. *)
+(* The theorem of a generated candidate is evaluated only here, when MePo accepts it. Its name is
+   one fact reference, as the provers read it. *)
 fun accept_item _ (Pool_Fact fact) = (fact, From_Pool)
   | accept_item ctxt (Generated (trigger_name, {name, stature, ...}, _)) =
     let
       val prefix =
         "Sledgehammer fact trigger " ^ quote trigger_name ^ ": the candidate " ^ name ^ " "
       val ths =
-        \<^try>\<open>thms_of_name ctxt name
+        \<^try>\<open>Attrib.eval_thms ctxt [xref_of_name ctxt name]
           catch exn =>
             error (prefix ^ "cannot be evaluated:\n" ^
               Runtime.exn_message (Runtime.exn_context (SOME ctxt) exn))\<close>
