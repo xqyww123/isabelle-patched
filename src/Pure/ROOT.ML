@@ -201,6 +201,7 @@ ML_file "tactical.ML";
 ML_file "search.ML";
 ML_file "tactic.ML";
 ML_file "bires.ML";
+ML_file "simp_steps.ML";
 ML_file "raw_simplifier.ML";
 ML_file "conjunction.ML";
 ML_file "assumption.ML";

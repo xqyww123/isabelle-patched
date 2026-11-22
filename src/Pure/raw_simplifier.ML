@@ -1107,9 +1107,14 @@ structure Trace_Ops = Theory_Data
 val set_trace_ops = Trace_Ops.put;
 
 val trace_ops = Trace_Ops.get o Proof_Context.theory_of;
-fun trace_invoke args ctxt = #trace_invoke (trace_ops ctxt) args ctxt;
-fun trace_rrule args ctxt = #trace_rrule (trace_ops ctxt) args ctxt;
-fun trace_simproc args ctxt = #trace_simproc (trace_ops ctxt) args ctxt;
+
+(*each call is one step of Simp_Steps*)
+fun trace_invoke args ctxt =
+  (Simp_Steps.step ctxt; #trace_invoke (trace_ops ctxt) args ctxt);
+fun trace_rrule args ctxt =
+  (Simp_Steps.step ctxt; #trace_rrule (trace_ops ctxt) args ctxt);
+fun trace_simproc args ctxt =
+  (Simp_Steps.step ctxt; #trace_simproc (trace_ops ctxt) args ctxt);
 
 
 
