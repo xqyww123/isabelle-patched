@@ -114,6 +114,7 @@ subsection "Fundamental structures";
 ML_file "name.ML";
 ML_file "term.ML";
 ML_file "context.ML";
+ML_file "hooks.ML";
 ML_file "config.ML";
 ML_file "context_position.ML";
 ML_file "General/completion.ML";
@@ -230,6 +231,7 @@ ML_file "Thy/document_marker.ML";
 
 (*proof context*)
 ML_file "Isar/object_logic.ML";
+ML_file "concept.ML";
 ML_file "Isar/rule_cases.ML";
 ML_file "Isar/auto_bind.ML";
 ML_file "type_infer.ML";

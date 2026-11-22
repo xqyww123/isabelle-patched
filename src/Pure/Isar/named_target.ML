@@ -11,7 +11,15 @@ sig
   val locale_of: local_theory -> string option
   val bottom_locale_of: local_theory -> string option
   val class_of: local_theory -> string option
+  type other_target =
+   {naming: Name_Space.naming -> Name_Space.naming,
+    setup: theory -> Proof.context,
+    operations: Local_Theory.operations}
+  structure Other_Target: HOOKS
+    where type arg = theory * (xstring * Position.T) and type state = other_target option
   val init: Bundle.name list -> string -> theory -> local_theory
+  val init_other: Bundle.name list -> other_target -> theory -> local_theory
+  val init_cmd: Bundle.name list -> xstring * Position.T -> theory -> local_theory
   val theory_init: theory -> local_theory
   val theory_map: (local_theory -> local_theory) -> theory -> theory
   val theory_map_result: (morphism -> 'a -> 'b) -> (local_theory -> 'a * local_theory) ->
@@ -28,7 +36,13 @@ struct
 
 (* context data *)
 
-datatype target = Theory | Locale of string | Class of string;
+(*a named target of an external package: background naming, context setup, operations*)
+type other_target =
+ {naming: Name_Space.naming -> Name_Space.naming,
+  setup: theory -> Proof.context,
+  operations: Local_Theory.operations};
+
+datatype target = Theory | Locale of string | Class of string | Other of other_target;
 
 fun target_of_ident _ "" = Theory
   | target_of_ident thy ident =
@@ -36,9 +50,14 @@ fun target_of_ident _ "" = Theory
       then (if Class.is_class thy ident then Class else Locale) ident
       else error ("No such locale: " ^ quote ident);
 
-fun ident_of_target Theory = ""
-  | ident_of_target (Locale locale) = locale
-  | ident_of_target (Class class) = class;
+(*resolution of target names: a hook may claim the name for an external package*)
+structure Other_Target =
+  Hooks(type arg = theory * (xstring * Position.T) type state = other_target option);
+
+fun check_target thy name =
+  (case Other_Target.invoke (Context.Theory thy) (thy, name) NONE of
+    SOME other => Other other
+  | NONE => target_of_ident thy (Locale.check_global thy name));
 
 fun target_is_theory (SOME Theory) = true
   | target_is_theory _ = false;
@@ -62,11 +81,6 @@ fun get_target lthy =
   if Local_Theory.level lthy = 1
   then get_bottom_target lthy
   else NONE;
-
-fun ident_of lthy =
-  case get_target lthy of
-    NONE => error "Not in a named target"
-  | SOME target => ident_of_target target;
 
 val is_theory = target_is_theory o get_target;
 
@@ -116,28 +130,38 @@ fun operations Theory =
        declaration = Generic_Target.locale_declaration class,
        theory_registration = fn _ => error "Not possible in class target",
        locale_dependency = Generic_Target.locale_dependency class,
-       pretty = fn ctxt => Class.pretty_specification (Proof_Context.theory_of ctxt) class};
+       pretty = fn ctxt => Class.pretty_specification (Proof_Context.theory_of ctxt) class}
+  | operations (Other {operations, ...}) = operations;
 
 fun setup_context Theory = Proof_Context.init_global
   | setup_context (Locale locale) = Locale.init locale
-  | setup_context (Class class) = Class.init class;
+  | setup_context (Class class) = Class.init class
+  | setup_context (Other {setup, ...}) = setup;
+
+fun background_naming thy target =
+  Sign.naming_of thy |>
+    (case target of
+      Theory => Name_Space.mandatory_path ""
+    | Locale locale => Name_Space.mandatory_path (Long_Name.base_name locale)
+    | Class class => Name_Space.mandatory_path (Long_Name.base_name class)
+    | Other {naming, ...} => naming);
 
 fun setup target includes =
   setup_context target
   #> Data.put (SOME (target, null includes))
   #> Bundle.includes includes;
 
-fun init includes ident thy =
-  let
-    val target = target_of_ident thy ident;
-  in
-    thy
-    |> Local_Theory.init
-       {background_naming = Sign.naming_of thy |> Name_Space.mandatory_path (Long_Name.base_name ident),
-        setup = setup target includes,
-        conclude = I}
-       (operations target)
-  end;
+fun init_target includes target thy =
+  thy
+  |> Local_Theory.init
+     {background_naming = background_naming thy target,
+      setup = setup target includes,
+      conclude = I}
+     (operations target);
+
+fun init includes ident thy = init_target includes (target_of_ident thy ident) thy;
+fun init_other includes other = init_target includes (Other other);
+fun init_cmd includes name thy = init_target includes (check_target thy name) thy;
 
 val theory_init = init [] "";
 
@@ -153,7 +177,7 @@ val revoke_reinitializability = (Data.map o Option.map o apsnd) (K false);
 
 fun exit_global_reinitialize lthy =
   if is_reinitializable lthy
-  then (init [] (ident_of lthy), Local_Theory.exit_global lthy)
+  then (init_target [] (the (get_target lthy)), Local_Theory.exit_global lthy)
   else error "Non-reinitializable local theory context";
 
 end;

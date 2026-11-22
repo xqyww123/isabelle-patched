@@ -146,6 +146,8 @@ sig
     Proof.context -> (string * thm list) list * Proof.context
   val put_thms: bool -> string * thm list option -> Proof.context -> Proof.context
   val alias_fact: binding -> string -> Proof.context -> Proof.context
+  structure Read_Var_Typ: HOOKS
+    where type arg = Proof.context * Position.T * typ and type state = unit
   val read_var: binding * string option * mixfix -> Proof.context ->
     (binding * typ option * mixfix) * Proof.context
   val cert_var: binding * typ option * mixfix -> Proof.context ->
@@ -1263,6 +1265,11 @@ fun check_var internal b =
       else error ("Bad name: " ^ Binding.print b);
   in x end;
 
+(*sees the type of a variable declared in text, after parse and before check; called once per
+  declared variable, possibly on an invisible context (e.g. for locale-style "fixes"), so a hook
+  reports with plain warning and Position.here*)
+structure Read_Var_Typ = Hooks(type arg = Proof.context * Position.T * typ type state = unit);
+
 local
 
 fun check_mixfix ctxt (b, T, mx) =
@@ -1283,9 +1290,15 @@ fun prep_var prep_typ internal (b, raw_T, mx) ctxt =
     val mx' = if Mixfix.is_empty mx then mx else check_mixfix ctxt' (b, T, mx);
   in ((b, SOME T, mx'), ctxt') end;
 
+fun read_var_typ ctxt raw_T =
+  let
+    val T = Syntax.parse_typ ctxt raw_T;
+    val _ = Read_Var_Typ.invoke (Context.Proof ctxt) (ctxt, Syntax.read_input_pos raw_T, T) ();
+  in Syntax.check_typ ctxt T end;
+
 in
 
-val read_var = prep_var Syntax.read_typ false;
+val read_var = prep_var read_var_typ false;
 val cert_var = prep_var cert_typ true;
 
 end;
