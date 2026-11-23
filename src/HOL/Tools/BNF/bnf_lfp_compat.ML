@@ -553,6 +553,6 @@ val primrec_simple =
 val _ =
   Outer_Syntax.local_theory \<^command_keyword>\<open>datatype_compat\<close>
     "register datatypes as old-style datatypes and derive old-style properties"
-    (Scan.repeat1 Parse.type_const >> datatype_compat_cmd);
+    (Scan.repeat1 Parse.type_const >> (Local_Theory.global_form o datatype_compat_cmd));
 
 end;

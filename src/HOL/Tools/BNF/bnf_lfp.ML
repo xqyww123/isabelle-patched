@@ -1877,6 +1877,6 @@ fun construct_lfp mixfixes map_bs rel_bs pred_bs set_bss0 bs resBs (resDs, Dss) 
 
 val _ =
   Outer_Syntax.local_theory \<^command_keyword>\<open>datatype\<close> "define inductive datatypes"
-    (parse_co_datatype_cmd Least_FP construct_lfp);
+    (parse_co_datatype_cmd Least_FP construct_lfp >> Local_Theory.global_form);
 
 end;

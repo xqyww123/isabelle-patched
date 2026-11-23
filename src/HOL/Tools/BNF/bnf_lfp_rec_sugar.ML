@@ -686,6 +686,7 @@ val _ = Outer_Syntax.local_theory \<^command_keyword>\<open>primrec\<close>
   "define primitive recursive functions"
   ((Scan.optional (\<^keyword>\<open>(\<close> |-- Parse.!!! (Parse.list1 rec_option_parser)
       --| \<^keyword>\<open>)\<close>) []) -- Parse_Spec.specification
-    >> (fn (opts, (fixes, specs)) => snd o primrec_cmd {verbose = true} opts fixes specs));
+    >> (fn (opts, (fixes, specs)) =>
+      Local_Theory.global_form (snd o primrec_cmd {verbose = true} opts fixes specs)));
 
 end;
