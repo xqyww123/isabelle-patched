@@ -95,8 +95,9 @@ sig
   val add_mksimps_handler: string (*name*) * mksimps_handler -> Proof.context -> Proof.context
   val del_mksimps_handler: string (*name*) -> Proof.context -> Proof.context
   val mksimps_context: thm -> Proof.context -> thm list * Proof.context
-  (*simproc_can_use_thm ctxt th: every hypothesis of th is the proposition of a theorem in
-    prems_of ctxt (pitfall 7 above).
+  (*simproc_can_use_thm ctxt th: every hypothesis h of th is assumed by a premise in
+    prems_of ctxt, i.e. one stating h with h among its own hypotheses (pitfall 7 above); a
+    proved fact stating h, as put there by add_prems, does not count.
     (8) Only for theorems whose hypotheses all come from simplifier premises: hypotheses from
       elsewhere (e.g. Isar assume) make it false.
     (9) A nested simplification with another simpset (put_simpset, clear_simpset,
@@ -622,8 +623,13 @@ fun add_prems ths =
   map_ss1' (fn (rules, prems, depth) => (rules, ths @ prems, depth));
 
 fun simproc_can_use_thm ctxt th =
-  let val prems = map Thm.prop_of (prems_of ctxt)
-  in forall (member (op aconv) prems) (Thm.hyps_of th) end;
+  let
+    (*premises that assume their own proposition, unlike proved facts put by add_prems*)
+    val assumed =
+      prems_of ctxt |> map_filter (fn prem =>
+        let val t = Thm.prop_of prem
+        in if member (op aconv) (Thm.hyps_of prem) t then SOME t else NONE end);
+  in forall (member (op aconv) assumed) (Thm.hyps_of th) end;
 
 
 (* maintain simp rules *)
@@ -1101,9 +1107,14 @@ structure Trace_Ops = Theory_Data
 val set_trace_ops = Trace_Ops.put;
 
 val trace_ops = Trace_Ops.get o Proof_Context.theory_of;
-fun trace_invoke args ctxt = #trace_invoke (trace_ops ctxt) args ctxt;
-fun trace_rrule args ctxt = #trace_rrule (trace_ops ctxt) args ctxt;
-fun trace_simproc args ctxt = #trace_simproc (trace_ops ctxt) args ctxt;
+
+(*each call is one step of Simp_Steps*)
+fun trace_invoke args ctxt =
+  (Simp_Steps.step ctxt; #trace_invoke (trace_ops ctxt) args ctxt);
+fun trace_rrule args ctxt =
+  (Simp_Steps.step ctxt; #trace_rrule (trace_ops ctxt) args ctxt);
+fun trace_simproc args ctxt =
+  (Simp_Steps.step ctxt; #trace_simproc (trace_ops ctxt) args ctxt);
 
 
 

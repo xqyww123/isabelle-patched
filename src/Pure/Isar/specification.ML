@@ -275,7 +275,9 @@ fun gen_def prep_spec prep_att {verbose} raw_var raw_params raw_prems ((a, raw_a
   in ((lhs, (def_name, th)), lthy4) end;
 
 val definition = gen_def check_spec_open (K I);
-val definition_cmd = gen_def read_spec_open Attrib.check_src;
+fun definition_cmd flags var params prems spec =
+  Local_Theory.global_form_result
+    (gen_def read_spec_open Attrib.check_src flags var params prems spec);
 
 
 (* abbreviation *)
