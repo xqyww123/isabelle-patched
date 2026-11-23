@@ -86,6 +86,7 @@ sig
   val begin_nested: local_theory -> Binding.scope * local_theory
   val end_nested: local_theory -> local_theory
   val end_nested_result: (morphism -> 'a -> 'b) ->  'a * local_theory -> 'b * local_theory
+  val global_form_enabled: bool Config.T
   val global_form_result: (local_theory -> 'a * local_theory) ->
     local_theory -> 'a * local_theory
   val global_form: (local_theory -> local_theory) -> local_theory -> local_theory
@@ -467,10 +468,15 @@ fun end_nested_result decl (x, lthy) =
 
 (* global form *)
 
-(*f runs without the assumptions of the context, definitions stay: its results are
-  stored as in a theory target; f must not depend on the assumptions*)
-fun global_form_result f =
-  assert #> Assumption.suspend_result Local_Defs.is_def_assms (map_contexts o K) f;
+(*set by a target that stores its facts in their global forms; no attribute sets it*)
+val global_form_enabled = Config.declare_bool ("global_form_enabled", \<^here>) (K false);
+
+(*where enabled, f runs without the assumptions of the context, definitions stay: its results
+  are stored as in a theory target; f must not depend on the assumptions.  Elsewhere just f*)
+fun global_form_result f lthy =
+  if Config.get (assert lthy) global_form_enabled then
+    Assumption.suspend_result Local_Defs.is_def_assms (map_contexts o K) f lthy
+  else f lthy;
 
 fun global_form f = #2 o global_form_result (f #> pair ());
 

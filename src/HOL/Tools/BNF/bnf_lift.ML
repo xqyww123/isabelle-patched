@@ -2117,7 +2117,7 @@ val _ =
   Outer_Syntax.local_theory @{command_keyword copy_bnf}
     "register a type copy of a bounded natural functor (BNF) as a BNF"
     ((parse_copy_opts -- parse_type_args_named_constrained -- Parse.type_const --
-      parse_xthm -- parse_map_rel_pred_bindings) >> copy_bnf_cmd);
+      parse_xthm -- parse_map_rel_pred_bindings) >> (Local_Theory.global_form o copy_bnf_cmd));
 
 end;
 
