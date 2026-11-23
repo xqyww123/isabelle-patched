@@ -37,6 +37,7 @@ sig
       term list * term list -> local_theory -> (term * thm) * local_theory) ->
     bool -> (binding * mixfix) * (Attrib.binding * term) -> local_theory ->
     (term * (string * thm)) * local_theory
+  val thm_definition: Thm_Name.P * thm -> local_theory -> (thm * thm) * local_theory
   val notes:
     (string -> Attrib.fact list -> Attrib.fact list -> local_theory -> local_theory) ->
     string -> Attrib.fact list -> local_theory -> (string * thm list) list * local_theory
@@ -304,6 +305,10 @@ fun thm_def (name, pos) thm lthy =
     Local_Theory.background_theory_result (Thm.store_zproof (name, pos) thm) lthy
   else (thm, lthy);
 
+in
+
+(*a theorem to its local and its global form: every assumption of the context becomes a premise,
+  every fixed variable a schematic one*)
 fun thm_definition (name_pos, thm) lthy =
   let
     val thy_ctxt = Proof_Context.init_global (Proof_Context.theory_of lthy);
@@ -355,8 +360,6 @@ fun thm_definition (name_pos, thm) lthy =
       |> name_thm2 name_pos;
 
   in ((local_thm, global_thm), lthy') end;
-
-in
 
 fun notes target_notes kind facts0 lthy =
   let
