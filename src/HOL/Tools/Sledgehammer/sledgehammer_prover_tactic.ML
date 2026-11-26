@@ -42,20 +42,21 @@ fun good_slices_of_tactic_prover "metis" = slices_of_max_facts [0, 64, 32, 8, 16
 
 end
 
-fun meth_of "algebra" = Algebra_Method
-  | meth_of "argo" = Argo_Method
-  | meth_of "auto" = Auto_Method
-  | meth_of "blast" = Blast_Method
-  | meth_of "fastforce" = Fastforce_Method
-  | meth_of "force" = Force_Method
-  | meth_of "linarith" = Linarith_Method
-  | meth_of "meson" = Meson_Method
-  | meth_of "metis" = Metis_Method (NONE, NONE, [])
-  | meth_of "order" = Order_Method
-  | meth_of "presburger" = Presburger_Method
-  | meth_of "satx" = SATx_Method
-  | meth_of "simp" = Simp_Method
-  | meth_of _ = Metis_Method (NONE, NONE, [])
+(*the proof method that stands for a Try0 method, if there is one*)
+fun meth_of "algebra" = SOME Algebra_Method
+  | meth_of "argo" = SOME Argo_Method
+  | meth_of "auto" = SOME Auto_Method
+  | meth_of "blast" = SOME Blast_Method
+  | meth_of "fastforce" = SOME Fastforce_Method
+  | meth_of "force" = SOME Force_Method
+  | meth_of "linarith" = SOME Linarith_Method
+  | meth_of "meson" = SOME Meson_Method
+  | meth_of "metis" = SOME (Metis_Method (NONE, NONE, []))
+  | meth_of "order" = SOME Order_Method
+  | meth_of "presburger" = SOME Presburger_Method
+  | meth_of "satx" = SOME SATx_Method
+  | meth_of "simp" = SOME Simp_Method
+  | meth_of _ = NONE
 
 fun run_tactic_prover mode name ({slices, timeout, ...} : params)
     ({state, subgoal, subgoal_count, factss, found_something, ...} : prover_problem) slice =
@@ -65,7 +66,7 @@ fun run_tactic_prover mode name ({slices, timeout, ...} : params)
     val non_chained = filter_out is_fact_chained facts
     val ctxt = Proof.context_of state
 
-    fun run_try0 () : Try0.result option =
+    fun run_try0 () : string option =
       let
         val run_timeout = slice_timeout slice_size slices timeout
         val (locals, globals) = List.partition (fn ((_, (sc, _)), _) => sc <> Global) non_chained
@@ -79,15 +80,20 @@ fun run_tactic_prover mode name ({slices, timeout, ...} : params)
         val direct_xrefs = map xref_of_fact (sort_by (fst o fst) globals)
         val facts : Try0.facts = {usings = usings_xrefs, directs = direct_xrefs, simps = [],
           intros = [], elims = [], dests = []}
+        (*Try0 works on the first subgoal*)
+        val (state', prefix) =
+          if subgoal = 1 then (state, "")
+          else (Proof.prefer subgoal state, "prefer " ^ string_of_int subgoal ^ " ")
       in
-        Try0.get_proof_method_or_noop name (SOME run_timeout) facts state
+        Try0.get_proof_method_or_noop name (SOME run_timeout) facts state'
+        |> Option.map (fn {command, ...} => prefix ^ command)
       end
 
     val timer = Timer.startRealTimer ()
     val (outcome, command) =
       (case run_try0 () of
         NONE => (SOME GaveUp, "")
-      | SOME {command, ...} => (NONE, command))
+      | SOME command => (NONE, command))
       handle ERROR _ => (SOME GaveUp, "")
            | Timeout.TIMEOUT _ => (SOME TimedOut, "")
     val run_time = Timer.checkRealTimer timer
@@ -97,21 +103,26 @@ fun run_tactic_prover mode name ({slices, timeout, ...} : params)
         NONE => (found_something name; map fst non_chained)
       | SOME _ => [])
 
+    val meth = meth_of name
+
+    (*a preplay result replaces Try0's command only if it played the proof method that stands for
+      the Try0 method*)
     val message = fn preplay_outcome =>
       (case outcome of
         NONE =>
         let
           val banner = proof_banner mode name
         in
-          (case preplay_outcome of
-            NONE => try_command_line banner (Played run_time) command
-          | SOME preplay_result =>
-              one_line_proof_text (preplay_result, banner, subgoal, subgoal_count))
+          (case (meth, preplay_outcome) of
+            (SOME _, SOME (preplay_result as (_, (_, Played _)))) =>
+              one_line_proof_text (preplay_result, banner, subgoal, subgoal_count)
+          | _ => try_command_line banner (Played run_time) command)
         end
       | SOME failure => string_of_atp_failure failure)
   in
     {outcome = outcome, used_facts = used_facts, used_from = facts,
-     preferred_methss = (meth_of name, []), run_time = run_time, message = message}
+     preferred_methss = (the_default (Metis_Method (NONE, NONE, [])) meth, []),
+     run_time = run_time, message = message}
   end
 
 end;

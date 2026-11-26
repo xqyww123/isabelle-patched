@@ -50,6 +50,9 @@ sig
     real * (fact * Sledgehammer_MePo.origin) list ->
     (real * ((fact * real) list * fact list)) list -> fact list
   val insert_generated_facts : (fact * Sledgehammer_MePo.origin) list -> fact list -> fact list
+  val facts_of_filter_results : Proof.context -> int -> string option -> string ->
+    (fact * Sledgehammer_MePo.origin) list option * ((fact * real) list * fact list) option ->
+    (string * fact list) list
   val nickname_of_thm : thm -> string
   val find_suggested_facts : Proof.context -> ('b * thm) list -> string list -> ('b * thm) list
   val crude_thm_ord : Proof.context -> thm ord
@@ -1551,6 +1554,25 @@ fun generous_max_suggestions max_facts = 2 * max_facts + 25 (* FUDGE *)
 val mepo_weight = 0.5 (* FUDGE *)
 val mash_weight = 0.5 (* FUDGE *)
 
+(* The fact lists that the results of MePo and MaSh give, each under the name of its fact filter:
+   all three lists if no fact filter was chosen and both have a result, else one list. *)
+fun facts_of_filter_results ctxt max_facts fact_filter effective_fact_filter
+    (mepo_result, mash_result) =
+  let
+    val mashs = map (pair mash_weight) (the_list mash_result)
+    val mesh =
+      (case mepo_result of
+        SOME mepo_facts => mesh_facts_with_mepo ctxt max_facts (mepo_weight, mepo_facts) mashs
+      | NONE => mesh_facts (fact_distinct (op aconv)) (eq_snd (gen_eq_thm ctxt)) max_facts mashs)
+  in
+    (case (fact_filter, mepo_result, mash_result) of
+      (NONE, SOME mepo_facts, SOME (mash_facts, _)) =>
+      [(meshN, mesh),
+       (mepoN, map fst mepo_facts),
+       (mashN, map fst mash_facts |> insert_generated_facts mepo_facts)]
+    | _ => [(effective_fact_filter, mesh)])
+  end
+
 val max_facts_to_learn_before_query = 100 (* FUDGE *)
 
 (* The threshold should be large enough so that MaSh does not get activated for Auto Sledgehammer. *)
@@ -1654,20 +1676,10 @@ fun relevant_facts ctxt (params as {verbose, learn, fact_filter, timeout, ...}) 
            |> effective_fact_filter <> mashN ? cons mepo
            |> Par_List.map (fn f => f ())
            |> (fn results => fold add_result results (NONE, NONE))
-
-      val mashs = map (pair mash_weight) (the_list mash_result)
-      val mesh =
-        (case mepo_result of
-          SOME mepo_facts => mesh_facts_with_mepo ctxt max_facts (mepo_weight, mepo_facts) mashs
-        | NONE => mesh_facts (fact_distinct (op aconv)) (eq_snd (gen_eq_thm ctxt)) max_facts mashs)
-        |> add_and_take
     in
-      (case (fact_filter, mepo_result, mash_result) of
-        (NONE, SOME mepo_facts, SOME (mash_facts, _)) =>
-        [(meshN, mesh),
-         (mepoN, map fst mepo_facts |> add_and_take),
-         (mashN, map fst mash_facts |> insert_generated_facts mepo_facts |> add_and_take)]
-      | _ => [(effective_fact_filter, mesh)])
+      facts_of_filter_results ctxt max_facts fact_filter effective_fact_filter
+        (mepo_result, mash_result)
+      |> map (apsnd add_and_take)
     end
 
 end;
