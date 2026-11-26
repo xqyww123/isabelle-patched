@@ -74,26 +74,32 @@ fun timed_infer_thm_insts ctxt verbose timeout chained goal subgoal fact_thms me
   end
 
 (* Try to infer variable instantiations of facts and instantiate them
- * using of-instantiations (e.g. "assms(1)[of x]") *)
+ * using of-instantiations (e.g. "assms(1)[of x]"); nothing is inferred if the name of a fact
+ * cannot be evaluated *)
 fun instantiate_facts state verbose timeout goal subgoal facts =
   let
     val ctxt = Proof.context_of state
     val {facts = chained, ...} = Proof.goal state
     val goal = Thm.solve_constraints goal (* avoid exceptions *)
-    val fact_thms = AList.make (thms_of_name ctxt o fst) facts
-    val timed_infer_thm_insts =
-      timed_infer_thm_insts ctxt verbose timeout chained goal subgoal fact_thms
-    fun infer_thm_insts [] = NONE
-      | infer_thm_insts (metis_method :: metis_methods) =
-        (case timed_infer_thm_insts metis_method of
-          NONE => infer_thm_insts metis_methods
-        | SOME (_ (* using_thm_insts *), arg_thm_insts) => SOME arg_thm_insts)
-    fun instantiate_fact ((name, stature), ths) thm_insts =
-      List.partition (member Thm.eq_thm ths o fst) thm_insts
-      |>> map (fn (_, inst) => (Metis_Tactic.pretty_name_inst ctxt (name, inst), stature))
+    fun instantiate fact_thms =
+      let
+        val timed_infer_thm_insts =
+          timed_infer_thm_insts ctxt verbose timeout chained goal subgoal fact_thms
+        fun infer_thm_insts [] = NONE
+          | infer_thm_insts (metis_method :: metis_methods) =
+            (case timed_infer_thm_insts metis_method of
+              NONE => infer_thm_insts metis_methods
+            | SOME (_ (* using_thm_insts *), arg_thm_insts) => SOME arg_thm_insts)
+        fun instantiate_fact ((name, stature), ths) thm_insts =
+          List.partition (member Thm.eq_thm ths o fst) thm_insts
+          |>> map (fn (_, inst) => (Metis_Tactic.pretty_name_inst ctxt (name, inst), stature))
+      in
+        infer_thm_insts (metis_methods ctxt)
+        |> Option.map (flat o fst o fold_map instantiate_fact fact_thms)
+      end
   in
-    infer_thm_insts (metis_methods ctxt)
-    |> Option.map (flat o fst o fold_map instantiate_fact fact_thms)
+    try (AList.make (thms_of_name ctxt o fst)) facts
+    |> Option.mapPartial instantiate
     |> verbose ? tap (Option.app (fn inst_facts =>
         Pretty.str "Instantiated facts:" :: map fst inst_facts
         |> Pretty.block o Pretty.breaks

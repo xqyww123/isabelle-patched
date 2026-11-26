@@ -151,11 +151,12 @@ fun status_of_thm css name th =
 fun stature_of_thm global assms chained css name th =
   (scope_of_thm global assms chained th, status_of_thm css name th)
 
-(*the name of each theorem is a reference to it alone, printed as Parse.thm reads it*)
+(*the name of each theorem is a reference to it alone, printed as Parse.thm reads it; a theorem
+  with attributes is the value of its name: evaluated on its own, an attribute sees no declaration
+  made for another theorem of the fact*)
 fun fact_of_ref ctxt _ chained css (xthm as (xref, args)) =
   let
-    val ths = Attrib.eval_thms ctxt [xthm]
-    val xrefs =
+    fun xrefs_of ths =
       (case xref of
         Facts.Named ((name, _), NONE) => map #1 (Facts.selections (name, ths))
       | Facts.Named (name_pos, SOME intervals) =>
@@ -163,10 +164,17 @@ fun fact_of_ref ctxt _ chained css (xthm as (xref, args)) =
             (length (Proof_Context.get_fact ctxt (Facts.Named (name_pos, NONE)))) intervals
           |> map (fn i => Facts.Named (name_pos, SOME [Facts.Single i]))
       | Facts.Fact _ => map (K xref) ths)
+    val xref_ths =
+      if null args then
+        (*one evaluation of the whole fact gives the same theorems*)
+        let val ths = Attrib.eval_thms ctxt [xthm] in xrefs_of ths ~~ ths end
+      else
+        xrefs_of (Proof_Context.get_fact ctxt xref)
+        |> map (fn xref' => (xref', the_single (Attrib.eval_thms ctxt [(xref', args)])))
   in
-    map2 (fn xref' => fn th =>
+    xref_ths |> map (fn (xref', th) =>
       let val name = Try0_Util.string_of_xref' ctxt (xref', args)
-      in ((name, stature_of_thm false [] chained css name th), th) end) xrefs ths
+      in ((name, stature_of_thm false [] chained css name th), th) end)
   end
 
 (* Reject theorems with names like "List.filter.filter_list_def" or "Accessible_Part.acc.defs", as
@@ -287,7 +295,11 @@ fun close_form t =
     (Term.add_vars t [] |> sort_by (fst o fst))
   |> fst
 
-fun cartouche_term ctxt = close_form #> hackish_string_of_term ctxt #> cartouche
+(*the text of a term on one line; unlike hackish_string_of_term, it keeps the blanks inside a
+  token*)
+fun line_of_term ctxt = Syntax.pretty_term ctxt #> content_of_pretty
+
+fun cartouche_term ctxt = close_form #> line_of_term ctxt #> cartouche
 fun cartouche_thm ctxt = cartouche_term ctxt o Thm.prop_of
 
 (* TODO: rewrite to use nets and/or to reuse existing data structures *)
@@ -395,7 +407,7 @@ fun instantiate_induct_rule ctxt concl_prop p_name ((name, stature), th) ind_x =
       |> map_aterms varify_noninducts
       |> close_form
       |> lambda (Free ind_x)
-      |> hackish_string_of_term ctxt
+      |> line_of_term ctxt
   in
     ((fn () => add_attribs_to_name ctxt ("where " ^ p_name ^ " = " ^ quote p_inst) (name ()),
       stature),

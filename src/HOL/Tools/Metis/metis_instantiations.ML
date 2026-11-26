@@ -91,10 +91,18 @@ fun table_of_thm_inst (th, cts) =
   |> filter_out (is_dummy_cterm o snd)
   |> Vars.make
 
-fun open_attrib name =
-  case try (unsuffix "]") name of
-    NONE => name ^ "["
-  | SOME name' => name' ^ ", "
+(* The text before and after attributes that are added to a fact reference: the anonymous fact
+ * "[[...]]" takes them inside its brackets *)
+fun attrib_brackets name =
+  let val name = Symbol.trim_blanks name in
+    case try (Symbol.trim_blanks o unprefix "[[" o unsuffix "]]") name of
+      SOME "" => ("[[", "]]")
+    | SOME attribs => ("[[" ^ attribs ^ ", ", "]]")
+    | NONE =>
+      (case try (unsuffix "]") name of
+        NONE => (name ^ "[", "]")
+      | SOME name' => (name' ^ ", ", "]"))
+  end
 
 fun pretty_inst_cterm ctxt ct =
   let
@@ -112,7 +120,7 @@ fun pretty_name_inst ctxt (name, inst) =
   | cts =>
     map (pretty_inst_cterm ctxt) cts
     |> Pretty.breaks o cons (Pretty.str "of")
-    |> Pretty.enclose (open_attrib name) "]"
+    |> uncurry Pretty.enclose (attrib_brackets name)
 
 val string_of_name_inst = Pretty.string_of oo pretty_name_inst
 
