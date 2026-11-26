@@ -46,7 +46,8 @@ fun string_of_xref' ctxt ((xref, args) : Try0.xref) =
 
 val string_of_xref = string_of_xref' \<^context>
 
-(*the indexes that a selection denotes in a fact of n theorems, in the order of the selection*)
+(*the indexes that a valid selection denotes in a fact of n theorems, in the order of the
+  selection*)
 fun indexes_of_selection n =
   maps (fn Facts.FromTo (i, j) => i upto j | Facts.From i => i upto n | Facts.Single i => [i])
 
@@ -64,7 +65,7 @@ val no_attrs : facts_config =
    elims_prefix = NONE,
    dests_prefix = NONE}
 val full_attrs : facts_config =
-  {allows_directs = true,
+  {allows_directs = false,
    simps_prefix = SOME "simp: ",
    intros_prefix = SOME "intro: ",
    elims_prefix = SOME "elim: ",
