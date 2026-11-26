@@ -19,6 +19,10 @@ sig
   val focus_params_fixed: Proof.context -> int -> binding list option -> thm -> focus * thm
   val focus_prems: Proof.context -> int -> binding list option -> thm -> focus * thm
   val focus: Proof.context -> int -> binding list option -> thm -> focus * thm
+  val lift_import: int -> cterm list -> thm -> Proof.context ->
+    ((cterm * cterm) list * thm) * Proof.context
+  val lift_subgoals: Proof.context -> (string * cterm) list -> cterm list -> thm ->
+    cterm list * thm
   val retrofit: Proof.context -> Proof.context -> (string * cterm) list -> cterm list ->
     int -> thm -> thm -> thm Seq.seq
   val FOCUS_PARAMS: (focus -> tactic) -> Proof.context -> int -> tactic
