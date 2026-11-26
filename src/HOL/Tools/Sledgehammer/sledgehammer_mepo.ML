@@ -40,7 +40,8 @@ sig
   val typargs_of_ptype : ptype -> typ list
 
   type candidate =
-    {name : string,
+    {name : unit -> string,
+     thm : thm lazy,
      prop : term,
      stature : stature}
   type trigger_input =
@@ -381,8 +382,11 @@ fun fact_weight fudge stature const_tab rel_const_tab chained_const_tab
 
 (* Fact triggers generate candidate facts while MePo iterates. *)
 
+(* name: the Isar fact expression written into a proof, made when it is needed; thm: the fact
+   itself, forced when MePo accepts the candidate; prop: what scores the candidate. *)
 type candidate =
-  {name : string,
+  {name : unit -> string,
+   thm : thm lazy,
    prop : term,
    stature : stature}
 
@@ -407,40 +411,26 @@ fun add_trigger name trigger = Triggers.map (Symtab.update (name, trigger))
 
 datatype origin = From_Pool | From_Trigger
 
-(* A generated candidate carries the name of its trigger and its own frequency table: the table of
-   the pool plus the candidate's own occurrences. *)
+(* A generated candidate carries its own frequency table: the table of the pool plus the
+   candidate's own occurrences. *)
 datatype item =
   Pool_Fact of lazy_fact |
-  Generated of string * candidate * int PType_Tab.table Symtab.table
+  Generated of candidate * int PType_Tab.table Symtab.table
 
 fun name_of_item (Pool_Fact ((name, _), _)) = name ()
-  | name_of_item (Generated (_, {name, ...}, _)) = name
+  | name_of_item (Generated ({name, ...}, _)) = name ()
 
 fun stature_of_item (Pool_Fact ((_, stature), _)) = stature
-  | stature_of_item (Generated (_, {stature, ...}, _)) = stature
+  | stature_of_item (Generated ({stature, ...}, _)) = stature
 
 fun const_tab_of_item const_tab (Pool_Fact _) = const_tab
-  | const_tab_of_item _ (Generated (_, _, const_tab)) = const_tab
+  | const_tab_of_item _ (Generated (_, const_tab)) = const_tab
 
-(* The theorem of a generated candidate is evaluated only here, when MePo accepts it. Its name is
-   one fact reference, as the provers read it. *)
-fun accept_item _ (Pool_Fact fact) = (fact, From_Pool)
-  | accept_item ctxt (Generated (trigger_name, {name, stature, ...}, _)) =
-    let
-      val prefix =
-        "Sledgehammer fact trigger " ^ quote trigger_name ^ ": the candidate " ^ name ^ " "
-      val ths =
-        \<^try>\<open>Attrib.eval_thms ctxt [xref_of_name ctxt name]
-          catch exn =>
-            error (prefix ^ "cannot be evaluated:\n" ^
-              Runtime.exn_message (Runtime.exn_context (SOME ctxt) exn))\<close>
-    in
-      (case ths of
-        [th] => (((K name, stature), th), From_Trigger)
-      | _ =>
-        error (prefix ^ "evaluates to " ^ string_of_int (length ths) ^
-          " theorems, but exactly one is expected."))
-    end
+(* The theorem of a generated candidate is forced only here, when MePo accepts it. The text of its
+   name is not evaluated: that it denotes this theorem is up to the trigger. *)
+fun accept_item (Pool_Fact fact) = (fact, From_Pool)
+  | accept_item (Generated ({name, thm, stature, ...}, _)) =
+    (((name, stature), Lazy.force thm), From_Trigger)
 
 fun take_most_relevant ctxt max_facts remaining_max
     ({max_imperfect, max_imperfect_exp, ...} : relevance_fudge)
@@ -523,14 +513,14 @@ fun relevance_filter ctxt thres0 decay max_facts
     val triggers = Symtab.dest (Triggers.get (Context.Proof ctxt))
 
     (* Generated candidates are distinct up to renaming of schematic variables. *)
-    fun add_candidate trigger_name (candidate as {prop, ...} : candidate) (items, seen) =
+    fun add_candidate (candidate as {prop, ...} : candidate) (items, seen) =
       let val key = normalize_vars prop in
         if Termtab.defined seen key then
           (items, seen)
         else
           let
             val t = theory_constify fudge thy_name prop
-            val item = Generated (trigger_name, candidate, count_consts_in_term thy t const_tab)
+            val item = Generated (candidate, count_consts_in_term thy t const_tab)
           in
             (the_list (pair_consts thy t item) @ items, Termtab.insert_set key seen)
           end
@@ -547,8 +537,7 @@ fun relevance_filter ctxt thres0 decay max_facts
             {ctxt = ctxt, hyp_ts = hyp_ts, concl_t = concl_t, new_consts = new_consts (),
              rel_consts = rel_consts, accepted = accepted}
           val (items, seen) =
-            ([], seen) |> fold (fn (trigger_name, trigger) =>
-              fold (add_candidate trigger_name) (trigger input)) triggers
+            ([], seen) |> fold (fn (_, trigger) => fold add_candidate (trigger input)) triggers
         in
           (rev items, (accepted, seen))
         end
@@ -569,7 +558,7 @@ fun relevance_filter ctxt thres0 decay max_facts
             let
               val (accepts, more_rejects) =
                 take_most_relevant ctxt max_facts remaining_max fudge candidates
-              val accepts' = map (accept_item ctxt o fst o fst) accepts
+              val accepts' = map (accept_item o fst o fst) accepts
               val sps = maps (snd o fst) accepts
               val rel_const_tab' =
                 rel_const_tab |> fold add_pconst_to_table sps
