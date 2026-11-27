@@ -382,8 +382,8 @@ fun fact_weight fudge stature const_tab rel_const_tab chained_const_tab
 
 (* Fact triggers generate candidate facts while MePo iterates. *)
 
-(* name: the Isar fact expression written into a proof, made when it is needed; thm: the fact
-   itself, forced when MePo accepts the candidate; prop: what scores the candidate. *)
+(* name: the Isar fact expression written into a proof, made when MePo returns the candidate; thm:
+   the fact itself, forced when MePo accepts the candidate; prop: what scores the candidate. *)
 type candidate =
   {name : unit -> string,
    thm : thm lazy,
