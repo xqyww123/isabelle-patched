@@ -146,6 +146,8 @@ sig
     Proof.context -> (string * thm list) list * Proof.context
   val put_thms: bool -> string * thm list option -> Proof.context -> Proof.context
   val alias_fact: binding -> string -> Proof.context -> Proof.context
+  structure Indexed_Facts: HOOKS
+    where type arg = thm list and type state = Proof.context
   structure Read_Var_Typ: HOOKS
     where type arg = Proof.context * Position.T * typ and type state = unit
   val read_var: binding * string option * mixfix -> Proof.context ->
@@ -1197,10 +1199,22 @@ val restore_stmt = set_stmt o is_stmt;
 fun add_thms_dynamic arg ctxt =
   ctxt |> map_facts_result (Facts.add_dynamic (Context.Proof ctxt) arg);
 
+(*sees the theorems of each fact that a context indexes by its proposition -- the facts of a
+  statement or a proof, and the result that a block exports -- in the context that has it*)
+structure Indexed_Facts = Hooks(type arg = thm list type state = Proof.context);
+
 local
 
-fun add_facts {index} arg ctxt = ctxt
-  |> map_facts_result (Facts.add_static (Context.Proof ctxt) {strict = false, index = index} arg);
+fun add_facts {index} (arg as (_, ths)) ctxt =
+  let
+    val (name, ctxt') =
+      ctxt |> map_facts_result
+        (Facts.add_static (Context.Proof ctxt) {strict = false, index = index} arg);
+  in
+    (*Facts.add_static has forced ths where index holds*)
+    (name,
+      if index then Indexed_Facts.invoke (Context.Proof ctxt') (Lazy.force ths) ctxt' else ctxt')
+  end;
 
 fun update_facts flags (b, SOME ths) ctxt = ctxt |> add_facts flags (b, Lazy.value ths) |> #2
   | update_facts _ (b, NONE) ctxt = ctxt |> map_facts (Facts.del (full_name ctxt b));
