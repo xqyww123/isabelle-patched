@@ -1107,14 +1107,9 @@ structure Trace_Ops = Theory_Data
 val set_trace_ops = Trace_Ops.put;
 
 val trace_ops = Trace_Ops.get o Proof_Context.theory_of;
-
-(*each call is one step of Simp_Steps*)
-fun trace_invoke args ctxt =
-  (Simp_Steps.step ctxt; #trace_invoke (trace_ops ctxt) args ctxt);
-fun trace_rrule args ctxt =
-  (Simp_Steps.step ctxt; #trace_rrule (trace_ops ctxt) args ctxt);
-fun trace_simproc args ctxt =
-  (Simp_Steps.step ctxt; #trace_simproc (trace_ops ctxt) args ctxt);
+fun trace_invoke args ctxt = #trace_invoke (trace_ops ctxt) args ctxt;
+fun trace_rrule args ctxt = #trace_rrule (trace_ops ctxt) args ctxt;
+fun trace_simproc args ctxt = #trace_simproc (trace_ops ctxt) args ctxt;
 
 
 
@@ -1273,10 +1268,11 @@ fun rewritec (prover, maxt) ctxt t =
                         in SOME (thm2', cond_skel (congs, congprocs, lr)) end)))))
       end;
 
+    (*a rule instance applied, given or made by a simproc, is one step of Simp_Steps*)
     fun rews [] = NONE
       | rews (rrule :: rrules) =
           let val opt = rew rrule handle Pattern.MATCH => NONE
-          in (case opt of NONE => rews rrules | some => some) end;
+          in (case opt of NONE => rews rrules | some => (Simp_Steps.step ctxt; some)) end;
 
     fun sort_rrules rrs =
       let
@@ -1401,8 +1397,9 @@ fun congc prover ctxt maxt cong t =
         (case check_conv ctxt true (Drule.beta_eta_conversion t) thm2 of
           NONE => err ("Congruence proof failed.  Should not have proved", thm2)
         | SOME thm2' =>
+            (*a change of the term is one step of Simp_Steps*)
             if op aconv (apply2 Thm.term_of (Thm.dest_equals (Thm.cprop_of thm2')))
-            then NONE else SOME thm2'))
+            then NONE else (Simp_Steps.step ctxt; SOME thm2')))
   end;
 
 val vA = (("A", 0), propT);
