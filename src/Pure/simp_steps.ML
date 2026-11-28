@@ -3,13 +3,22 @@
 
 A bound on the number of simplifier steps.
 
+A step is a change of the term that the simplifier has made: a rule instance
+applied, given or made by a simproc, a conditional one once its conditions are
+proved (Raw_Simplifier.rewritec); or a congruence rule or procedure applied
+that changed the term (congc).  An attempt that changes nothing is no step,
+and neither is a beta step, which always ends.  So a bound ends every
+simplification that keeps changing the term, but not work that changes
+nothing: conditional rules whose conditions fail, again and again down to
+simp_depth_limit; simprocs that fail; a looper that keeps making subgoals on
+which nothing is changed, which nothing ends, as without the bound.
+
 A bounded run "limited N f ctxt" gives f a context with a new step counter in
 front of the open counters of ctxt.  The simplifier counts each step on every
-open counter of its context (Raw_Simplifier.trace_invoke, trace_rrule,
-trace_simproc).  A step is refused by EXCEEDED when one of them has counted
-its bound; the refused step is still counted once, so that this counter has
-reached its bound (bound + 1), and it refuses every later step while it is
-open.  Without an open counter nothing is counted.
+open counter of its context.  A step is refused by EXCEEDED when one of them
+has counted its bound; the refused step is still counted once, so that this
+counter has reached its bound (bound + 1), and it refuses every later step
+while it is open.  Without an open counter nothing is counted.
 *)
 
 signature SIMP_STEPS =
